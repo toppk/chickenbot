@@ -1,0 +1,94 @@
+from chickenbot.irc import Channel, Client, ISupport, parse, split_message
+
+
+def test_parses_tags_source_and_trailing():
+    msg = parse(r"@account=nate;+draft/x=a\sb :nate!u@host PRIVMSG #chan :hello  world")
+    assert msg.command == "PRIVMSG"
+    assert msg.nick == "nate"
+    assert msg.account == "nate"
+    assert msg.tags["+draft/x"] == "a b"
+    assert msg.target == "#chan"
+    assert msg.text == "hello  world"
+
+
+def test_logged_out_account_tag_is_empty():
+    assert parse("@account=* :n!u@h PRIVMSG #c :hi").account == ""
+    assert parse(":n!u@h PRIVMSG #c :hi").account == ""
+
+
+def test_parses_command_without_source_or_trailing():
+    msg = parse("PING abc")
+    assert msg.command == "PING"
+    assert msg.params == ["abc"]
+
+
+def test_isupport_drives_mode_parameter_parsing():
+    sup = ISupport()
+    sup.update(["PREFIX=(ohv)@%+", "CHANMODES=beI,k,lfj,psitnm", "CHANTYPES=#"])
+    assert sup.prefixes == {"o": "@", "h": "%", "v": "+"}
+    assert sup.takes_param("o", True) and sup.takes_param("b", False) and sup.takes_param("k", False)
+    assert sup.takes_param("l", True) and not sup.takes_param("l", False)
+    assert not sup.takes_param("n", True)
+    assert sup.is_channel("#x") and not sup.is_channel("&x")
+
+
+def _client() -> Client:
+    client = Client(host="x", nick="chickenbot")
+    client.nick = "chickenbot"
+    return client
+
+
+async def test_tracks_ops_through_names_and_mode():
+    client = _client()
+    await client._handle_protocol(parse(":srv 353 chickenbot = #chan :@chickenbot +nate plain"))
+    assert client.has_op("#chan")
+    assert client.channels["#chan"].has_mode("nate", "v")
+
+    await client._handle_protocol(parse(":op!u@h MODE #chan -o+o chickenbot nate"))
+    assert not client.has_op("#chan")
+    assert client.channels["#chan"].has_mode("NATE", "o")
+
+
+async def test_mode_parameters_consumed_in_order():
+    client = _client()
+    await client._handle_protocol(parse(":srv 353 me = #chan :nate"))
+    # +l takes a param, +n does not, +o does - a naive parser ops "25" here.
+    await client._handle_protocol(parse(":op!u@h MODE #chan +lno 25 nate"))
+    assert client.channels["#chan"].has_mode("nate", "o")
+
+
+async def test_remembers_hosts_for_bans():
+    client = _client()
+    await client._handle_protocol(parse(":nate!user@example.com JOIN #chan"))
+    assert client.channels["#chan"].host("nate") == "example.com"
+    await client._handle_protocol(parse(":nate!user@example.com NICK :nate2"))
+    assert client.channels["#chan"].host("nate2") == "example.com"
+
+
+async def test_kick_and_part_drop_membership():
+    client = _client()
+    await client._handle_protocol(parse(":srv 353 me = #chan :chickenbot nate"))
+    await client._handle_protocol(parse(":op!u@h KICK #chan nate :bye"))
+    assert "nate" not in client.channels["#chan"].members
+    await client._handle_protocol(parse(":chickenbot!u@h PART #chan"))
+    assert "#chan" not in client.channels
+
+
+def test_split_message_wraps_and_caps():
+    assert split_message("") == []
+    assert split_message("short") == ["short"]
+    lines = split_message("word " * 500)
+    assert len(lines) == 4
+    assert all(len(line) <= 400 for line in lines)
+    assert lines[-1].endswith("…")
+
+
+def test_split_message_strips_control_codes():
+    assert split_message("a\x03\x02b") == ["ab"]
+
+
+def test_channel_rename_keeps_modes():
+    chan = Channel("#c")
+    chan.add("Nate", {"o"})
+    chan.rename("nate", "Nate2")
+    assert chan.has_mode("nate2", "o")

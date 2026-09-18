@@ -1,0 +1,50 @@
+# Copy to chickenbot.toml and edit. Paths here are relative to this file.
+# Secrets never belong in this file - see the *_env keys and .env.example.
+
+nick = "chickenbot"
+realname = "chickenbot"
+prefix = "!"                 # command character
+db_path = "chickenbot.db"
+log_level = "info"           # debug | info | warn | error
+chatlog_days = 365           # how long to keep logged channel lines
+
+# Services account names, not nicks. These come from IRCv3 account-tag, so the
+# bot only knows who you are if you are logged in to NickServ (or SASL).
+owners = ["alice"]
+
+channels = ["#lobby"]
+
+[server]
+host = "irc.libera.chat"
+port = 6697
+tls = true
+# The bot's own SASL login. Without it the bot still works, but many networks
+# will not let it hold ops, and some will not show it your account either.
+sasl_user = ""
+sasl_password_env = "CHICKENBOT_SASL_PASSWORD"
+password_env = "CHICKENBOT_SERVER_PASSWORD"
+
+[llm]
+enabled = true
+provider = "claude"          # claude | xai | none
+model = ""                   # "" uses the provider default (claude-opus-5 / grok-4.6)
+max_tokens = 4096            # a ceiling, not a length control - brevity comes from the persona
+effort = "low"               # claude only: low | medium | high | xhigh | max
+search = true                # let the model look things up
+history_lines = 20           # channel scrollback handed to the model
+per_user_per_min = 4
+# api_key_env = ""           # "" uses the provider default (ANTHROPIC_API_KEY / XAI_API_KEY)
+# base_url = ""              # point the xai provider at OpenRouter or a local server
+persona = """You are chickenbot, a bot on IRC. Answer in plain text with no markdown, no bullet lists and no code fences. Be brief: two or three short sentences unless asked for more. If you do not know, say so."""
+
+# Live search on the xai provider is vendor-specific; whatever you put here is
+# merged into the request body. For xAI:
+# [llm.search_params]
+# search_parameters = { mode = "auto" }
+
+[github]
+enabled = true
+poll_seconds = 900           # 60/hr unauthenticated, 5000/hr with a token
+token_env = "GITHUB_TOKEN"
+summarize = true             # one-line LLM summary of release notes
+max_per_poll = 3             # per feed, per cycle, before it says "and N more"

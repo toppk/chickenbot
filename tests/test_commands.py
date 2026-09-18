@@ -1,0 +1,180 @@
+import pytest
+
+from chickenbot.brain import ProviderError
+from chickenbot.commands import Handler, ago
+from chickenbot.irc import parse
+
+
+class StubProvider:
+    name = "stub"
+
+    def __init__(self, answer: str = "42", error: str = "") -> None:
+        self.answer = answer
+        self.error = error
+        self.prompts: list[str] = []
+
+    async def reply(self, *, system, history, prompt, search):
+        self.prompts.append(prompt)
+        if self.error:
+            raise ProviderError(self.error)
+        return self.answer
+
+    async def aclose(self) -> None:
+        pass
+
+
+@pytest.fixture
+def handler(cfg, client, store) -> Handler:
+    return Handler(cfg, client, store, None, None)
+
+
+def line(text: str, *, nick: str = "nate", account: str = "nate", target: str = "#chan") -> str:
+    tag = f"@account={account} " if account else ""
+    return f"{tag}:{nick}!u@example.com PRIVMSG {target} :{text}"
+
+
+async def test_logs_channel_chat_even_when_not_addressed(handler, store):
+    await handler.on_message(parse(line("just chatting")))
+    seen = await store.last_seen("nate")
+    assert seen is not None and seen.text == "just chatting"
+    assert handler.client.said() == []
+
+
+async def test_ignores_its_own_messages_and_ctcp(handler, store):
+    await handler.on_message(parse(line("hi", nick="chickenbot")))
+    await handler.on_message(parse(line("\x01ACTION waves\x01")))
+    assert await store.last_seen("chickenbot") is None
+    assert await store.last_seen("nate") is None
+
+
+async def test_owner_commands_require_a_matching_account(handler, client):
+    await handler.on_message(parse(line("!watch anthropics/claude-code")))
+    assert "owner-only" in client.said()[0]
+
+    client.sent.clear()
+    await handler.on_message(parse(line("!watch anthropics/claude-code", account="alice")))
+    assert "watching anthropics/claude-code" in client.said()[0]
+
+
+async def test_unidentified_user_is_told_why(handler, client):
+    await handler.on_message(parse(line("!topic hi", account="")))
+    assert "cannot see your account" in client.said()[0]
+
+
+async def test_ops_commands_refuse_without_ops(handler, client):
+    await handler._handle_protocol_names()
+    await handler.on_message(parse(line("!kick nate rude", account="alice")))
+    assert "not opped" in client.said()[0]
+    assert not [s for s in client.sent if s[0] == "KICK"]
+
+
+async def test_kick_and_ban_when_opped(handler, client):
+    await client._handle_protocol(parse(":srv 353 chickenbot = #chan :@chickenbot nate"))
+    await client._handle_protocol(parse(":nate!u@example.com JOIN #chan"))
+    client.sent.clear()
+
+    await handler.on_message(parse(line("!kick nate being rude", account="alice")))
+    assert ("KICK", "#chan", "nate", "being rude") in client.sent
+
+    await handler.on_message(parse(line("!ban nate", account="alice")))
+    assert ("MODE", "#chan", "+b", "*!*@example.com") in client.sent
+
+
+async def test_seen_and_history_read_the_log(handler, client, store):
+    await store.log_line("#chan", "nate", "nate", "the kettle is broken")
+    await handler.on_message(parse(line("!seen nate")))
+    assert "was last seen" in client.said()[0]
+
+    client.sent.clear()
+    await handler.on_message(parse(line("!history kettle")))
+    assert "kettle is broken" in client.said()[0]
+
+    client.sent.clear()
+    await handler.on_message(parse(line("!history unobtainium")))
+    assert "nothing matching" in client.said()[0]
+
+
+async def test_ask_is_reached_by_prefix_and_by_address(cfg, client, store):
+    provider = StubProvider("a quine prints itself")
+    handler = Handler(cfg, client, store, provider, None)
+
+    await handler.on_message(parse(line("!ask what is a quine")))
+    assert client.said()[0] == "nate: a quine prints itself"
+
+    client.sent.clear()
+    await handler.on_message(parse(line("chickenbot: what is a quine")))
+    assert client.said()[0] == "nate: a quine prints itself"
+    assert "what is a quine" in provider.prompts[-1]
+
+
+async def test_ask_passes_scrollback_as_untrusted_data(cfg, client, store):
+    provider = StubProvider()
+    handler = Handler(cfg, client, store, provider, None)
+    await handler.on_message(parse(line("the kettle is broken")))
+    await handler.on_message(parse(line("!ask what is broken")))
+    assert "<channel_scrollback>" in provider.prompts[-1]
+    assert "the kettle is broken" in provider.prompts[-1]
+
+
+async def test_ask_reports_provider_errors_without_crashing(cfg, client, store):
+    handler = Handler(cfg, client, store, StubProvider(error="rate limited"), None)
+    await handler.on_message(parse(line("!ask hi")))
+    assert client.said()[0] == "nate: rate limited"
+
+
+async def test_ask_rate_limits_per_user(cfg, client, store):
+    cfg.llm.per_user_per_min = 2
+    handler = Handler(cfg, client, store, StubProvider(), None)
+    for _ in range(3):
+        await handler.on_message(parse(line("!ask hi")))
+    assert "slow down" in client.said()[-1]
+
+
+async def test_watch_rejects_bad_slugs_and_feeds(handler, client):
+    await handler.on_message(parse(line("!watch not-a-slug", account="alice")))
+    assert "usage:" in client.said()[0]
+
+    client.sent.clear()
+    await handler.on_message(parse(line("!watch a/b nonsense", account="alice")))
+    assert "unknown feeds" in client.said()[0]
+
+
+async def test_watch_unwatch_round_trip(handler, client):
+    await handler.on_message(parse(line("!watch a/b releases,issues", account="alice")))
+    client.sent.clear()
+    await handler.on_message(parse(line("!watching")))
+    assert "a/b (releases+issues)" in client.said()[0]
+
+    client.sent.clear()
+    await handler.on_message(parse(line("!unwatch a/b", account="alice")))
+    assert "dropped a/b" in client.said()[0]
+
+
+async def test_private_message_needs_no_prefix(cfg, client, store):
+    handler = Handler(cfg, client, store, StubProvider("hi"), None)
+    await handler.on_message(parse(line("uptime", target="chickenbot")))
+    assert "up " in client.said()[0]
+    assert client.sent[0][1] == "nate"
+
+
+async def test_unknown_prefixed_command_is_silent(handler, client):
+    await handler.on_message(parse(line("!nosuchcommand")))
+    assert client.said() == []
+
+
+def test_ago_formats_coarsely():
+    import time
+
+    now = int(time.time())
+    assert ago(now).endswith("s")
+    assert ago(now - 120) == "2m"
+    assert ago(now - 7500) == "2h5m"
+    assert ago(now - 200000) == "2d7h"
+
+
+# Small helper so the "no ops" test reads clearly.
+async def _handle_protocol_names(self) -> None:
+    await self.client._handle_protocol(parse(":srv 353 chickenbot = #chan :chickenbot nate"))
+
+
+Handler._handle_protocol_names = _handle_protocol_names
