@@ -178,3 +178,23 @@ async def _handle_protocol_names(self) -> None:
 
 
 Handler._handle_protocol_names = _handle_protocol_names
+
+
+async def test_commands_from_a_flagged_bot_are_ignored(handler, client, store):
+    await handler.on_message(parse("@bot;account=alice :otherbot!u@h PRIVMSG #chan :!topic hijacked"))
+    assert client.sent == []
+    # Still logged, so the channel record stays complete.
+    assert (await store.last_seen("otherbot")).text == "!topic hijacked"
+    assert await store.search("#chan", "hijacked") == []
+
+
+async def test_ignore_nicks_covers_networks_without_bot_mode(cfg, client, store):
+    cfg.ignore_nicks = ["OtherBot"]
+    handler = Handler(cfg, client, store, None, None)
+    await handler.on_message(parse(line("!topic hijacked", nick="otherbot", account="alice")))
+    assert client.sent == []
+
+
+async def test_ordinary_users_are_unaffected_by_the_bot_filter(handler, client):
+    await handler.on_message(parse(line("!topic fine", account="alice")))
+    assert ("TOPIC", "#chan", "fine") in client.sent

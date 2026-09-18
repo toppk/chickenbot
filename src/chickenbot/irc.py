@@ -54,6 +54,11 @@ class Message:
         return "" if acct == "*" else acct
 
     @property
+    def is_bot(self) -> bool:
+        """True when the sender is flagged as a bot (IRCv3 bot mode)."""
+        return "bot" in self.tags or "draft/bot" in self.tags
+
+    @property
     def target(self) -> str:
         return self.params[0] if self.params else ""
 
@@ -99,6 +104,7 @@ class ISupport:
         self.chantypes = "#&"
         self.prefixes: dict[str, str] = {"o": "@", "v": "+"}
         self.chanmodes = ("beI", "k", "lfj", "psitnmrRc")
+        self.bot_mode = ""  # IRCv3 bot mode letter, e.g. "B"
 
     def update(self, tokens: list[str]) -> None:
         for token in tokens:
@@ -109,6 +115,8 @@ class ISupport:
                 modes, _, chars = value[1:].partition(")")
                 if len(modes) == len(chars):
                     self.prefixes = dict(zip(modes, chars, strict=True))
+            elif key == "BOT" and len(value) == 1:
+                self.bot_mode = value
             elif key == "CHANMODES" and value.count(",") == 3:
                 a, b, c, d = value.split(",")
                 self.chanmodes = (a, b, c, d)
@@ -192,6 +200,7 @@ class Client:
         self.channels: dict[str, Channel] = {}
         self.caps: set[str] = set()
         self.ready = asyncio.Event()
+        self._bot_mode_set = False
         self.handler: Handler | None = None
 
         self._reader: asyncio.StreamReader | None = None
@@ -258,6 +267,7 @@ class Client:
         self.caps.clear()
         self._offered.clear()
         self._pending_caps.clear()
+        self._bot_mode_set = False
         self.nick = self.wanted_nick
         drain = asyncio.create_task(self._drain_outbox())
         try:
@@ -327,8 +337,10 @@ class Client:
             case "001":
                 self.nick = msg.params[0] if msg.params else self.nick
                 self.ready.set()
+                self._claim_bot_mode()
             case "005":
                 self.isupport.update(msg.params[1:-1])
+                self._claim_bot_mode()
             case "353":
                 self._handle_names(msg)
             case "332":
@@ -358,6 +370,13 @@ class Client:
             case "902" | "904" | "905" | "906" | "907":
                 log.error("SASL failed: %s", msg.text)
                 self.send("CAP", "END")
+
+    def _claim_bot_mode(self) -> None:
+        """Tell the network we are a bot so other bots can leave us alone."""
+        if self._bot_mode_set or not self.isupport.bot_mode or not self.ready.is_set():
+            return
+        self._bot_mode_set = True
+        self.send("MODE", self.nick, "+" + self.isupport.bot_mode)
 
     def _channel(self, name: str) -> Channel:
         key = name.casefold()

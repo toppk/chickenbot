@@ -3,7 +3,7 @@
 
 nick = "chickenbot"
 realname = "chickenbot"
-prefix = "!"                 # command character
+prefix = "!"                 # command character; if another bot already owns "!", use "." or "~"
 db_path = "chickenbot.db"
 log_level = "info"           # debug | info | warn | error
 chatlog_days = 365           # how long to keep logged channel lines
@@ -13,6 +13,10 @@ chatlog_days = 365           # how long to keep logged channel lines
 owners = ["alice"]
 
 channels = ["#lobby"]
+
+# Other bots in these channels. Networks that support IRCv3 bot mode need no
+# list - chickenbot honours the `bot` tag automatically and flags itself too.
+ignore_nicks = []
 
 [server]
 host = "irc.libera.chat"

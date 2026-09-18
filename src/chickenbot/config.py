@@ -71,6 +71,8 @@ class Config:
     realname: str = "chickenbot"
     owners: list[str] = field(default_factory=list)
     channels: list[str] = field(default_factory=list)
+    # Networks without IRCv3 bot mode need the other bots named by hand.
+    ignore_nicks: list[str] = field(default_factory=list)
     prefix: str = "!"
     db_path: str = "chickenbot.db"
     log_level: str = "info"
@@ -81,6 +83,9 @@ class Config:
 
     def is_owner(self, account: str) -> bool:
         return bool(account) and account.casefold() in {o.casefold() for o in self.owners}
+
+    def is_ignored(self, nick: str) -> bool:
+        return nick.casefold() in {n.casefold() for n in self.ignore_nicks}
 
 
 def _section(data: dict, name: str, cls):

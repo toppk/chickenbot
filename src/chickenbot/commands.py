@@ -90,6 +90,11 @@ class Handler:
             return
         if msg.nick.casefold() == self.client.nick.casefold():
             return
+        if msg.is_bot or self.cfg.is_ignored(msg.nick):
+            # Another bot. Log what it says, but never act on it.
+            if self.client.isupport.is_channel(msg.target) and msg.text.strip():
+                await self.store.log_line(msg.target, msg.nick, msg.account, msg.text.strip(), "bot")
+            return
         text = msg.text.strip()
         if not text or text.startswith("\x01"):  # CTCP, including /me
             return

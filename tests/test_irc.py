@@ -92,3 +92,32 @@ def test_channel_rename_keeps_modes():
     chan.add("Nate", {"o"})
     chan.rename("nate", "Nate2")
     assert chan.has_mode("nate2", "o")
+
+
+async def test_claims_bot_mode_once_the_network_advertises_it():
+    client = _client()
+    await client._handle_protocol(parse(":toy 001 chickenbot :welcome"))
+    sent: list[tuple] = []
+    client.send = lambda *args: sent.append(args)
+    await client._handle_protocol(parse(":toy 005 chickenbot BOT=B PREFIX=(ov)@+ :are supported"))
+    assert client.isupport.bot_mode == "B"
+    assert ("MODE", "chickenbot", "+B") in sent
+
+    sent.clear()
+    await client._handle_protocol(parse(":toy 005 chickenbot BOT=B :are supported"))
+    assert sent == []  # claimed once, not on every ISUPPORT burst
+
+
+async def test_no_bot_mode_claim_when_the_network_lacks_it():
+    client = _client()
+    sent: list[tuple] = []
+    client.send = lambda *args: sent.append(args)
+    await client._handle_protocol(parse(":toy 001 chickenbot :welcome"))
+    await client._handle_protocol(parse(":toy 005 chickenbot PREFIX=(ov)@+ :are supported"))
+    assert sent == []
+
+
+def test_bot_tag_is_recognised_in_both_spellings():
+    assert parse("@bot :b!u@h PRIVMSG #c :hi").is_bot
+    assert parse("@draft/bot :b!u@h PRIVMSG #c :hi").is_bot
+    assert not parse(":n!u@h PRIVMSG #c :hi").is_bot

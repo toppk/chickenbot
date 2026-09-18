@@ -80,6 +80,28 @@ Feeds are `releases`, `commits`, `issues`, `prs`, comma-separated:
 A newly watched feed is silent on its first poll — it records where it is and
 announces only what arrives after that.
 
+## Sharing a channel with another bot
+
+There is no protocol that decides which bot answers `!history`, so the
+convention is social: **whoever arrives second changes their prefix.** Set
+`prefix` to `.`, `~`, `@` or whatever is free. Addressing by nick
+(`chickenbot: history kettle`) always works regardless of prefix, so that is
+the tiebreaker when two bots do collide.
+
+The part that is standardised is not answering *each other*. Where the network
+supports IRCv3 bot mode (`BOT=` in `RPL_ISUPPORT`), chickenbot sets that user
+mode on itself at connect and ignores any message carrying the `bot` tag.
+Most networks still do not support it, so `ignore_nicks` names the others by
+hand:
+
+```toml
+ignore_nicks = ["eggdrop", "limnoria"]
+```
+
+Ignored bots are still written to the chat log (as `kind = 'bot'`) but never
+trigger a command, and their lines stay out of search and out of the
+scrollback handed to the model.
+
 ## LLM providers
 
 `llm.provider` is `claude`, `xai`, or `none`.
