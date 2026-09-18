@@ -8,8 +8,9 @@ db_path = "chickenbot.db"
 log_level = "info"           # debug | info | warn | error
 chatlog_days = 365           # how long to keep logged channel lines
 
-# Services account names, not nicks. These come from IRCv3 account-tag, so the
-# bot only knows who you are if you are logged in to NickServ (or SASL).
+# Services account names, not nicks. The bot only knows who you are once you
+# are logged in to services; it reads that from account-tag where available and
+# otherwise from extended-join / ACCOUNT / WHOIS.
 owners = ["alice"]
 
 channels = ["#lobby"]

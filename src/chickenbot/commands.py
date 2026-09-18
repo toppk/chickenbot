@@ -85,6 +85,10 @@ class Handler:
 
     # -- entry point -----------------------------------------------------
 
+    def account_for(self, msg: Message) -> str:
+        """account-tag when the network has it, otherwise what we tracked."""
+        return msg.account or self.client.account_of(msg.nick)
+
     async def on_message(self, msg: Message) -> None:
         if msg.command != "PRIVMSG" or not msg.source:
             return
@@ -93,7 +97,7 @@ class Handler:
         if msg.is_bot or self.cfg.is_ignored(msg.nick):
             # Another bot. Log what it says, but never act on it.
             if self.client.isupport.is_channel(msg.target) and msg.text.strip():
-                await self.store.log_line(msg.target, msg.nick, msg.account, msg.text.strip(), "bot")
+                await self.store.log_line(msg.target, msg.nick, self.account_for(msg), msg.text.strip(), "bot")
             return
         text = msg.text.strip()
         if not text or text.startswith("\x01"):  # CTCP, including /me
@@ -107,18 +111,19 @@ class Handler:
             # Anything aimed at the bot is an invocation, not channel chat, so it
             # stays out of search and out of the scrollback handed to the model.
             kind = "command" if body is not None else "privmsg"
-            await self.store.log_line(msg.target, msg.nick, msg.account, text, kind)
+            await self.store.log_line(msg.target, msg.nick, self.account_for(msg), text, kind)
 
         if body is None:
             return
 
         cmd = COMMANDS.get(name.casefold().removeprefix(self.cfg.prefix))
+        account = self.account_for(msg)
         ctx = Context(
             nick=msg.nick,
-            account=msg.account,
+            account=account,
             channel=channel,
             args=args.strip(),
-            is_owner=self.cfg.is_owner(msg.account),
+            is_owner=self.cfg.is_owner(account),
             in_channel=in_channel,
         )
 

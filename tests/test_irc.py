@@ -121,3 +121,54 @@ def test_bot_tag_is_recognised_in_both_spellings():
     assert parse("@bot :b!u@h PRIVMSG #c :hi").is_bot
     assert parse("@draft/bot :b!u@h PRIVMSG #c :hi").is_bot
     assert not parse(":n!u@h PRIVMSG #c :hi").is_bot
+
+
+async def test_learns_accounts_without_account_tag():
+    client = _client()
+    client.caps.add("extended-join")
+    await client._handle_protocol(parse(":nate!u@h JOIN #chan toppk :Real Name"))
+    assert client.account_of("NATE") == "toppk"
+
+    # Logging out, then back in under a different account.
+    await client._handle_protocol(parse(":nate!u@h ACCOUNT *"))
+    assert client.account_of("nate") == ""
+    await client._handle_protocol(parse(":nate!u@h ACCOUNT toppk2"))
+    assert client.account_of("nate") == "toppk2"
+
+    await client._handle_protocol(parse(":nate!u@h NICK :nate2"))
+    assert client.account_of("nate2") == "toppk2"
+    await client._handle_protocol(parse(":nate2!u@h QUIT :bye"))
+    assert client.account_of("nate2") == ""
+
+
+async def test_unauthenticated_join_records_no_account():
+    client = _client()
+    client.caps.add("extended-join")
+    await client._handle_protocol(parse(":nate!u@h JOIN #chan * :Real Name"))
+    assert client.account_of("nate") == ""
+
+
+async def test_whois_resolves_members_who_were_already_present():
+    client = _client()
+    client.caps.add("extended-join")
+    sent: list[tuple] = []
+    await client._handle_protocol(parse(":srv 353 chickenbot = #chan :@toppk chickenbot nate"))
+    client.send = lambda *args: sent.append(args)
+    await client._handle_protocol(parse(":srv 366 chickenbot #chan :end"))
+    # Everyone but ourselves, and never the bot's own nick.
+    assert ("WHOIS", "toppk") in sent and ("WHOIS", "nate") in sent
+    assert ("WHOIS", "chickenbot") not in sent
+
+    await client._handle_protocol(parse(":srv 330 chickenbot toppk toppk :is logged in as"))
+    assert client.account_of("toppk") == "toppk"
+
+
+async def test_whois_storm_is_capped_on_big_channels():
+    client = _client()
+    client.caps.add("extended-join")
+    client.whois_limit = 3
+    await client._handle_protocol(parse(":srv 353 chickenbot = #big :a b c d e"))
+    sent: list[tuple] = []
+    client.send = lambda *args: sent.append(args)
+    await client._handle_protocol(parse(":srv 366 chickenbot #big :end"))
+    assert sent == []

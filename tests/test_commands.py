@@ -198,3 +198,28 @@ async def test_ignore_nicks_covers_networks_without_bot_mode(cfg, client, store)
 async def test_ordinary_users_are_unaffected_by_the_bot_filter(handler, client):
     await handler.on_message(parse(line("!topic fine", account="alice")))
     assert ("TOPIC", "#chan", "fine") in client.sent
+
+
+async def test_owner_is_recognised_without_account_tag(cfg, client, store):
+    """Chonkbase and friends have extended-join but no account-tag."""
+    handler = Handler(cfg, client, store, None, None)
+    client.caps.add("extended-join")
+    await client._handle_protocol(parse(":nate!u@example.com JOIN #chan alice :Alice"))
+    client.sent.clear()
+
+    await handler.on_message(parse(":nate!u@example.com PRIVMSG #chan :!topic hello"))
+    assert ("TOPIC", "#chan", "hello") in client.sent
+
+    # Logging out revokes it immediately.
+    await client._handle_protocol(parse(":nate!u@example.com ACCOUNT *"))
+    client.sent.clear()
+    await handler.on_message(parse(":nate!u@example.com PRIVMSG #chan :!topic nope"))
+    assert "cannot see your account" in client.said()[0]
+
+
+async def test_account_tag_wins_when_the_network_has_both(cfg, client, store):
+    handler = Handler(cfg, client, store, None, None)
+    client.caps.add("extended-join")
+    await client._handle_protocol(parse(":nate!u@h JOIN #chan stale :Nate"))
+    await handler.on_message(parse("@account=alice :nate!u@h PRIVMSG #chan :!topic fresh"))
+    assert ("TOPIC", "#chan", "fresh") in client.sent

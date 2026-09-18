@@ -183,6 +183,7 @@ class Client:
         sasl_user: str = "",
         sasl_password: str = "",
         send_interval: float = 0.6,
+        whois_limit: int = 30,
     ) -> None:
         self.host = host
         self.port = port
@@ -195,10 +196,13 @@ class Client:
         self.sasl_user = sasl_user
         self.sasl_password = sasl_password
         self.send_interval = send_interval
+        self.whois_limit = whois_limit
 
         self.isupport = ISupport()
         self.channels: dict[str, Channel] = {}
         self.caps: set[str] = set()
+        # Folded nick -> services account, for networks without account-tag.
+        self.accounts: dict[str, str] = {}
         self.ready = asyncio.Event()
         self._bot_mode_set = False
         self.handler: Handler | None = None
@@ -235,6 +239,17 @@ class Client:
         for line in split_message(text):
             self.send("NOTICE", target, line)
 
+    def account_of(self, nick: str) -> str:
+        """The sender's services account, learned from extended-join/ACCOUNT/WHOIS."""
+        return self.accounts.get(nick.casefold(), "")
+
+    def _learn_account(self, nick: str, account: str) -> None:
+        key = nick.casefold()
+        if account and account != "*":
+            self.accounts[key] = account
+        else:
+            self.accounts.pop(key, None)
+
     def has_op(self, channel: str) -> bool:
         chan = self.channels.get(channel.casefold())
         return bool(chan and chan.has_mode(self.nick, "o"))
@@ -264,6 +279,7 @@ class Client:
         self._reader, self._writer = await asyncio.open_connection(self.host, self.port, ssl=context)
         self.ready.clear()
         self.channels.clear()
+        self.accounts.clear()
         self.caps.clear()
         self._offered.clear()
         self._pending_caps.clear()
@@ -358,6 +374,14 @@ class Client:
             case "QUIT":
                 for chan in self.channels.values():
                     chan.remove(msg.nick)
+                self.accounts.pop(msg.nick.casefold(), None)
+            case "ACCOUNT":
+                self._learn_account(msg.nick, msg.params[0] if msg.params else "*")
+            case "330":  # RPL_WHOISACCOUNT - <me> <nick> <account> :is logged in as
+                if len(msg.params) >= 3:
+                    self._learn_account(msg.params[1], msg.params[2])
+            case "366":
+                self._resolve_accounts(msg.params[1] if len(msg.params) > 1 else "")
             case "NICK":
                 self._handle_nick(msg)
             case "MODE":
@@ -449,6 +473,8 @@ class Client:
             return
         chan = self._channel(name)
         chan.add(msg.nick)
+        if len(msg.params) >= 3:  # extended-join: JOIN <chan> <account> :<realname>
+            self._learn_account(msg.nick, msg.params[1])
         if "@" in msg.source:
             chan.hosts[chan.fold(msg.nick)] = msg.source
         if msg.nick.casefold() == self.nick.casefold():
@@ -469,6 +495,17 @@ class Client:
         else:
             self._channel(msg.target).remove(victim)
 
+    def _resolve_accounts(self, channel: str) -> None:
+        """NAMES carries no accounts, so WHOIS the people who were already here."""
+        if "extended-join" not in self.caps or not channel:
+            return
+        chan = self.channels.get(channel.casefold())
+        if chan is None or len(chan.members) > self.whois_limit:
+            return
+        unknown = [n for n in chan.members if n not in self.accounts and n != self.nick.casefold()]
+        for nick in unknown:
+            self.send("WHOIS", nick)
+
     def _handle_nick(self, msg: Message) -> None:
         new = msg.text or (msg.params[0] if msg.params else "")
         if msg.nick.casefold() == self.nick.casefold():
@@ -476,6 +513,9 @@ class Client:
             self.wanted_nick = new
         for chan in self.channels.values():
             chan.rename(msg.nick, new)
+        account = self.accounts.pop(msg.nick.casefold(), "")
+        if account:
+            self.accounts[new.casefold()] = account
 
     def _handle_mode(self, msg: Message) -> None:
         if len(msg.params) < 2 or not self.isupport.is_channel(msg.target):

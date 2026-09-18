@@ -8,8 +8,14 @@ An IRC bot that does four things:
 - **watches GitHub repos** and announces releases, commits, issues and PRs
 
 It is not an Eggdrop clone. There is no partyline, no DCC, no user file, and no
-handle/password system: identity comes from your services account via IRCv3
-`account-tag`, and `owners` in the config is a list of those account names.
+handle/password system: identity is your services account, and `owners` in the
+config is a list of those account names.
+
+Accounts are read from the IRCv3 `account-tag` where the network offers it. Many
+networks do not, so chickenbot also learns accounts from `extended-join`, tracks
+`ACCOUNT` changes, and falls back to a `WHOIS` for people already in the channel
+when it joins. If a network has none of those, nobody can be recognised as an
+owner and the bot says so rather than failing silently.
 
 ## Install
 
@@ -97,6 +103,9 @@ hand:
 ```toml
 ignore_nicks = ["eggdrop", "limnoria"]
 ```
+
+Bot mode needs `message-tags` too, so on a network offering neither (Chonkbase,
+for one) `ignore_nicks` is the only mechanism.
 
 Ignored bots are still written to the chat log (as `kind = 'bot'`) but never
 trigger a command, and their lines stay out of search and out of the
