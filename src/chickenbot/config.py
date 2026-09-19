@@ -48,6 +48,7 @@ class LLMConfig:
         "no bullet lists and no code fences. Be brief: two or three short sentences "
         "unless asked for more. If you do not know, say so."
     )
+    tools: bool = True
     history_lines: int = 20
     per_user_per_min: int = 4
     # Merged into every openai-compatible request body: OpenRouter's `provider`

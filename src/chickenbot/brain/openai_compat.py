@@ -6,6 +6,7 @@ Provider routing and search are vendor-specific, so they are passed through from
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 
@@ -23,7 +24,12 @@ DEFAULTS = {
 }
 
 
+MAX_TOOL_TURNS = 4
+
+
 class OpenAICompatProvider:
+    supports_tools = True
+
     def __init__(self, cfg: LLMConfig) -> None:
         base_url, model, key_env = DEFAULTS.get(cfg.provider, DEFAULTS["openrouter"])
         self.name = cfg.provider
@@ -42,8 +48,8 @@ class OpenAICompatProvider:
     async def aclose(self) -> None:
         await self.client.aclose()
 
-    async def reply(self, *, system: str, history: list[Turn], prompt: str, search: bool) -> str:
-        messages = [{"role": "system", "content": system}]
+    async def reply(self, *, system: str, history: list[Turn], prompt: str, search: bool, toolbox=None) -> str:
+        messages: list[dict] = [{"role": "system", "content": system}]
         messages += [{"role": t.role, "content": t.text} for t in history]
         messages.append({"role": "user", "content": prompt})
 
@@ -51,7 +57,26 @@ class OpenAICompatProvider:
         body.update(self.cfg.body_params)
         if search and self.cfg.search and self.cfg.search_params:
             body.update(self.cfg.search_params)
+        if toolbox is not None and toolbox.schemas:
+            body["tools"] = toolbox.schemas
 
+        for _ in range(MAX_TOOL_TURNS):
+            message = await self._post(body)
+            calls = message.get("tool_calls") or []
+            if not calls or toolbox is None:
+                break
+            messages.append(message)
+            for call in calls:
+                messages.append(await self._run_call(toolbox, call))
+        else:
+            raise ProviderError("gave up after too many tool rounds")
+
+        text = (message.get("content") or "").strip()
+        if not text:
+            raise ProviderError("empty response")
+        return clean_for_irc(text)
+
+    async def _post(self, body: dict) -> dict:
         try:
             response = await self.client.post(f"{self.base_url}/chat/completions", json=body)
         except httpx.RequestError as exc:
@@ -60,12 +85,17 @@ class OpenAICompatProvider:
             raise ProviderError("rate limited")
         if response.status_code >= 400:
             raise ProviderError(f"api error {response.status_code}")
-
         try:
-            choice = response.json()["choices"][0]["message"]["content"]
+            return response.json()["choices"][0]["message"]
         except (KeyError, IndexError, ValueError) as exc:
             raise ProviderError("unexpected response shape") from exc
-        text = (choice or "").strip()
-        if not text:
-            raise ProviderError("empty response")
-        return clean_for_irc(text)
+
+    async def _run_call(self, toolbox, call: dict) -> dict:
+        fn = call.get("function") or {}
+        try:
+            args = json.loads(fn.get("arguments") or "{}")
+        except ValueError:
+            result = "error: arguments were not valid json"
+        else:
+            result = await toolbox.run(fn.get("name", ""), args)
+        return {"role": "tool", "tool_call_id": call.get("id", ""), "content": result}

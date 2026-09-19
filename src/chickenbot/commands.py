@@ -12,6 +12,7 @@ from .brain import Provider, ProviderError
 from .config import Config
 from .irc import Client, Message
 from .store import Store
+from .tools import ToolBox
 from .watcher import FEEDS, Watcher, parse_slug
 
 log = logging.getLogger(__name__)
@@ -256,12 +257,17 @@ async def cmd_ask(h: Handler, ctx: Context) -> None:
     if scrollback:
         prompt = f"<channel_scrollback>\n{scrollback}\n</channel_scrollback>\n\n{ctx.nick} asks: {ctx.args}"
 
+    toolbox = None
+    if h.cfg.llm.tools and getattr(h.provider, "supports_tools", False):
+        toolbox = ToolBox(h, ctx)
+
     try:
         answer = await h.provider.reply(
             system=h.cfg.llm.persona + SYSTEM_SUFFIX,
             history=[],
             prompt=prompt,
             search=True,
+            toolbox=toolbox,
         )
     except ProviderError as exc:
         h.say(ctx.channel, f"{ctx.nick}: {exc}")

@@ -19,6 +19,7 @@ MAX_RESUMES = 3
 
 class ClaudeProvider:
     name = "claude"
+    supports_tools = False  # server-side web search only; no client tool loop yet
 
     def __init__(self, cfg: LLMConfig) -> None:
         self.cfg = cfg
@@ -34,7 +35,7 @@ class ClaudeProvider:
     async def aclose(self) -> None:
         await self.client.close()
 
-    async def reply(self, *, system: str, history: list[Turn], prompt: str, search: bool) -> str:
+    async def reply(self, *, system: str, history: list[Turn], prompt: str, search: bool, toolbox=None) -> str:
         messages: list[dict] = [{"role": t.role, "content": t.text} for t in history]
         messages.append({"role": "user", "content": prompt})
 

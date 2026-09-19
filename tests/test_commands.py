@@ -13,8 +13,11 @@ class StubProvider:
         self.error = error
         self.prompts: list[str] = []
 
-    async def reply(self, *, system, history, prompt, search):
+    supports_tools = False
+
+    async def reply(self, *, system, history, prompt, search, toolbox=None):
         self.prompts.append(prompt)
+        self.toolbox = toolbox
         if self.error:
             raise ProviderError(self.error)
         return self.answer

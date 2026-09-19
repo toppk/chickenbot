@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from ..config import LLMConfig
+
+if TYPE_CHECKING:
+    from ..tools import ToolBox
 
 
 @dataclass(frozen=True, slots=True)
@@ -21,8 +24,11 @@ class ProviderError(Exception):
 
 class Provider(Protocol):
     name: str
+    supports_tools: bool
 
-    async def reply(self, *, system: str, history: list[Turn], prompt: str, search: bool) -> str: ...
+    async def reply(
+        self, *, system: str, history: list[Turn], prompt: str, search: bool, toolbox: ToolBox | None = None
+    ) -> str: ...
 
     async def aclose(self) -> None: ...
 
