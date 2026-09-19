@@ -16,7 +16,8 @@ claude = ["anthropic>=1.0"]
 chickenbot = "chickenbot.__main__:main"
 
 [dependency-groups]
-dev = ["pytest>=8", "pytest-asyncio>=0.23", "ruff>=0.6"]
+# anthropic is optional for users, but the tests cover that provider.
+dev = ["pytest>=8", "pytest-asyncio>=0.23", "ruff>=0.6", "anthropic>=1.0"]
 
 [build-system]
 requires = ["hatchling"]
