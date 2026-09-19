@@ -105,3 +105,69 @@ def test_clean_for_irc_removes_markdown_and_control_codes():
     assert clean_for_irc("```py\ncode\n```") == "code"
     assert clean_for_irc("a\x03\x02b\x1fc") == "abc"
     assert clean_for_irc("one\n\n\n\ntwo") == "one\ntwo"
+
+
+def openai_compat(monkeypatch, cfg, handler):
+    import httpx
+
+    from chickenbot.brain.openai_compat import OpenAICompatProvider
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    monkeypatch.setenv("XAI_API_KEY", "test-key")
+    p = OpenAICompatProvider(cfg)
+    p.client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    return p
+
+
+def ok(bodies):
+    import httpx
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        import json
+
+        bodies.append(json.loads(request.content))
+        return httpx.Response(200, json={"choices": [{"message": {"content": "hi"}}]})
+
+    return handler
+
+
+async def test_openrouter_defaults_to_its_own_endpoint(monkeypatch):
+    bodies: list[dict] = []
+    p = openai_compat(monkeypatch, LLMConfig(provider="openrouter"), ok(bodies))
+    assert p.base_url == "https://openrouter.ai/api/v1"
+    assert p.name == "openrouter"
+    await p.reply(system="s", history=[], prompt="p", search=False)
+    await p.aclose()
+    assert bodies[0]["model"] == "openrouter/auto"
+
+
+async def test_body_params_ride_on_every_request_but_search_params_do_not(monkeypatch):
+    bodies: list[dict] = []
+    cfg = LLMConfig(
+        provider="openrouter",
+        body_params={"provider": {"only": ["anthropic"], "zdr": True, "data_collection": "deny"}},
+        search_params={"plugins": [{"id": "web", "max_results": 3}]},
+    )
+    p = openai_compat(monkeypatch, cfg, ok(bodies))
+    await p.reply(system="s", history=[], prompt="p", search=False)
+    await p.reply(system="s", history=[], prompt="p", search=True)
+    await p.aclose()
+    # Routing policy must apply even when nothing is being searched.
+    assert bodies[0]["provider"]["zdr"] is True
+    assert "plugins" not in bodies[0]
+    assert bodies[1]["provider"]["only"] == ["anthropic"]
+    assert bodies[1]["plugins"] == [{"id": "web", "max_results": 3}]
+
+
+async def test_xai_still_resolves_to_its_own_defaults(monkeypatch):
+    p = openai_compat(monkeypatch, LLMConfig(provider="xai"), ok([]))
+    assert p.base_url == "https://api.x.ai/v1" and p.name == "xai"
+    await p.aclose()
+
+
+async def test_missing_key_names_the_env_var_it_wanted(monkeypatch):
+    from chickenbot.brain.openai_compat import OpenAICompatProvider
+
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    with pytest.raises(ProviderError, match="OPENROUTER_API_KEY"):
+        OpenAICompatProvider(LLMConfig(provider="openrouter"))

@@ -57,7 +57,7 @@ def build(cfg: LLMConfig) -> Provider | None:
         from .claude import ClaudeProvider
 
         return ClaudeProvider(cfg)
-    if cfg.provider == "xai":
+    if cfg.provider in {"openrouter", "xai"}:
         from .openai_compat import OpenAICompatProvider
 
         return OpenAICompatProvider(cfg)

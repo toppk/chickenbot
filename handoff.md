@@ -72,8 +72,17 @@ first: IRCv3 `account-tag` -> `extended-join` + `ACCOUNT` tracking -> a
 **Web search is the provider's job.** eggbot had several hundred lines across
 `llm/route.go`, `llm/ask.go`, `NeedsSearch`, `wantsXSearch` deciding *when* to
 search. Claude's `web_search_20260209` is a server-side tool: declare it, the
-model decides, results come back in the same response. There is no search
-routing code in this repo and there should not be.
+model decides, results come back in the same response. OpenRouter's is the
+`web` plugin (`plugins = [{id = "web"}]`, or a `:online` model suffix), which
+is likewise server-side. There is no search routing code in this repo and there
+should not be.
+
+**Vendor-specific request fields are config, not code.** `llm.body_params` is
+merged into every openai-compatible request body and `llm.search_params` on top
+when searching. That is how OpenRouter's `provider` routing policy (`only`,
+`zdr`, `data_collection`, `allow_fallbacks`, …) and its web plugin are set,
+with no provider-specific code and no policy-class abstraction. Both shapes are
+documented, commented out, in `chickenbot.toml`.
 
 **Case folding goes through `irccase.fold`, never `str.casefold()`.** Python's
 casefold is Unicode-aware and ASCII-only in the wrong directions at once; IRC
@@ -144,11 +153,10 @@ User hosts are cloaked.
 All three numbered items from the previous handoff are done (2026-09-18). What
 is left:
 
-- xAI live search is still **deliberately not implemented**. Claude's is
-  server-side and needs no code; xAI's parameters are vendor-specific and were
-  not guessed at. `llm.search_params` is merged into the request body so it can
-  be configured without code changes, but as shipped `provider = "xai"` answers
-  without searching. Do not invent the parameter shape — check xAI's docs.
+- Nothing outstanding in the LLM layer. `provider = "openrouter"` is
+  first-class as of 2026-09-18; xAI is still accepted but its live-search
+  parameters were never implemented, so `provider = "xai"` answers without
+  searching. OpenRouter needs no such code — see the design decision below.
 
 ### Filed upstream against chonkline (2026-09-18)
 

@@ -77,7 +77,10 @@ def test_owner_match_is_case_insensitive_but_never_empty(tmp_path):
         ('owners = ["a"]\n[server]\nhost = ""\n', "server.host is required"),
         ('[server]\nhost = "x"\n', "owners is required"),
         ('owners = ["a"]\nbogus = 1\n[server]\nhost = "x"\n', "unknown keys"),
-        ('owners = ["a"]\n[server]\nhost = "x"\n[llm]\nprovider = "gpt"\n', "must be claude, xai or none"),
+        (
+            'owners = ["a"]\n[server]\nhost = "x"\n[llm]\nprovider = "gpt"\n',
+            "must be one of claude, none, openrouter, xai",
+        ),
         ("owners = [\n", "c.toml"),
     ],
 )

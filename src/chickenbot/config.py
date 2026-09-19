@@ -50,7 +50,10 @@ class LLMConfig:
     )
     history_lines: int = 20
     per_user_per_min: int = 4
-    # Merged into the request body when an xai/openai-compatible provider searches.
+    # Merged into every openai-compatible request body: OpenRouter's `provider`
+    # routing policy lives here.
+    body_params: dict = field(default_factory=dict)
+    # Merged on top when that provider searches, e.g. OpenRouter's `plugins`.
     search_params: dict = field(default_factory=dict)
 
 
@@ -138,8 +141,9 @@ def load(path: str | Path) -> Config:
     cfg.channels = [c if c.startswith(("#", "&")) else "#" + c for c in cfg.channels]
     if cfg.casemapping and cfg.casemapping not in irccase.MAPPINGS:
         raise ConfigError(f"casemapping must be one of {', '.join(sorted(irccase.MAPPINGS))}")
-    if cfg.llm.provider not in {"claude", "xai", "none"}:
-        raise ConfigError(f"llm.provider must be claude, xai or none (got {cfg.llm.provider!r})")
+    providers = {"claude", "openrouter", "xai", "none"}
+    if cfg.llm.provider not in providers:
+        raise ConfigError(f"llm.provider must be one of {', '.join(sorted(providers))} (got {cfg.llm.provider!r})")
     # Paths in the toml are relative to the toml, not the working directory.
     db = Path(cfg.db_path)
     if not db.is_absolute():

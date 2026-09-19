@@ -1,7 +1,7 @@
-"""OpenAI-compatible chat/completions provider: xAI, OpenRouter, or a local server.
+"""OpenAI-compatible chat/completions provider: OpenRouter, xAI, or a local server.
 
-Live search is provider-specific, so it is passed through from `llm.search_params`
-rather than guessed at here (for xAI that is a `search_parameters` table).
+Provider routing and search are vendor-specific, so they are passed through from
+`llm.body_params` and `llm.search_params` rather than modelled here.
 """
 
 from __future__ import annotations
@@ -16,20 +16,24 @@ from . import ProviderError, Turn, clean_for_irc
 
 log = logging.getLogger(__name__)
 
-DEFAULT_BASE_URL = "https://api.x.ai/v1"
-DEFAULT_MODEL = "grok-4.6"
+# provider -> (base url, default model, api key env)
+DEFAULTS = {
+    "openrouter": ("https://openrouter.ai/api/v1", "openrouter/auto", "OPENROUTER_API_KEY"),
+    "xai": ("https://api.x.ai/v1", "grok-4.6", "XAI_API_KEY"),
+}
 
 
 class OpenAICompatProvider:
-    name = "xai"
-
     def __init__(self, cfg: LLMConfig) -> None:
+        base_url, model, key_env = DEFAULTS.get(cfg.provider, DEFAULTS["openrouter"])
+        self.name = cfg.provider
         self.cfg = cfg
-        self.model = cfg.model or DEFAULT_MODEL
-        self.base_url = (cfg.base_url or DEFAULT_BASE_URL).rstrip("/")
-        key = os.environ.get(cfg.api_key_env or "XAI_API_KEY", "")
+        self.model = cfg.model or model
+        self.base_url = (cfg.base_url or base_url).rstrip("/")
+        key_env = cfg.api_key_env or key_env
+        key = os.environ.get(key_env, "")
         if not key:
-            raise ProviderError(f"{cfg.api_key_env or 'XAI_API_KEY'} is not set")
+            raise ProviderError(f"{key_env} is not set")
         self.client = httpx.AsyncClient(
             timeout=90.0,
             headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
@@ -44,6 +48,7 @@ class OpenAICompatProvider:
         messages.append({"role": "user", "content": prompt})
 
         body: dict = {"model": self.model, "max_tokens": self.cfg.max_tokens, "messages": messages}
+        body.update(self.cfg.body_params)
         if search and self.cfg.search and self.cfg.search_params:
             body.update(self.cfg.search_params)
 
