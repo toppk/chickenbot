@@ -104,8 +104,11 @@ hand:
 ignore_nicks = ["eggdrop", "limnoria"]
 ```
 
-Bot mode needs `message-tags` too, so on a network offering neither (Chonkbase,
-for one) `ignore_nicks` is the only mechanism.
+The two halves have different requirements. Flagging ourselves needs only the
+`BOT=` token. Recognising *other* bots also needs `message-tags`, because the
+spec says the `bot` tag "MUST only be sent to users who have requested the
+message-tags capability". Chonkbase offers neither, so there `ignore_nicks` is
+the only mechanism.
 
 Ignored bots are still written to the chat log (as `kind = 'bot'`) but never
 trigger a command, and their lines stay out of search and out of the

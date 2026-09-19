@@ -55,7 +55,11 @@ class Message:
 
     @property
     def is_bot(self) -> bool:
-        """True when the sender is flagged as a bot (IRCv3 bot mode)."""
+        """True when the sender is flagged as a bot (IRCv3 bot mode).
+
+        The ratified tag is `bot`; `draft/bot` is only for servers still on the
+        draft spelling. Either way it arrives only with the message-tags cap.
+        """
         return "bot" in self.tags or "draft/bot" in self.tags
 
     @property
