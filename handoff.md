@@ -149,9 +149,26 @@ is left:
   not guessed at. `llm.search_params` is merged into the request body so it can
   be configured without code changes, but as shipped `provider = "xai"` answers
   without searching. Do not invent the parameter shape — check xAI's docs.
-- `chonkline` advertises `CASEMAPPING=rfc1459` and does not implement it (see
-  the network section above). An issue should be filed upstream; `casemapping = "ascii"` in
-  `chickenbot.toml` works around it meanwhile.
+
+### Filed upstream against chonkline (2026-09-18)
+
+Three issues on `github.com/iconidentify/chonkline`. chickenbot needs **no code**
+for any of them — `WANTED_CAPS` already asks for `message-tags` and `account-tag`,
+`_claim_bot_mode()` already fires on `BOT=`, and `Message.is_bot` / `Message.account`
+are tested. All three light up on their deploy.
+
+- [#33](https://github.com/iconidentify/chonkline/issues/33) — `CASEMAPPING=rfc1459`
+  advertised but ASCII folding. Until it moves, `casemapping = "ascii"` in
+  `chickenbot.toml` is the workaround; drop the pin if they fix the folding, keep it
+  if they change the advertisement to `ascii`.
+- [#34](https://github.com/iconidentify/chonkline/issues/34) — `message-tags` plus bot
+  mode (`+B`, `BOT=B`, the `bot` tag). This is what retires `ignore_nicks`.
+- [#35](https://github.com/iconidentify/chonkline/issues/35) — `account-tag`, which
+  retires the WHOIS-per-member fallback. Depends on #34.
+
+Deliberately not asked for, because chickenbot uses none of them: `WHOX`,
+`chathistory`, `echo-message`, `labeled-response`, `batch`, `multiline`, `setname`,
+`MONITOR`, `standard-replies`. Keep it that way — asks should track real need.
 
 ## Gotchas
 
