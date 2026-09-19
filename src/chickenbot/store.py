@@ -5,9 +5,11 @@ from __future__ import annotations
 import asyncio
 import sqlite3
 import time
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
+
+from . import irccase
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS chatlog (
@@ -15,12 +17,13 @@ CREATE TABLE IF NOT EXISTS chatlog (
     ts       INTEGER NOT NULL,
     channel  TEXT NOT NULL,
     nick     TEXT NOT NULL,
+    nick_key TEXT NOT NULL DEFAULT '',
     account  TEXT NOT NULL DEFAULT '',
     kind     TEXT NOT NULL DEFAULT 'privmsg',
     text     TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS chatlog_channel_id ON chatlog (channel, id DESC);
-CREATE INDEX IF NOT EXISTS chatlog_nick_id    ON chatlog (nick, id DESC);
+CREATE INDEX IF NOT EXISTS chatlog_nick_id    ON chatlog (nick_key, id DESC);
 
 CREATE TABLE IF NOT EXISTS watch (
     id        INTEGER PRIMARY KEY,
@@ -67,16 +70,30 @@ class Watch:
 class Store:
     """Async facade over a single SQLite connection."""
 
-    def __init__(self, path: str | Path) -> None:
+    def __init__(self, path: str | Path, fold: Callable[[str], str] | None = None) -> None:
+        # SQLite's NOCASE collation is ASCII-only and cannot express rfc1459, so
+        # nicks and channels are folded in Python and stored folded.
+        self.fold = fold or irccase.fold
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._db = sqlite3.connect(self.path, check_same_thread=False)
         self._db.row_factory = sqlite3.Row
         self._db.execute("PRAGMA journal_mode=WAL")
         self._db.execute("PRAGMA foreign_keys=ON")
+        self._migrate()
         self._db.executescript(SCHEMA)
         self._db.commit()
         self._lock = asyncio.Lock()
+
+    def _migrate(self) -> None:
+        """Runs before SCHEMA, because the nick_key index cannot be built without it."""
+        cols = {r["name"] for r in self._db.execute("PRAGMA table_info(chatlog)")}
+        if cols and "nick_key" not in cols:
+            self._db.execute("ALTER TABLE chatlog ADD COLUMN nick_key TEXT NOT NULL DEFAULT ''")
+            for row in self._db.execute("SELECT DISTINCT nick FROM chatlog").fetchall():
+                self._db.execute(
+                    "UPDATE chatlog SET nick_key = ? WHERE nick = ?", (self.fold(row["nick"]), row["nick"])
+                )
 
     async def _run(self, fn, *args):
         async with self._lock:
@@ -90,8 +107,8 @@ class Store:
     async def log_line(self, channel: str, nick: str, account: str, text: str, kind: str = "privmsg") -> None:
         def go() -> None:
             self._db.execute(
-                "INSERT INTO chatlog (ts, channel, nick, account, kind, text) VALUES (?, ?, ?, ?, ?, ?)",
-                (int(time.time()), channel.casefold(), nick, account, kind, text[:900]),
+                "INSERT INTO chatlog (ts, channel, nick, nick_key, account, kind, text) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (int(time.time()), self.fold(channel), nick, self.fold(nick), account, kind, text[:900]),
             )
             self._db.commit()
 
@@ -100,8 +117,8 @@ class Store:
     async def last_seen(self, nick: str) -> Line | None:
         def go() -> Line | None:
             row = self._db.execute(
-                "SELECT ts, channel, nick, text FROM chatlog WHERE nick = ? COLLATE NOCASE ORDER BY id DESC LIMIT 1",
-                (nick,),
+                "SELECT ts, channel, nick, text FROM chatlog WHERE nick_key = ? ORDER BY id DESC LIMIT 1",
+                (self.fold(nick),),
             ).fetchone()
             return Line(row["ts"], row["channel"], row["nick"], row["text"]) if row else None
 
@@ -113,7 +130,7 @@ class Store:
                 "SELECT ts, channel, nick, text FROM chatlog"
                 " WHERE channel = ? AND ts >= ? AND kind = 'privmsg' AND text LIKE ?"
                 " ORDER BY id DESC LIMIT ?",
-                (channel.casefold(), since, f"%{terms}%", limit),
+                (self.fold(channel), since, f"%{terms}%", limit),
             ).fetchall()
             return [Line(r["ts"], r["channel"], r["nick"], r["text"]) for r in rows]
 
@@ -124,7 +141,7 @@ class Store:
             rows = self._db.execute(
                 "SELECT ts, channel, nick, text FROM chatlog"
                 " WHERE channel = ? AND kind = 'privmsg' ORDER BY id DESC LIMIT ?",
-                (channel.casefold(), limit),
+                (self.fold(channel), limit),
             ).fetchall()
             return [Line(r["ts"], r["channel"], r["nick"], r["text"]) for r in reversed(rows)]
 
@@ -146,7 +163,7 @@ class Store:
             try:
                 self._db.execute(
                     "INSERT INTO watch (owner, repo, channel, feeds, added_by, added_at) VALUES (?, ?, ?, ?, ?, ?)",
-                    (owner, repo, channel.casefold(), ",".join(feeds), added_by, int(time.time())),
+                    (owner, repo, self.fold(channel), ",".join(feeds), added_by, int(time.time())),
                 )
             except sqlite3.IntegrityError:
                 return False
@@ -157,9 +174,10 @@ class Store:
 
     async def remove_watch(self, owner: str, repo: str, channel: str) -> bool:
         def go() -> bool:
+            # GitHub slugs are ASCII and case-insensitive, so NOCASE is right here.
             cur = self._db.execute(
                 "DELETE FROM watch WHERE owner = ? COLLATE NOCASE AND repo = ? COLLATE NOCASE AND channel = ?",
-                (owner, repo, channel.casefold()),
+                (owner, repo, self.fold(channel)),
             )
             self._db.commit()
             return cur.rowcount > 0
@@ -171,7 +189,7 @@ class Store:
             if channel:
                 rows = self._db.execute(
                     "SELECT id, owner, repo, channel, feeds FROM watch WHERE channel = ? ORDER BY owner, repo",
-                    (channel.casefold(),),
+                    (self.fold(channel),),
                 ).fetchall()
             else:
                 rows = self._db.execute(

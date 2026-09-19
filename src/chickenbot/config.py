@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import os
 import tomllib
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from . import irccase
 
 
 class ConfigError(Exception):
@@ -74,6 +77,9 @@ class Config:
     # Networks without IRCv3 bot mode need the other bots named by hand.
     ignore_nicks: list[str] = field(default_factory=list)
     prefix: str = "!"
+    # Empty honours the network's CASEMAPPING; set it when the server advertises a
+    # mapping it does not actually implement.
+    casemapping: str = ""
     db_path: str = "chickenbot.db"
     log_level: str = "info"
     chatlog_days: int = 365
@@ -81,11 +87,16 @@ class Config:
     llm: LLMConfig = field(default_factory=LLMConfig)
     github: GitHubConfig = field(default_factory=GitHubConfig)
 
-    def is_owner(self, account: str) -> bool:
-        return bool(account) and account.casefold() in {o.casefold() for o in self.owners}
+    def fold(self, text: str) -> str:
+        return irccase.fold(text, self.casemapping or irccase.DEFAULT)
 
-    def is_ignored(self, nick: str) -> bool:
-        return nick.casefold() in {n.casefold() for n in self.ignore_nicks}
+    def is_owner(self, account: str, fold: Callable[[str], str] | None = None) -> bool:
+        fold = fold or self.fold
+        return bool(account) and fold(account) in {fold(o) for o in self.owners}
+
+    def is_ignored(self, nick: str, fold: Callable[[str], str] | None = None) -> bool:
+        fold = fold or self.fold
+        return fold(nick) in {fold(n) for n in self.ignore_nicks}
 
 
 def _section(data: dict, name: str, cls):
@@ -125,6 +136,8 @@ def load(path: str | Path) -> Config:
     if not cfg.owners:
         raise ConfigError("owners is required (a list of services account names)")
     cfg.channels = [c if c.startswith(("#", "&")) else "#" + c for c in cfg.channels]
+    if cfg.casemapping and cfg.casemapping not in irccase.MAPPINGS:
+        raise ConfigError(f"casemapping must be one of {', '.join(sorted(irccase.MAPPINGS))}")
     if cfg.llm.provider not in {"claude", "xai", "none"}:
         raise ConfigError(f"llm.provider must be claude, xai or none (got {cfg.llm.provider!r})")
     # Paths in the toml are relative to the toml, not the working directory.

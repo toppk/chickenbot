@@ -172,3 +172,51 @@ async def test_whois_storm_is_capped_on_big_channels():
     client.send = lambda *args: sent.append(args)
     await client._handle_protocol(parse(":srv 366 chickenbot #big :end"))
     assert sent == []
+
+
+async def test_chghost_rewrites_the_host_a_ban_would_use():
+    client = _client()
+    await client._handle_protocol(parse(":nate!user@old.cloak JOIN #chan"))
+    await client._handle_protocol(parse(":nate!user@old.cloak JOIN #other"))
+    # Identifying to services recloaks; a stale host bans the wrong mask.
+    await client._handle_protocol(parse(":nate!user@old.cloak CHGHOST user new.cloak"))
+    assert client.channels["#chan"].host("nate") == "new.cloak"
+    assert client.channels["#other"].host("nate") == "new.cloak"
+
+
+async def test_chghost_leaves_strangers_alone():
+    client = _client()
+    await client._handle_protocol(parse(":nate!u@h JOIN #chan"))
+    await client._handle_protocol(parse(":ghost!u@h CHGHOST u other.cloak"))
+    assert "ghost" not in client.channels["#chan"].hosts
+
+
+def test_chghost_is_requested_when_offered():
+    from chickenbot.irc import WANTED_CAPS
+
+    assert "chghost" in WANTED_CAPS
+
+
+def test_statusmsg_targets_are_still_channel_traffic():
+    sup = ISupport()
+    sup.update(["STATUSMSG=@+", "CHANTYPES=#"])
+    assert sup.channel_of("@#soup") == "#soup"
+    assert sup.channel_of("+#soup") == "#soup"
+    assert sup.channel_of("#soup") == "#soup"
+    assert sup.channel_of("nate") == ""
+    assert sup.is_channel("@#soup")
+
+
+async def test_statusmsg_host_lands_on_the_bare_channel():
+    client = _client()
+    client.isupport.update(["STATUSMSG=@+", "CHANTYPES=#"])
+    await client._handle_protocol(parse(":nate!u@example.com PRIVMSG @#chan :ops only"))
+    assert client.channels["#chan"].host("nate") == "example.com"
+    assert "@#chan" not in client.channels
+
+
+def test_topiclen_is_parsed():
+    sup = ISupport()
+    assert sup.topiclen == 0
+    sup.update(["TOPICLEN=390"])
+    assert sup.topiclen == 390

@@ -223,3 +223,17 @@ async def test_account_tag_wins_when_the_network_has_both(cfg, client, store):
     await client._handle_protocol(parse(":nate!u@h JOIN #chan stale :Nate"))
     await handler.on_message(parse("@account=alice :nate!u@h PRIVMSG #chan :!topic fresh"))
     assert ("TOPIC", "#chan", "fresh") in client.sent
+
+
+async def test_topic_is_truncated_to_topiclen(cfg, client, store):
+    h = Handler(cfg, client, store, None, None)
+    client.isupport.update(["TOPICLEN=10"])
+    await h.on_message(parse("@account=alice :alice!u@h PRIVMSG #chan :!topic " + "x" * 40))
+    assert ("TOPIC", "#chan", "x" * 10) in client.sent
+
+
+async def test_statusmsg_command_replies_to_the_bare_channel(cfg, client, store):
+    h = Handler(cfg, client, store, None, None)
+    client.isupport.update(["STATUSMSG=@+", "CHANTYPES=#"])
+    await h.on_message(parse("@account=alice :alice!u@h PRIVMSG @#chan :!uptime"))
+    assert [p[1] for p in client.sent if p[0] == "PRIVMSG"] == ["#chan"]

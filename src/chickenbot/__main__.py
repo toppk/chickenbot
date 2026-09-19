@@ -37,7 +37,6 @@ async def prune_daily(store: Store, keep_days: int) -> None:
 
 
 async def run(cfg: config.Config) -> int:
-    store = Store(cfg.db_path)
     try:
         provider = brain.build(cfg.llm)
     except brain.ProviderError as exc:
@@ -56,7 +55,9 @@ async def run(cfg: config.Config) -> int:
         server_password=cfg.server.password,
         sasl_user=cfg.server.sasl_user,
         sasl_password=cfg.server.sasl_password,
+        casemapping=cfg.casemapping,
     )
+    store = Store(cfg.db_path, client.fold)
 
     handler = Handler(cfg, client, store, provider, None)
     watcher = None

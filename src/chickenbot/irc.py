@@ -11,10 +11,21 @@ import ssl
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 
+from . import irccase
+
 log = logging.getLogger(__name__)
 
 WANTED_CAPS = frozenset(
-    {"message-tags", "account-tag", "account-notify", "extended-join", "server-time", "multi-prefix", "sasl"}
+    {
+        "message-tags",
+        "account-tag",
+        "account-notify",
+        "extended-join",
+        "server-time",
+        "multi-prefix",
+        "chghost",
+        "sasl",
+    }
 )
 
 _TAG_UNESCAPE = {":": ";", "s": " ", "\\": "\\", "r": "\r", "n": "\n"}
@@ -104,17 +115,27 @@ def parse(raw: str) -> Message:
 class ISupport:
     """The subset of RPL_ISUPPORT that affects parsing."""
 
-    def __init__(self) -> None:
+    def __init__(self, casemapping: str = "") -> None:
         self.chantypes = "#&"
         self.prefixes: dict[str, str] = {"o": "@", "v": "+"}
         self.chanmodes = ("beI", "k", "lfj", "psitnmrRc")
         self.bot_mode = ""  # IRCv3 bot mode letter, e.g. "B"
+        self.statusmsg = ""
+        self.topiclen = 0  # 0 means the server named no limit
+        self.casemapping = casemapping or irccase.DEFAULT
+        self._pinned = bool(casemapping)
 
     def update(self, tokens: list[str]) -> None:
         for token in tokens:
             key, _, value = token.partition("=")
             if key == "CHANTYPES" and value:
                 self.chantypes = value
+            elif key == "CASEMAPPING" and value and not self._pinned:
+                self.casemapping = value.lower()
+            elif key == "STATUSMSG":
+                self.statusmsg = value
+            elif key == "TOPICLEN" and value.isdigit():
+                self.topiclen = int(value)
             elif key == "PREFIX" and value.startswith("(") and ")" in value:
                 modes, _, chars = value[1:].partition(")")
                 if len(modes) == len(chars):
@@ -125,8 +146,16 @@ class ISupport:
                 a, b, c, d = value.split(",")
                 self.chanmodes = (a, b, c, d)
 
+    def fold(self, text: str) -> str:
+        return irccase.fold(text, self.casemapping)
+
+    def channel_of(self, name: str) -> str:
+        """The bare channel name, with any STATUSMSG prefix stripped, else ""."""
+        name = name.lstrip(self.statusmsg) if self.statusmsg else name
+        return name if name and name[0] in self.chantypes else ""
+
     def is_channel(self, name: str) -> bool:
-        return bool(name) and name[0] in self.chantypes
+        return bool(self.channel_of(name))
 
     def takes_param(self, mode: str, adding: bool) -> bool:
         a, b, c, _d = self.chanmodes
@@ -136,14 +165,12 @@ class ISupport:
 
 
 class Channel:
-    def __init__(self, name: str) -> None:
+    def __init__(self, name: str, fold: Callable[[str], str] = irccase.fold) -> None:
         self.name = name
         self.members: dict[str, set[str]] = {}
         self.hosts: dict[str, str] = {}
         self.topic = ""
-
-    def fold(self, nick: str) -> str:
-        return nick.casefold()
+        self.fold = fold
 
     def add(self, nick: str, modes: set[str] | None = None) -> None:
         self.members[self.fold(nick)] = modes or set()
@@ -188,6 +215,7 @@ class Client:
         sasl_password: str = "",
         send_interval: float = 0.6,
         whois_limit: int = 30,
+        casemapping: str = "",
     ) -> None:
         self.host = host
         self.port = port
@@ -202,7 +230,7 @@ class Client:
         self.send_interval = send_interval
         self.whois_limit = whois_limit
 
-        self.isupport = ISupport()
+        self.isupport = ISupport(casemapping)
         self.channels: dict[str, Channel] = {}
         self.caps: set[str] = set()
         # Folded nick -> services account, for networks without account-tag.
@@ -243,19 +271,22 @@ class Client:
         for line in split_message(text):
             self.send("NOTICE", target, line)
 
+    def fold(self, text: str) -> str:
+        return self.isupport.fold(text)
+
     def account_of(self, nick: str) -> str:
         """The sender's services account, learned from extended-join/ACCOUNT/WHOIS."""
-        return self.accounts.get(nick.casefold(), "")
+        return self.accounts.get(self.fold(nick), "")
 
     def _learn_account(self, nick: str, account: str) -> None:
-        key = nick.casefold()
+        key = self.fold(nick)
         if account and account != "*":
             self.accounts[key] = account
         else:
             self.accounts.pop(key, None)
 
     def has_op(self, channel: str) -> bool:
-        chan = self.channels.get(channel.casefold())
+        chan = self.channels.get(self.fold(channel))
         return bool(chan and chan.has_mode(self.nick, "o"))
 
     # -- connection ------------------------------------------------------
@@ -347,8 +378,9 @@ class Client:
             case "PING":
                 self.send("PONG", *msg.params)
             case "PRIVMSG":
-                if "@" in msg.source and self.isupport.is_channel(msg.target):
-                    chan = self._channel(msg.target)
+                name = self.isupport.channel_of(msg.target)
+                if "@" in msg.source and name:
+                    chan = self._channel(name)
                     chan.hosts[chan.fold(msg.nick)] = msg.source
             case "CAP":
                 self._handle_cap(msg)
@@ -378,7 +410,9 @@ class Client:
             case "QUIT":
                 for chan in self.channels.values():
                     chan.remove(msg.nick)
-                self.accounts.pop(msg.nick.casefold(), None)
+                self.accounts.pop(self.fold(msg.nick), None)
+            case "CHGHOST":
+                self._handle_chghost(msg)
             case "ACCOUNT":
                 self._learn_account(msg.nick, msg.params[0] if msg.params else "*")
             case "330":  # RPL_WHOISACCOUNT - <me> <nick> <account> :is logged in as
@@ -407,10 +441,10 @@ class Client:
         self.send("MODE", self.nick, "+" + self.isupport.bot_mode)
 
     def _channel(self, name: str) -> Channel:
-        key = name.casefold()
+        key = self.fold(name)
         chan = self.channels.get(key)
         if chan is None:
-            chan = Channel(name)
+            chan = Channel(name, self.fold)
             self.channels[key] = chan
         return chan
 
@@ -481,12 +515,12 @@ class Client:
             self._learn_account(msg.nick, msg.params[1])
         if "@" in msg.source:
             chan.hosts[chan.fold(msg.nick)] = msg.source
-        if msg.nick.casefold() == self.nick.casefold():
+        if self.fold(msg.nick) == self.fold(self.nick):
             self.send("MODE", name)
 
     def _handle_part(self, msg: Message) -> None:
-        if msg.nick.casefold() == self.nick.casefold():
-            self.channels.pop(msg.target.casefold(), None)
+        if self.fold(msg.nick) == self.fold(self.nick):
+            self.channels.pop(self.fold(msg.target), None)
         else:
             self._channel(msg.target).remove(msg.nick)
 
@@ -494,8 +528,8 @@ class Client:
         if len(msg.params) < 2:
             return
         victim = msg.params[1]
-        if victim.casefold() == self.nick.casefold():
-            self.channels.pop(msg.target.casefold(), None)
+        if self.fold(victim) == self.fold(self.nick):
+            self.channels.pop(self.fold(msg.target), None)
         else:
             self._channel(msg.target).remove(victim)
 
@@ -503,23 +537,33 @@ class Client:
         """NAMES carries no accounts, so WHOIS the people who were already here."""
         if "extended-join" not in self.caps or not channel:
             return
-        chan = self.channels.get(channel.casefold())
+        chan = self.channels.get(self.fold(channel))
         if chan is None or len(chan.members) > self.whois_limit:
             return
-        unknown = [n for n in chan.members if n not in self.accounts and n != self.nick.casefold()]
+        unknown = [n for n in chan.members if n not in self.accounts and n != self.fold(self.nick)]
         for nick in unknown:
             self.send("WHOIS", nick)
 
     def _handle_nick(self, msg: Message) -> None:
         new = msg.text or (msg.params[0] if msg.params else "")
-        if msg.nick.casefold() == self.nick.casefold():
+        if self.fold(msg.nick) == self.fold(self.nick):
             self.nick = new
             self.wanted_nick = new
         for chan in self.channels.values():
             chan.rename(msg.nick, new)
-        account = self.accounts.pop(msg.nick.casefold(), "")
+        account = self.accounts.pop(self.fold(msg.nick), "")
         if account:
-            self.accounts[new.casefold()] = account
+            self.accounts[self.fold(new)] = account
+
+    def _handle_chghost(self, msg: Message) -> None:
+        """Cloaks change on services login, so a stale host bans the wrong mask."""
+        if len(msg.params) < 2:
+            return
+        source = f"{msg.nick}!{msg.params[0]}@{msg.params[1]}"
+        for chan in self.channels.values():
+            key = chan.fold(msg.nick)
+            if key in chan.hosts:
+                chan.hosts[key] = source
 
     def _handle_mode(self, msg: Message) -> None:
         if len(msg.params) < 2 or not self.isupport.is_channel(msg.target):

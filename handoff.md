@@ -26,7 +26,7 @@ Everything Eggdrop-shaped that does not serve those five things was
 deliberately left out: no partyline, no DCC, no user file, no handle/password
 system, no Tcl/Lua/Python scripting, no notes/quotes, no protection engine.
 
-Current size: ~1900 lines of source, ~800 of tests, 68 tests, vs eggbot's
+Current size: ~1960 lines of source, ~1000 of tests, 87 tests, vs eggbot's
 13k/9k. Keep it that way. If a change starts growing a subsystem, push back.
 
 ## Layout
@@ -34,6 +34,7 @@ Current size: ~1900 lines of source, ~800 of tests, 68 tests, vs eggbot's
 ```
 src/chickenbot/
   irc.py        asyncio IRC client: IRCv3 caps, SASL, channel + account state
+  irccase.py    ascii / rfc1459 / strict-rfc1459 folding for nicks and channels
   commands.py   dispatch, owner gating, LLM invocation
   watcher.py    GitHub polling and announcements
   store.py      sqlite: chat log, watches, cursors
@@ -74,6 +75,15 @@ search. Claude's `web_search_20260209` is a server-side tool: declare it, the
 model decides, results come back in the same response. There is no search
 routing code in this repo and there should not be.
 
+**Case folding goes through `irccase.fold`, never `str.casefold()`.** Python's
+casefold is Unicode-aware and ASCII-only in the wrong directions at once; IRC
+wants one of three fixed tables. `ISupport` takes the mapping from `CASEMAPPING`
+and `Client.fold` / `Channel.fold` / `Store.fold` / `Config.fold` all route
+through it, so there is one source of truth. `casemapping` in the toml pins it
+for servers that advertise a mapping they do not implement. In sqlite the folded
+nick lives in its own `nick_key` column, because `COLLATE NOCASE` is SQLite's
+own ASCII folding and cannot express rfc1459.
+
 **The IRC client is hand-rolled** (~520 lines). Every Python IRC library is
 either unmaintained or fights you on IRCv3 tags, which the identity model
 depends on. IRC is line-based; this is not the hard part.
@@ -107,72 +117,49 @@ TARGMAX=PRIVMSG:4,NOTICE:4 NETWORK=Chonkbase`
 `labeled-response`, `setname`, `chathistory`, `BOT=`, `WHOX`, `MONITOR`,
 `MODES=`, SASL mechanisms beyond PLAIN. No halfops.
 
+The source is now in `upstream/chonkline` (gitignored, from
+`github.com/iconidentify/chonkline`), so this is checkable rather than probed:
+`SUPPORTED_CAPS` is at `src/cmds.rs:3201`, the `005` line at `src/cmds.rs:852`,
+and the user modes (`i/w/s/o` only, no `+B`) at `src/state.rs:131`. There is no
+`message-tags` and no bot mode, so IRCv3 bot detection cannot work on this
+network in either direction — `ignore_nicks` is it.
+
+**The advertised `CASEMAPPING=rfc1459` is a lie.** Every fold in the server is
+Rust's ASCII `to_lowercase()` (`src/channels.rs:25`, `src/state.rs:183-189`,
+`src/network.rs:360`), while `valid_nick` (`src/cmds.rs:446`) admits
+`` [ ] \ { } ^ ` ``. So `nate[m]` and `nate{m}` are two distinct users that can
+both be present, and a client that folds rfc1459 faithfully collapses them into
+one. `chickenbot.toml` therefore pins `casemapping = "ascii"`.
+
 Consequences already handled: no `account-tag` is why the account fallback
 chain exists; no `WHOX` is why account resolution uses `WHOIS` per member
-rather than `WHO %a`; no `BOT=`/`message-tags` means IRCv3 bot mode is inert
-there and `ignore_nicks` is the only way to ignore another bot.
+rather than `WHO %a`; `chghost` is requested because cloaks change on services
+login and a stale host bans the wrong mask.
 
 Services are Atheme-style (NickServ/ChanServ, `REGISTER`/`IDENTIFY`).
 User hosts are cloaked.
 
 ## Open work
 
-### 1. CASEMAPPING=rfc1459 is not implemented (correctness bug)
+All three numbered items from the previous handoff are done (2026-09-18). What
+is left:
 
-Chonkbase advertises `CASEMAPPING=rfc1459`. Under that mapping `[]\~` are the
-uppercase forms of `{}|^`, so `nate[m]` and `nate{m}` are the same nick and
-`#Foo[bar]` and `#foo{bar}` are the same channel. chickenbot folds with
-Python's `.casefold()` everywhere, which is ASCII-only and therefore wrong on
-this network. `[m]`-suffixed nicks are the standard Matrix bridge convention,
-so this is likely to bite rather than theoretical.
-
-Symptoms: an ignored bot could evade `ignore_nicks`; `.seen nate{m}` misses
-`nate[m]`; two `Channel` entries for one channel.
-
-Scope — about 30 call sites, all findable with
-`grep -rn "casefold()\|COLLATE NOCASE" src/`:
-
-- new `src/chickenbot/irccase.py` with `fold(s, mapping)` supporting `ascii`,
-  `rfc1459` and `strict-rfc1459`; default `rfc1459` per RFC 2812
-- `ISupport` already parses tokens — add `CASEMAPPING` and expose it
-- `irc.py`: `Channel.fold`, the `self.channels` dict keys, `accounts` keys,
-  and every `nick.casefold() == self.nick.casefold()` comparison
-- `config.py:85,88`: `is_owner` / `is_ignored`
-- `commands.py:172,214,354` and the nick-address match at `149-150`
-- `store.py`: this is the awkward one. `COLLATE NOCASE` (lines 103, 161) is
-  SQLite's own ASCII folding and cannot express rfc1459. Fold in Python before
-  the query and store the folded value in a dedicated column, rather than
-  relying on collation.
-
-Note the irony: eggbot has `internal/irccase` at 72 lines, and the first
-message of this conversation listed it among the trivial packages worth
-merging away. It exists for exactly this reason.
-
-### 2. `chghost` is offered but never requested
-
-`WANTED_CAPS` in `irc.py:16` omits `chghost`, so the server never tells us
-when a user's host changes, and there is no `CHGHOST` case in
-`_handle_protocol`. Chonkbase *cloaks* hosts, and cloaks typically change the
-moment a user identifies to NickServ — so `Channel.hosts` goes stale exactly
-when someone logs in, and `.ban nate` then writes a ban for the old cloak. It
-does not error; it silently does nothing.
-
-Fix: add `chghost` to `WANTED_CAPS`, handle `:nick!old@old CHGHOST <newuser>
-<newhost>` by rewriting `Channel.hosts` for that nick in every channel.
-
-### 3. Minor
-
-- `TOPICLEN=390` is not enforced before sending `.topic`
-- `STATUSMSG=@+` means `@#soup` targets are not recognised as channel traffic
-  (`ISupport.is_channel` sees the leading `@`)
-- xAI live search is **deliberately not implemented**. Claude's is server-side
-  and needs no code; xAI's parameters are vendor-specific and were not
-  guessed at. `llm.search_params` is merged into the request body so it can be
-  configured without code changes, but as shipped `provider = "xai"` answers
+- xAI live search is still **deliberately not implemented**. Claude's is
+  server-side and needs no code; xAI's parameters are vendor-specific and were
+  not guessed at. `llm.search_params` is merged into the request body so it can
+  be configured without code changes, but as shipped `provider = "xai"` answers
   without searching. Do not invent the parameter shape — check xAI's docs.
+- `chonkline` advertises `CASEMAPPING=rfc1459` and does not implement it (see
+  the network section above). An issue should be filed upstream; `casemapping = "ascii"` in
+  `chickenbot.toml` works around it meanwhile.
 
 ## Gotchas
 
+- **`Store._migrate` runs before `SCHEMA`**, because the `chatlog_nick_id`
+  index is on `nick_key` and cannot be created on a pre-`nick_key` database.
+  A test covers the upgrade path.
+- **A changed `casemapping` does not re-fold rows already in sqlite.** Stored
+  `nick_key`/`channel` values keep the mapping that was in force when written.
 - **`anthropic` 1.x is built on `httpx2`, not `httpx`.** `import httpx2` in
   tests that need a Request object. Passing an `httpx` object to the SDK fails.
 - **Optional extras vs. the test suite.** `anthropic` is an optional extra for

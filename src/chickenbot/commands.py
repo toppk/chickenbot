@@ -92,38 +92,39 @@ class Handler:
     async def on_message(self, msg: Message) -> None:
         if msg.command != "PRIVMSG" or not msg.source:
             return
-        if msg.nick.casefold() == self.client.nick.casefold():
+        if self.client.fold(msg.nick) == self.client.fold(self.client.nick):
             return
-        if msg.is_bot or self.cfg.is_ignored(msg.nick):
+        if msg.is_bot or self.cfg.is_ignored(msg.nick, self.client.fold):
             # Another bot. Log what it says, but never act on it.
-            if self.client.isupport.is_channel(msg.target) and msg.text.strip():
-                await self.store.log_line(msg.target, msg.nick, self.account_for(msg), msg.text.strip(), "bot")
+            name = self.client.isupport.channel_of(msg.target)
+            if name and msg.text.strip():
+                await self.store.log_line(name, msg.nick, self.account_for(msg), msg.text.strip(), "bot")
             return
         text = msg.text.strip()
         if not text or text.startswith("\x01"):  # CTCP, including /me
             return
 
-        in_channel = self.client.isupport.is_channel(msg.target)
-        channel = msg.target if in_channel else msg.nick
+        channel = self.client.isupport.channel_of(msg.target) or msg.nick
+        in_channel = channel != msg.nick
         body = self._extract(text, in_channel)
         name, _, args = body.partition(" ") if body else ("", "", "")
         if in_channel:
             # Anything aimed at the bot is an invocation, not channel chat, so it
             # stays out of search and out of the scrollback handed to the model.
             kind = "command" if body is not None else "privmsg"
-            await self.store.log_line(msg.target, msg.nick, self.account_for(msg), text, kind)
+            await self.store.log_line(channel, msg.nick, self.account_for(msg), text, kind)
 
         if body is None:
             return
 
-        cmd = COMMANDS.get(name.casefold().removeprefix(self.cfg.prefix))
+        cmd = COMMANDS.get(name.lower().removeprefix(self.cfg.prefix))
         account = self.account_for(msg)
         ctx = Context(
             nick=msg.nick,
             account=account,
             channel=channel,
             args=args.strip(),
-            is_owner=self.cfg.is_owner(account),
+            is_owner=self.cfg.is_owner(account, self.client.fold),
             in_channel=in_channel,
         )
 
@@ -146,8 +147,8 @@ class Handler:
         """Return the command body, or None when the bot was not being spoken to."""
         if text.startswith(self.cfg.prefix) and len(text) > len(self.cfg.prefix):
             return text[len(self.cfg.prefix) :].strip()
-        nick = self.client.nick.casefold()
-        lowered = text.casefold()
+        nick = self.client.fold(self.client.nick)
+        lowered = self.client.fold(text)
         for sep in (":", ",", " "):
             if lowered.startswith(nick + sep):
                 return text[len(nick) + len(sep) :].strip()
@@ -169,7 +170,7 @@ class Handler:
         if limit <= 0:
             return True
         now = time.monotonic()
-        hits = self._asks[nick.casefold()]
+        hits = self._asks[self.client.fold(nick)]
         while hits and now - hits[0] > 60:
             hits.popleft()
         if len(hits) >= limit:
@@ -211,7 +212,7 @@ async def cmd_seen(h: Handler, ctx: Context) -> None:
     if not who:
         h.say(ctx.channel, f"usage: {h.cfg.prefix}seen <nick>")
         return
-    if who.casefold() == h.client.nick.casefold():
+    if h.client.fold(who) == h.client.fold(h.client.nick):
         h.say(ctx.channel, "i am right here")
         return
     line = await h.store.last_seen(who)
@@ -351,7 +352,7 @@ async def cmd_ban(h: Handler, ctx: Context) -> None:
     if not who:
         h.say(ctx.channel, f"usage: {h.cfg.prefix}ban <nick>")
         return
-    chan = h.client.channels.get(ctx.channel.casefold())
+    chan = h.client.channels.get(h.client.fold(ctx.channel))
     host = chan.host(who) if chan else ""
     if not host:
         h.say(ctx.channel, f"i do not know {who}'s host")
@@ -373,7 +374,8 @@ async def cmd_topic(h: Handler, ctx: Context) -> None:
     if not ctx.in_channel:
         h.say(ctx.channel, "that only works in a channel")
         return
-    h.client.send("TOPIC", ctx.channel, ctx.args)
+    limit = h.client.isupport.topiclen
+    h.client.send("TOPIC", ctx.channel, ctx.args[:limit] if limit else ctx.args)
 
 
 @command("say", owner=True, usage="say <text>", blurb="speak")
