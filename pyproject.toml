@@ -1,7 +1,7 @@
 [project]
 name = "chickenbot"
 version = "0.1.0"
-description = "An IRC bot that logs the channel, answers with an LLM, keeps order, and watches GitHub repos"
+description = "A chat bot that logs the room, answers with an LLM, keeps order, and watches GitHub repos"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
@@ -11,13 +11,24 @@ dependencies = [
 
 [project.optional-dependencies]
 claude = ["anthropic>=1.0"]
+signal = ["signalbot>=2.0"]
+discord = ["discord.py>=2.4"]
+telegram = ["python-telegram-bot>=21"]
 
 [project.scripts]
 chickenbot = "chickenbot.__main__:main"
 
 [dependency-groups]
-# anthropic is optional for users, but the tests cover that provider.
-dev = ["pytest>=8", "pytest-asyncio>=0.23", "ruff>=0.6", "anthropic>=1.0"]
+# Optional for users, but the tests cover every provider and transport.
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.6",
+    "anthropic>=1.0",
+    "signalbot>=2.0",
+    "discord.py>=2.4",
+    "python-telegram-bot>=21",
+]
 
 [build-system]
 requires = ["hatchling"]

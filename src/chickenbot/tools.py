@@ -31,14 +31,22 @@ class Tool:
     owner: bool
     description: str
     params: dict
+    requires: frozenset[str] = frozenset()  # transport capabilities this tool needs
 
 
 TOOLS: dict[str, Tool] = {}
 
 
-def tool(name: str, *, owner: bool = False, description: str = "", params: dict | None = None):
+def tool(
+    name: str,
+    *,
+    owner: bool = False,
+    description: str = "",
+    params: dict | None = None,
+    requires: frozenset[str] = frozenset(),
+):
     def register(fn: Runner) -> Runner:
-        TOOLS[name] = Tool(name, fn, owner, description, params or {"type": "object", "properties": {}})
+        TOOLS[name] = Tool(name, fn, owner, description, params or {"type": "object", "properties": {}}, requires)
         return fn
 
     return register
@@ -56,14 +64,18 @@ class ToolBox:
 
     @property
     def schemas(self) -> list[dict]:
-        """OpenAI-style function declarations for the tools this user may call."""
+        """Declarations for the tools this user, on this network, may actually call."""
         return [
             {
                 "type": "function",
                 "function": {"name": t.name, "description": t.description, "parameters": t.params},
             }
             for t in self.tools.values()
+            if self._available(t)
         ]
+
+    def _available(self, spec: Tool) -> bool:
+        return spec.requires <= self.ctx.transport.caps
 
     async def run(self, name: str, args: dict) -> str:
         result = await self._run(name, args)
@@ -90,6 +102,9 @@ class ToolBox:
         # The asking user's rights, not the bot's: the model cannot widen them.
         if spec.owner and not self.ctx.is_owner:
             return "error: refused, that tool is owner-only and the user asking is not an owner"
+        if not self._available(spec):
+            missing = ", ".join(sorted(spec.requires - self.ctx.transport.caps))
+            return f"error: {self.ctx.transport.name} cannot do that ({missing})"
         missing = [p for p in spec.params.get("required", []) if p not in args]
         if missing:
             return f"error: missing required argument(s): {', '.join(missing)}"

@@ -18,7 +18,7 @@ log = logging.getLogger(__name__)
 API = "https://api.github.com"
 FEEDS = ("releases", "commits", "issues", "prs")
 
-Announce = Callable[[str, str], Awaitable[None]]
+Announce = Callable[[str, str, str], Awaitable[None]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -131,9 +131,9 @@ class Watcher:
 
         extra = len(fresh) - self.cfg.max_per_poll
         for item in reversed(fresh[: self.cfg.max_per_poll]):
-            await self.announce(watch.channel, await self._format(watch, feed, item))
+            await self.announce(watch.transport, watch.channel, await self._format(watch, feed, item))
         if extra > 0:
-            await self.announce(watch.channel, f"[{watch.slug}] and {extra} more {feed}")
+            await self.announce(watch.transport, watch.channel, f"[{watch.slug}] and {extra} more {feed}")
 
     async def _format(self, watch: Watch, feed: str, item: Item) -> str:
         line = f"[{watch.slug}] {item.headline}"
@@ -145,13 +145,13 @@ class Watcher:
 
     async def _summarize(self, slug: str, item: Item) -> str:
         prompt = (
-            f"Summarize this {slug} release for an IRC channel in one sentence of at most 25 words. "
+            f"Summarize this {slug} release for a chat room in one sentence of at most 25 words. "
             f"Lead with what changed for users. No preamble, no markdown.\n\n"
             f"{item.headline}\n\n{item.body[:4000]}"
         )
         try:
             text = await self.provider.reply(
-                system="You write single-sentence release summaries for an IRC channel.",
+                system="You write single-sentence release summaries for a chat room.",
                 history=[],
                 prompt=prompt,
                 search=False,

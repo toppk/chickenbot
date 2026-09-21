@@ -19,7 +19,7 @@ def watcher(store):
             return httpx.Response(304)
         return httpx.Response(200, json=payload["json"], headers={"etag": "W/abc"})
 
-    async def announce(channel: str, text: str) -> None:
+    async def announce(transport: str, channel: str, text: str) -> None:
         calls.append((channel, text))
 
     w = Watcher(store, GitHubConfig(summarize=False, max_per_poll=2), announce)
@@ -30,14 +30,14 @@ def watcher(store):
 
 
 async def test_first_poll_sets_a_baseline_without_announcing(watcher, store):
-    await store.add_watch("a", "b", "#chan", ["releases"], "alice")
+    await store.add_watch("irc", "a", "b", "#chan", ["releases"], "alice")
     await watcher.poll_all()
     assert watcher.calls == []
     assert (await store.get_cursor((await store.watches())[0].id, "releases"))[0] == "3"
 
 
 async def test_second_poll_announces_only_what_is_new(watcher, store):
-    await store.add_watch("a", "b", "#chan", ["releases"], "alice")
+    await store.add_watch("irc", "a", "b", "#chan", ["releases"], "alice")
     await watcher.poll_all()
     watcher.payload["json"] = releases(4, 3, 2, 1)
     await watcher.poll_all()
@@ -45,7 +45,7 @@ async def test_second_poll_announces_only_what_is_new(watcher, store):
 
 
 async def test_announces_oldest_first_and_caps_the_burst(watcher, store):
-    await store.add_watch("a", "b", "#chan", ["releases"], "alice")
+    await store.add_watch("irc", "a", "b", "#chan", ["releases"], "alice")
     await watcher.poll_all()
     watcher.payload["json"] = releases(7, 6, 5, 4, 3, 2, 1)
     await watcher.poll_all()
@@ -58,7 +58,7 @@ async def test_announces_oldest_first_and_caps_the_burst(watcher, store):
 
 
 async def test_unchanged_feed_makes_no_noise(watcher, store):
-    await store.add_watch("a", "b", "#chan", ["releases"], "alice")
+    await store.add_watch("irc", "a", "b", "#chan", ["releases"], "alice")
     await watcher.poll_all()
     watcher.payload["status"] = 304
     await watcher.poll_all()
@@ -71,13 +71,13 @@ async def test_a_broken_feed_does_not_stop_the_others(store):
             raise httpx.ConnectError("nope")
         return httpx.Response(200, json=releases(2, 1))
 
-    async def announce(channel: str, text: str) -> None:
+    async def announce(transport: str, channel: str, text: str) -> None:
         pass
 
     w = Watcher(store, GitHubConfig(summarize=False), announce)
     w.client = httpx.AsyncClient(transport=httpx.MockTransport(route))
-    await store.add_watch("a", "boom", "#chan", ["releases"], "alice")
-    await store.add_watch("a", "fine", "#chan", ["releases"], "alice")
+    await store.add_watch("irc", "a", "boom", "#chan", ["releases"], "alice")
+    await store.add_watch("irc", "a", "fine", "#chan", ["releases"], "alice")
     await w.poll_all()
 
     by_repo = {watch.repo: watch.id for watch in await store.watches()}

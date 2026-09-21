@@ -13,7 +13,7 @@ import os
 import httpx
 
 from ..config import LLMConfig
-from . import ProviderError, Turn, clean_for_irc
+from . import ProviderError, Turn
 
 log = logging.getLogger(__name__)
 
@@ -74,7 +74,7 @@ class OpenAICompatProvider:
         text = (message.get("content") or "").strip()
         if not text:
             raise ProviderError("empty response")
-        return clean_for_irc(text)
+        return text
 
     async def _post(self, body: dict) -> dict:
         try:

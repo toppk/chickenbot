@@ -3,7 +3,7 @@ import sqlite3
 import pytest
 
 from chickenbot import irccase
-from chickenbot.config import Config, ConfigError, ServerConfig, load
+from chickenbot.config import ConfigError, IRCConfig, load
 from chickenbot.irc import Client, ISupport, parse
 from chickenbot.store import Store
 
@@ -46,16 +46,26 @@ def test_configured_mapping_overrides_the_advertisement():
 
 def test_config_rejects_an_unknown_mapping(tmp_path):
     path = tmp_path / "c.toml"
-    path.write_text('owners = ["a"]\ncasemapping = "utf8"\n[server]\nhost = "x"\n')
+    path.write_text('[irc]\nenabled = true\nhost = "x"\nowners = ["a"]\ncasemapping = "utf8"\n')
     with pytest.raises(ConfigError, match="casemapping"):
         load(path)
 
 
-def test_owner_and_ignore_checks_follow_the_mapping():
-    cfg = Config(owners=["nate[m]"], ignore_nicks=["bot[x]"], server=ServerConfig(host="x"))
-    assert cfg.is_owner("NATE{M}")  # rfc1459 default
-    assert cfg.is_ignored("BOT{X}")
-    assert not cfg.is_owner("NATE{M}", lambda s: irccase.fold(s, "ascii"))
+def test_owner_and_ignore_checks_follow_the_networks_mapping():
+    from chickenbot.transport import Membership
+
+    rfc = Membership(["nate[m]"], ["bot[x]"], irccase.fold)
+    assert rfc.is_owner("NATE{M}") and rfc.is_ignored("BOT{X}")
+    assert not rfc.is_owner("")
+
+    ascii_ = Membership(["nate[m]"], [], lambda s: irccase.fold(s, "ascii"))
+    assert not ascii_.is_owner("NATE{M}")
+    assert ascii_.is_owner("NATE[M]")
+
+
+def test_irc_config_carries_its_own_identities():
+    cfg = IRCConfig(enabled=True, host="x", owners=["toppk"])
+    assert cfg.owners == ["toppk"]
 
 
 async def test_client_channel_and_account_keys_use_the_mapping():
@@ -68,11 +78,18 @@ async def test_client_channel_and_account_keys_use_the_mapping():
     assert client.account_of("NATE{M}") == "toppk"
 
 
-async def test_store_folds_nicks_with_the_mapping(tmp_path):
-    st = Store(tmp_path / "t.db", lambda s: irccase.fold(s, "rfc1459"))
+async def test_store_folds_nicks_with_each_networks_mapping(tmp_path):
+    def fold(transport: str, text: str) -> str:
+        return irccase.fold(text) if transport == "irc" else text.casefold()
+
+    st = Store(tmp_path / "t.db", fold)
     try:
-        await st.log_line("#chan", "nate[m]", "nate", "hi")
-        assert (await st.last_seen("NATE{M}")).text == "hi"
+        await st.log_line("irc", "#chan", "nate[m]", "nate", "hi")
+        assert (await st.last_seen("irc", "NATE{M}")).text == "hi"
+        # The same string on another network folds by that network's rules.
+        await st.log_line("signal", "g1", "nate[m]", "uuid", "hello")
+        assert await st.last_seen("signal", "NATE{M}") is None
+        assert (await st.last_seen("signal", "NATE[M]")).text == "hello"
     finally:
         st.close()
 
@@ -91,6 +108,6 @@ async def test_store_backfills_nick_key_for_an_older_database(tmp_path):
 
     st = Store(path)
     try:
-        assert (await st.last_seen("nate{m}")).text == "hi"
+        assert (await st.last_seen("irc", "nate{m}")).text == "hi"
     finally:
         st.close()

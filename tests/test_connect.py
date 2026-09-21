@@ -7,7 +7,9 @@ import contextlib
 import pytest
 
 from chickenbot.commands import Handler
+from chickenbot.config import IRCConfig
 from chickenbot.irc import Client
+from chickenbot.transports.irc_transport import IRCTransport
 
 
 class ToyServer:
@@ -66,24 +68,32 @@ async def toy():
 
 
 async def test_registers_joins_and_answers(toy, cfg, store):
-    client = Client(
+    cfg.irc = IRCConfig(
+        enabled=True,
         host="127.0.0.1",
         port=toy.port,
         tls=False,
         nick="chickenbot",
+        channels=["#chan"],
+        owners=["alice"],
         sasl_user="chickenbot",
-        sasl_password="hunter2",
-        send_interval=0.0,
+        sasl_password_env="TOY_SASL",
     )
-    handler = Handler(cfg, client, store, None, None)
-    client.handler = handler.on_message
-    task = asyncio.create_task(client.run())
+    import os
+
+    os.environ["TOY_SASL"] = "hunter2"
+    transport = IRCTransport(cfg.irc, None)
+    transport.client.send_interval = 0.0
+    handler = Handler(cfg, store, None, None)
+    handler.transports = {"irc": transport}
+    transport.sink = handler.on_message
+    client = transport.client
+    task = asyncio.create_task(transport.run())
     try:
         await asyncio.wait_for(toy.registered.wait(), 5)
         assert base64.b64decode(toy.sasl_payload) == b"chickenbot\0chickenbot\0hunter2"
         assert "account-tag" in client.caps
 
-        client.send("JOIN", "#chan")
         await asyncio.wait_for(toy.joined.wait(), 5)
         await asyncio.sleep(0.05)
         assert client.has_op("#chan")
@@ -95,7 +105,7 @@ async def test_registers_joins_and_answers(toy, cfg, store):
         toy.send("@account=alice :nate!u@example.com PRIVMSG #chan :!topic new topic")
         assert "TOPIC #chan :new topic" in await _wait_for(toy, "TOPIC")
     finally:
-        await client.close()
+        await transport.close()
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
 

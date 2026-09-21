@@ -8,7 +8,7 @@ import os
 import anthropic
 
 from ..config import LLMConfig
-from . import ProviderError, Turn, clean_for_irc
+from . import ProviderError, Turn
 
 log = logging.getLogger(__name__)
 
@@ -78,4 +78,4 @@ class ClaudeProvider:
             text += " [cut off]"
         if not text:
             raise ProviderError("empty response")
-        return clean_for_irc(text)
+        return text

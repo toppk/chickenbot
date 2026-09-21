@@ -1,28 +1,33 @@
 # chickenbot
 
-An IRC bot that does four things:
+A chat bot that does four things, on IRC, Signal, Discord and Telegram at once:
 
-- **logs the channel** to SQLite, so `!seen` and `!history` have something to read
-- **answers questions** with an LLM that can search the web
-- **keeps order** — op, kick, ban, topic — when it has ops
+- **logs the room** to SQLite, so `!seen` and `!history` have something to read
+- **answers questions** with an LLM that can search the web and call tools
+- **keeps order** — op, kick, ban, topic — where the network allows it
 - **watches GitHub repos** and announces releases, commits, issues and PRs
 
 It is not an Eggdrop clone. There is no partyline, no DCC, no user file, and no
-handle/password system: identity is your services account, and `owners` in the
-config is a list of those account names.
+handle/password system.
 
-Accounts are read from the IRCv3 `account-tag` where the network offers it. Many
-networks do not, so chickenbot also learns accounts from `extended-join`, tracks
+**Each network keeps its own owner list**, because their identity namespaces do
+not merge: `[irc] owners` are services accounts, `[signal] owners` are uuids or
+phone numbers, Discord and Telegram are numeric ids. Being an owner on one
+network grants nothing on another, and display names are never identity.
+
+On IRC, accounts come from the IRCv3 `account-tag` where the network offers it.
+Many do not, so chickenbot also learns accounts from `extended-join`, tracks
 `ACCOUNT` changes, and falls back to a `WHOIS` for people already in the channel
-when it joins. If a network has none of those, nobody can be recognised as an
-owner and the bot says so rather than failing silently.
+when it joins. If a network has none of those, nobody is recognised as an owner
+and the bot says so rather than failing silently.
 
 ## Install
 
 Needs Python 3.11+.
 
 ```bash
-uv sync --extra claude     # or: uv sync   (xAI / OpenAI-compatible only)
+uv sync --extra claude                        # LLM provider
+uv sync --extra signal --extra discord --extra telegram   # the networks you use
 ```
 
 ## Configure

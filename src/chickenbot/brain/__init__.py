@@ -42,7 +42,8 @@ _CITATION = re.compile(r"\s*\[\d+\](?=[\s.,;:]|$)")
 
 
 def clean_for_irc(text: str) -> str:
-    """Strip markdown and control codes so output is plain IRC text."""
+    """Strip markdown and control codes. Called by transports that want plain text,
+    never by a provider: Discord and Telegram render markdown and should keep it."""
     text = _FENCE.sub("", text)
     text = _LINK.sub(r"\1 (\2)", text)
     text = _HEADING.sub("", text)

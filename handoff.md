@@ -26,8 +26,10 @@ Everything Eggdrop-shaped that does not serve those five things was
 deliberately left out: no partyline, no DCC, no user file, no handle/password
 system, no Tcl/Lua/Python scripting, no notes/quotes, no protection engine.
 
-Current size: ~1960 lines of source, ~1000 of tests, 87 tests, vs eggbot's
-13k/9k. Keep it that way. If a change starts growing a subsystem, push back.
+Current size: ~2800 lines of source, ~1660 of tests, 135 tests, vs eggbot's
+13k/9k. Four networks and a tool framework have been added since the original
+note; it is still a fifth of eggbot. If a change starts growing a subsystem,
+push back.
 
 ## Layout
 
@@ -57,6 +59,27 @@ uv run chickenbot -c chickenbot.toml
 ```
 
 ## Design decisions, and why
+
+**Each network keeps its own identity namespace.** `[irc] owners` are services
+accounts, `[signal] owners` are uuids or E.164 numbers, `[discord]`/`[telegram]`
+are numeric ids as strings. They are never merged into one list: flatten them
+and anyone who registers the Telegram username `toppk` owns the bot. A
+transport answers `is_owner` for itself, using its own folding, so the check and
+the namespace cannot drift apart. Display names are never identity - a Signal
+profile name or a Discord nickname is whatever the user typed.
+
+Cross-network identity (one person, several handles) would need a linking flow
+with verification. It was deliberately left out; the per-network lists are the
+whole model.
+
+**Transports own folding, presentation and moderation.** `Transport.fold`
+because rfc1459 is meaningless off IRC; `Transport.lines` because IRC wants
+markdown stripped and 400-char lines while Discord and Telegram want markdown
+kept - so providers now return raw text and never call `clean_for_irc`
+themselves. `Transport.moderate(action, room, target, reason)` is one method
+rather than eight, gated by `Transport.caps`; Signal declares an empty set and
+refuses rather than pretending. Tools declare `requires` and are hidden from the
+model entirely on a network that cannot do them.
 
 **Identity is the services account, not a userfile.** Eggdrop needed handles,
 passwords and hostmasks because 1993 IRC had no accounts. Today NickServ
@@ -171,6 +194,13 @@ User hosts are cloaked.
 All three numbered items from the previous handoff are done (2026-09-18). What
 is left:
 
+- **The new transports have never touched a live service.** Signal, Discord and
+  Telegram were written against APIs verified by introspecting the installed
+  libraries, and are tested against the data shapes those libraries hand us -
+  not against a real account. Expect first-run surprises: Discord needs the
+  message-content privileged intent enabled on the application, Signal needs a
+  signal-cli-rest-api daemon at `signal.service`, Telegram needs the bot added
+  to each chat with privacy mode off to see group messages.
 - **Tools.** The framework landed 2026-09-18 with one trivial tool
   (`current_time`) proving the loop. Still to write: `chat_history` (must scope
   to `ctx.channel` — it may not read channels the asker is not in),
@@ -212,6 +242,12 @@ Deliberately not asked for, because chickenbot uses none of them: `WHOX`,
 
 ## Gotchas
 
+- **A transport that keeps failing must not take the others down.** `supervise()`
+  in `__main__.py` restarts each one on its own backoff, and a missing optional
+  extra is logged and skipped, not fatal. Only "no transport at all" exits.
+- **`say()` on the async transports is fire-and-forget.** Signal, Discord and
+  Telegram send from a task, so a send failure is logged rather than raised into
+  whatever command was running. IRC queues instead, through its own outbox.
 - **`Store._migrate` runs before `SCHEMA`**, because the `chatlog_nick_id`
   index is on `nick_key` and cannot be created on a pre-`nick_key` database.
   A test covers the upgrade path.

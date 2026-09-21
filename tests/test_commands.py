@@ -1,19 +1,23 @@
+import time
+
 import pytest
 
 from chickenbot.brain import ProviderError
 from chickenbot.commands import Handler, ago
-from chickenbot.irc import parse
+from chickenbot.transport import KICK, TOPIC
+
+from .conftest import FakeTransport
 
 
 class StubProvider:
     name = "stub"
+    supports_tools = False
 
     def __init__(self, answer: str = "42", error: str = "") -> None:
         self.answer = answer
         self.error = error
         self.prompts: list[str] = []
-
-    supports_tools = False
+        self.toolbox = None
 
     async def reply(self, *, system, history, prompt, search, toolbox=None):
         self.prompts.append(prompt)
@@ -27,216 +31,194 @@ class StubProvider:
 
 
 @pytest.fixture
-def handler(cfg, client, store) -> Handler:
-    return Handler(cfg, client, store, None, None)
+def handler(cfg, store) -> Handler:
+    return Handler(cfg, store, None, None)
 
 
-def line(text: str, *, nick: str = "nate", account: str = "nate", target: str = "#chan") -> str:
-    tag = f"@account={account} " if account else ""
-    return f"{tag}:{nick}!u@example.com PRIVMSG {target} :{text}"
+async def send(h, tr, text, **kw):
+    await h.on_message(tr, tr.envelope(text, **kw))
 
 
-async def test_logs_channel_chat_even_when_not_addressed(handler, store):
-    await handler.on_message(parse(line("just chatting")))
-    seen = await store.last_seen("nate")
+async def test_logs_room_chat_even_when_not_addressed(handler, transport, store):
+    await send(handler, transport, "just chatting")
+    seen = await store.last_seen("fake", "nate")
     assert seen is not None and seen.text == "just chatting"
-    assert handler.client.said() == []
+    assert transport.said() == []
 
 
-async def test_ignores_its_own_messages_and_ctcp(handler, store):
-    await handler.on_message(parse(line("hi", nick="chickenbot")))
-    await handler.on_message(parse(line("\x01ACTION waves\x01")))
-    assert await store.last_seen("chickenbot") is None
-    assert await store.last_seen("nate") is None
+async def test_owner_commands_require_a_matching_account(handler, transport):
+    await send(handler, transport, "!watch anthropics/claude-code")
+    assert "owner-only" in transport.said()[0]
+
+    transport.sent.clear()
+    await send(handler, transport, "!watch anthropics/claude-code", account="alice")
+    assert "watching anthropics/claude-code" in transport.said()[0]
 
 
-async def test_owner_commands_require_a_matching_account(handler, client):
-    await handler.on_message(parse(line("!watch anthropics/claude-code")))
-    assert "owner-only" in client.said()[0]
-
-    client.sent.clear()
-    await handler.on_message(parse(line("!watch anthropics/claude-code", account="alice")))
-    assert "watching anthropics/claude-code" in client.said()[0]
+async def test_unidentified_user_is_told_why(handler, transport):
+    await send(handler, transport, "!topic hi", account="")
+    assert "cannot see your account" in transport.said()[0]
 
 
-async def test_unidentified_user_is_told_why(handler, client):
-    await handler.on_message(parse(line("!topic hi", account="")))
-    assert "cannot see your account" in client.said()[0]
+async def test_moderation_reaches_the_transport(handler, transport):
+    await send(handler, transport, "!kick nate being rude", account="alice")
+    assert transport.actions == [(KICK, "#chan", "nate", "being rude")]
+
+    transport.actions.clear()
+    await send(handler, transport, "!topic fine", account="alice")
+    assert transport.actions == [(TOPIC, "#chan", "fine", "")]
 
 
-async def test_ops_commands_refuse_without_ops(handler, client):
-    await handler._handle_protocol_names()
-    await handler.on_message(parse(line("!kick nate rude", account="alice")))
-    assert "not opped" in client.said()[0]
-    assert not [s for s in client.sent if s[0] == "KICK"]
+async def test_moderation_a_network_cannot_do_is_refused(cfg, store):
+    """Signal has no moderation surface, so the command must say so, not pretend."""
+    tr = FakeTransport(caps=frozenset())
+    handler = Handler(cfg, store, None, None)
+    await handler.on_message(tr, tr.envelope("!kick nate", account="alice"))
+    assert "cannot kick" in tr.said()[0]
+    assert tr.actions == []
 
 
-async def test_kick_and_ban_when_opped(handler, client):
-    await client._handle_protocol(parse(":srv 353 chickenbot = #chan :@chickenbot nate"))
-    await client._handle_protocol(parse(":nate!u@example.com JOIN #chan"))
-    client.sent.clear()
-
-    await handler.on_message(parse(line("!kick nate being rude", account="alice")))
-    assert ("KICK", "#chan", "nate", "being rude") in client.sent
-
-    await handler.on_message(parse(line("!ban nate", account="alice")))
-    assert ("MODE", "#chan", "+b", "*!*@example.com") in client.sent
+async def test_moderation_needs_a_group(handler, transport):
+    await send(handler, transport, "!kick nate", account="alice", room="nate", is_group=False)
+    assert "only works in a group" in transport.said()[0]
+    assert transport.actions == []
 
 
-async def test_seen_and_history_read_the_log(handler, client, store):
-    await store.log_line("#chan", "nate", "nate", "the kettle is broken")
-    await handler.on_message(parse(line("!seen nate")))
-    assert "was last seen" in client.said()[0]
+async def test_seen_and_history_read_the_log(handler, transport, store):
+    await store.log_line("fake", "#chan", "nate", "nate", "the kettle is broken")
+    await send(handler, transport, "!seen nate")
+    assert "was last seen" in transport.said()[0]
 
-    client.sent.clear()
-    await handler.on_message(parse(line("!history kettle")))
-    assert "kettle is broken" in client.said()[0]
+    transport.sent.clear()
+    await send(handler, transport, "!history kettle")
+    assert "kettle is broken" in transport.said()[0]
 
-    client.sent.clear()
-    await handler.on_message(parse(line("!history unobtainium")))
-    assert "nothing matching" in client.said()[0]
+    transport.sent.clear()
+    await send(handler, transport, "!history unobtainium")
+    assert "nothing matching" in transport.said()[0]
 
 
-async def test_ask_is_reached_by_prefix_and_by_address(cfg, client, store):
+async def test_ask_is_reached_by_prefix_and_by_address(cfg, transport, store):
     provider = StubProvider("a quine prints itself")
-    handler = Handler(cfg, client, store, provider, None)
+    handler = Handler(cfg, store, provider, None)
 
-    await handler.on_message(parse(line("!ask what is a quine")))
-    assert client.said()[0] == "nate: a quine prints itself"
+    await send(handler, transport, "!ask what is a quine")
+    assert transport.said()[0] == "nate: a quine prints itself"
 
-    client.sent.clear()
-    await handler.on_message(parse(line("chickenbot: what is a quine")))
-    assert client.said()[0] == "nate: a quine prints itself"
+    transport.sent.clear()
+    await send(handler, transport, "chickenbot: what is a quine")
+    assert transport.said()[0] == "nate: a quine prints itself"
     assert "what is a quine" in provider.prompts[-1]
 
 
-async def test_ask_passes_scrollback_as_untrusted_data(cfg, client, store):
+async def test_ask_passes_scrollback_as_untrusted_data(cfg, transport, store):
     provider = StubProvider()
-    handler = Handler(cfg, client, store, provider, None)
-    await handler.on_message(parse(line("the kettle is broken")))
-    await handler.on_message(parse(line("!ask what is broken")))
+    handler = Handler(cfg, store, provider, None)
+    await send(handler, transport, "the kettle is broken")
+    await send(handler, transport, "!ask what is broken")
     assert "<channel_scrollback>" in provider.prompts[-1]
     assert "the kettle is broken" in provider.prompts[-1]
 
 
-async def test_ask_reports_provider_errors_without_crashing(cfg, client, store):
-    handler = Handler(cfg, client, store, StubProvider(error="rate limited"), None)
-    await handler.on_message(parse(line("!ask hi")))
-    assert client.said()[0] == "nate: rate limited"
+async def test_ask_reports_provider_errors_without_crashing(cfg, transport, store):
+    handler = Handler(cfg, store, StubProvider(error="rate limited"), None)
+    await send(handler, transport, "!ask hi")
+    assert transport.said()[0] == "nate: rate limited"
 
 
-async def test_ask_rate_limits_per_user(cfg, client, store):
+async def test_ask_rate_limits_per_user(cfg, transport, store):
     cfg.llm.per_user_per_min = 2
-    handler = Handler(cfg, client, store, StubProvider(), None)
+    handler = Handler(cfg, store, StubProvider(), None)
     for _ in range(3):
-        await handler.on_message(parse(line("!ask hi")))
-    assert "slow down" in client.said()[-1]
+        await send(handler, transport, "!ask hi")
+    assert "slow down" in transport.said()[-1]
 
 
-async def test_watch_rejects_bad_slugs_and_feeds(handler, client):
-    await handler.on_message(parse(line("!watch not-a-slug", account="alice")))
-    assert "usage:" in client.said()[0]
+async def test_watch_rejects_bad_slugs_and_feeds(handler, transport):
+    await send(handler, transport, "!watch not-a-slug", account="alice")
+    assert "usage:" in transport.said()[0]
 
-    client.sent.clear()
-    await handler.on_message(parse(line("!watch a/b nonsense", account="alice")))
-    assert "unknown feeds" in client.said()[0]
-
-
-async def test_watch_unwatch_round_trip(handler, client):
-    await handler.on_message(parse(line("!watch a/b releases,issues", account="alice")))
-    client.sent.clear()
-    await handler.on_message(parse(line("!watching")))
-    assert "a/b (releases+issues)" in client.said()[0]
-
-    client.sent.clear()
-    await handler.on_message(parse(line("!unwatch a/b", account="alice")))
-    assert "dropped a/b" in client.said()[0]
+    transport.sent.clear()
+    await send(handler, transport, "!watch a/b nonsense", account="alice")
+    assert "unknown feeds" in transport.said()[0]
 
 
-async def test_private_message_needs_no_prefix(cfg, client, store):
-    handler = Handler(cfg, client, store, StubProvider("hi"), None)
-    await handler.on_message(parse(line("uptime", target="chickenbot")))
-    assert "up " in client.said()[0]
-    assert client.sent[0][1] == "nate"
+async def test_watch_unwatch_round_trip(handler, transport):
+    await send(handler, transport, "!watch a/b releases,issues", account="alice")
+    transport.sent.clear()
+    await send(handler, transport, "!watching")
+    assert "a/b (releases+issues)" in transport.said()[0]
+
+    transport.sent.clear()
+    await send(handler, transport, "!unwatch a/b", account="alice")
+    assert "dropped a/b" in transport.said()[0]
 
 
-async def test_unknown_prefixed_command_is_silent(handler, client):
-    await handler.on_message(parse(line("!nosuchcommand")))
-    assert client.said() == []
+async def test_a_watch_belongs_to_one_room_on_one_network(handler, store):
+    """The same repo watched from two networks is two watches, announced separately."""
+    irc, signal = FakeTransport(), FakeTransport()
+    signal.name = "signal"
+    await handler.on_message(irc, irc.envelope("!watch a/b", account="alice"))
+    await handler.on_message(signal, signal.envelope("!watch a/b", account="alice", room="group1"))
+
+    assert len(await store.watches()) == 2
+    assert [w.transport for w in await store.watches()] == ["fake", "signal"]
+    assert len(await store.watches("fake", "#chan")) == 1
+
+
+async def test_direct_message_needs_no_prefix(cfg, transport, store):
+    handler = Handler(cfg, store, StubProvider("hi"), None)
+    await send(handler, transport, "uptime", room="nate", is_group=False)
+    assert "up " in transport.said()[0]
+    assert transport.sent[0][0] == "nate"
+
+
+async def test_unknown_prefixed_command_is_silent(handler, transport):
+    await send(handler, transport, "!nosuchcommand")
+    assert transport.said() == []
+
+
+async def test_messages_from_a_flagged_bot_are_logged_not_obeyed(handler, transport, store):
+    await send(handler, transport, "!topic hijacked", sender="otherbot", account="alice", is_bot=True)
+    assert transport.sent == []
+    # Still logged, so the room record stays complete.
+    assert (await store.last_seen("fake", "otherbot")).text == "!topic hijacked"
+    assert await store.search("fake", "#chan", "hijacked") == []
+
+
+async def test_ignore_lists_cover_networks_without_bot_flags(cfg, store):
+    tr = FakeTransport(ignored=["OtherBot"])
+    handler = Handler(cfg, store, None, None)
+    await handler.on_message(tr, tr.envelope("!topic hijacked", sender="otherbot", account="alice"))
+    assert tr.sent == []
+
+
+async def test_an_owner_on_one_network_is_not_an_owner_on_another(cfg, store):
+    """Identity namespaces do not merge: the same string means different people."""
+    irc = FakeTransport(owners=["alice"])
+    signal = FakeTransport(owners=["+15551234567"])
+    signal.name = "signal"
+    handler = Handler(cfg, store, None, None)
+
+    await handler.on_message(signal, signal.envelope("!topic nope", account="alice", room="g1"))
+    assert "owner-only" in signal.said()[0]
+
+    await handler.on_message(irc, irc.envelope("!topic yes", account="alice"))
+    assert irc.actions == [(TOPIC, "#chan", "yes", "")]
+
+
+async def test_announce_goes_to_the_transport_that_owns_the_watch(handler, transport):
+    handler.transports = {"fake": transport}
+    await handler.announce("fake", "#chan", "[a/b] v1.0")
+    assert transport.sent == [("#chan", "[a/b] v1.0")]
+
+    await handler.announce("gone", "#chan", "into the void")
+    assert len(transport.sent) == 1
 
 
 def test_ago_formats_coarsely():
-    import time
-
     now = int(time.time())
     assert ago(now).endswith("s")
     assert ago(now - 120) == "2m"
     assert ago(now - 7500) == "2h5m"
     assert ago(now - 200000) == "2d7h"
-
-
-# Small helper so the "no ops" test reads clearly.
-async def _handle_protocol_names(self) -> None:
-    await self.client._handle_protocol(parse(":srv 353 chickenbot = #chan :chickenbot nate"))
-
-
-Handler._handle_protocol_names = _handle_protocol_names
-
-
-async def test_commands_from_a_flagged_bot_are_ignored(handler, client, store):
-    await handler.on_message(parse("@bot;account=alice :otherbot!u@h PRIVMSG #chan :!topic hijacked"))
-    assert client.sent == []
-    # Still logged, so the channel record stays complete.
-    assert (await store.last_seen("otherbot")).text == "!topic hijacked"
-    assert await store.search("#chan", "hijacked") == []
-
-
-async def test_ignore_nicks_covers_networks_without_bot_mode(cfg, client, store):
-    cfg.ignore_nicks = ["OtherBot"]
-    handler = Handler(cfg, client, store, None, None)
-    await handler.on_message(parse(line("!topic hijacked", nick="otherbot", account="alice")))
-    assert client.sent == []
-
-
-async def test_ordinary_users_are_unaffected_by_the_bot_filter(handler, client):
-    await handler.on_message(parse(line("!topic fine", account="alice")))
-    assert ("TOPIC", "#chan", "fine") in client.sent
-
-
-async def test_owner_is_recognised_without_account_tag(cfg, client, store):
-    """Chonkbase and friends have extended-join but no account-tag."""
-    handler = Handler(cfg, client, store, None, None)
-    client.caps.add("extended-join")
-    await client._handle_protocol(parse(":nate!u@example.com JOIN #chan alice :Alice"))
-    client.sent.clear()
-
-    await handler.on_message(parse(":nate!u@example.com PRIVMSG #chan :!topic hello"))
-    assert ("TOPIC", "#chan", "hello") in client.sent
-
-    # Logging out revokes it immediately.
-    await client._handle_protocol(parse(":nate!u@example.com ACCOUNT *"))
-    client.sent.clear()
-    await handler.on_message(parse(":nate!u@example.com PRIVMSG #chan :!topic nope"))
-    assert "cannot see your account" in client.said()[0]
-
-
-async def test_account_tag_wins_when_the_network_has_both(cfg, client, store):
-    handler = Handler(cfg, client, store, None, None)
-    client.caps.add("extended-join")
-    await client._handle_protocol(parse(":nate!u@h JOIN #chan stale :Nate"))
-    await handler.on_message(parse("@account=alice :nate!u@h PRIVMSG #chan :!topic fresh"))
-    assert ("TOPIC", "#chan", "fresh") in client.sent
-
-
-async def test_topic_is_truncated_to_topiclen(cfg, client, store):
-    h = Handler(cfg, client, store, None, None)
-    client.isupport.update(["TOPICLEN=10"])
-    await h.on_message(parse("@account=alice :alice!u@h PRIVMSG #chan :!topic " + "x" * 40))
-    assert ("TOPIC", "#chan", "x" * 10) in client.sent
-
-
-async def test_statusmsg_command_replies_to_the_bare_channel(cfg, client, store):
-    h = Handler(cfg, client, store, None, None)
-    client.isupport.update(["STATUSMSG=@+", "CHANTYPES=#"])
-    await h.on_message(parse("@account=alice :alice!u@h PRIVMSG @#chan :!uptime"))
-    assert [p[1] for p in client.sent if p[0] == "PRIVMSG"] == ["#chan"]

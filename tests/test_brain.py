@@ -70,7 +70,8 @@ async def test_joins_text_blocks_and_drops_tool_blocks(provider):
         provider,
         response(content=[block("server_tool_use"), block("text", "**bold**"), block("text", "and more")]),
     )
-    assert await provider.reply(system="s", history=[], prompt="p", search=True) == "bold\nand more"
+    # Markdown survives the provider: presentation is the transport's call now.
+    assert await provider.reply(system="s", history=[], prompt="p", search=True) == "**bold**\nand more"
 
 
 async def test_flags_a_truncated_answer(provider):

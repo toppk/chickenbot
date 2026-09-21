@@ -10,25 +10,35 @@ from chickenbot.commands import Context, Handler
 from chickenbot.config import LLMConfig
 from chickenbot.tools import MAX_CALLS, TOOLS, Tool, ToolBox
 
-
-def ctx(*, is_owner: bool = False) -> Context:
-    return Context(nick="nate", account="nate", channel="#chan", args="", is_owner=is_owner, in_channel=True)
+from .conftest import FakeTransport
 
 
-def box(handler, *, is_owner=False, **tools) -> ToolBox:
-    return ToolBox(handler, ctx(is_owner=is_owner), tools)
+def ctx(*, is_owner: bool = False, transport=None) -> Context:
+    return Context(
+        transport=transport or FakeTransport(),
+        nick="nate",
+        account="nate",
+        channel="#chan",
+        args="",
+        is_owner=is_owner,
+        in_channel=True,
+    )
 
 
-def make(name, fn, *, owner=False, required=None):
+def box(handler, *, is_owner=False, transport=None, **tools) -> ToolBox:
+    return ToolBox(handler, ctx(is_owner=is_owner, transport=transport), tools)
+
+
+def make(name, fn, *, owner=False, required=None, requires=frozenset()):
     params = {"type": "object", "properties": {"who": {"type": "string"}}}
     if required:
         params["required"] = required
-    return Tool(name, fn, owner, "", params)
+    return Tool(name, fn, owner, "", params, requires)
 
 
 @pytest.fixture
-def handler(cfg, client, store) -> Handler:
-    return Handler(cfg, client, store, None, None)
+def handler(cfg, store) -> Handler:
+    return Handler(cfg, store, None, None)
 
 
 async def test_owner_tools_follow_the_asking_user_not_the_bot(handler):
@@ -174,3 +184,19 @@ async def test_no_toolbox_means_no_tools_field(handler, monkeypatch):
     assert await p.reply(system="s", history=[], prompt="p", search=False) == "plain"
     await p.aclose()
     assert "tools" not in seen[0]
+
+
+async def test_a_tool_a_network_cannot_support_is_hidden_and_refused(handler):
+    async def kick(h, c, a):
+        return "kicked"
+
+    from chickenbot.transport import KICK
+
+    spec = {"kick": make("kick", kick, requires=frozenset({KICK}))}
+    signal = FakeTransport(caps=frozenset())
+    b = box(handler, transport=signal, **spec)
+    assert b.schemas == []
+    assert "cannot do that (kick)" in await b.run("kick", {})
+
+    irc = FakeTransport(caps=frozenset({KICK}))
+    assert await box(handler, transport=irc, **spec).run("kick", {}) == "kicked"

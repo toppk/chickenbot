@@ -1,40 +1,71 @@
 import pytest
 
-from chickenbot.config import Config, GitHubConfig, LLMConfig, ServerConfig
-from chickenbot.irc import Client
+from chickenbot.config import Config, GitHubConfig, IRCConfig, LLMConfig
 from chickenbot.store import Store
+from chickenbot.transport import BAN, DEOP, DEVOICE, KICK, OP, TOPIC, UNBAN, VOICE, Envelope, Membership, chunk
+
+ALL_CAPS = frozenset({OP, DEOP, VOICE, DEVOICE, KICK, BAN, UNBAN, TOPIC})
 
 
-class FakeClient(Client):
-    """A Client that records what it would have sent instead of connecting."""
+class FakeTransport:
+    """A transport that records what it would have sent instead of connecting."""
 
-    def __init__(self, nick: str = "chickenbot") -> None:
-        super().__init__(host="test.invalid", nick=nick)
-        self.nick = nick
-        self.sent: list[tuple[str, ...]] = []
+    name = "fake"
+    me = "chickenbot"
 
-    def send(self, command: str, *params: str) -> None:
-        self.sent.append((command, *params))
+    def __init__(self, *, owners=("alice",), ignored=(), caps=ALL_CAPS) -> None:
+        self.caps = frozenset(caps)
+        self.rooms: list[str] = []
+        self.sent: list[tuple[str, str]] = []
+        self.actions: list[tuple[str, str, str, str]] = []
+        self._members = Membership(list(owners), list(ignored), self.fold)
+
+    def fold(self, text: str) -> str:
+        return text.casefold()
+
+    def is_owner(self, account: str) -> bool:
+        return self._members.is_owner(account)
+
+    def is_ignored(self, sender: str) -> bool:
+        return self._members.is_ignored(sender)
+
+    def lines(self, text: str) -> list[str]:
+        return chunk(text, 400, 4)
+
+    def say(self, room: str, text: str) -> None:
+        self.sent.append((room, text))
+
+    async def moderate(self, action: str, room: str, target: str, reason: str = "") -> str:
+        self.actions.append((action, room, target, reason))
+        return f"{action} {target}"
+
+    async def run(self) -> None:
+        pass
+
+    async def close(self, reason: str = "") -> None:
+        pass
+
+    # -- test helpers ----------------------------------------------------
 
     def said(self) -> list[str]:
-        return [p[-1] for p in self.sent if p[0] == "PRIVMSG"]
+        return [text for _room, text in self.sent]
+
+    def envelope(self, text, *, sender="nate", account="nate", room="#chan", is_group=True, is_bot=False):
+        return Envelope(room=room, sender=sender, account=account, text=text, is_group=is_group, is_bot=is_bot)
 
 
 @pytest.fixture
 def cfg() -> Config:
     return Config(
-        nick="chickenbot",
-        owners=["alice"],
-        channels=["#chan"],
-        server=ServerConfig(host="test.invalid"),
+        irc=IRCConfig(enabled=True, host="test.invalid", nick="chickenbot", channels=["#chan"], owners=["alice"]),
         llm=LLMConfig(enabled=False, provider="none"),
         github=GitHubConfig(enabled=False),
     )
 
 
 @pytest.fixture
-def client() -> FakeClient:
-    return FakeClient()
+def transport() -> FakeTransport:
+    return FakeTransport()
 
 
 @pytest.fixture

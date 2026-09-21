@@ -4,42 +4,42 @@ from chickenbot import config
 
 
 async def test_search_and_scrollback_ignore_command_lines(store):
-    await store.log_line("#chan", "nate", "nate", "the kettle is broken")
-    await store.log_line("#chan", "nate", "nate", "!history kettle", kind="command")
-    assert [line.text for line in await store.search("#chan", "kettle")] == ["the kettle is broken"]
-    assert [line.text for line in await store.recent("#chan")] == ["the kettle is broken"]
+    await store.log_line("irc", "#chan", "nate", "nate", "the kettle is broken")
+    await store.log_line("irc", "#chan", "nate", "nate", "!history kettle", kind="command")
+    assert [line.text for line in await store.search("irc", "#chan", "kettle")] == ["the kettle is broken"]
+    assert [line.text for line in await store.recent("irc", "#chan")] == ["the kettle is broken"]
     # ...but "when did nate last speak" still counts them.
-    assert (await store.last_seen("nate")).text == "!history kettle"
+    assert (await store.last_seen("irc", "nate")).text == "!history kettle"
 
 
 async def test_channel_lookup_is_case_insensitive(store):
-    await store.log_line("#Chan", "Nate", "nate", "hi")
-    assert await store.search("#CHAN", "hi")
-    assert (await store.last_seen("NATE")) is not None
+    await store.log_line("irc", "#Chan", "Nate", "nate", "hi")
+    assert await store.search("irc", "#CHAN", "hi")
+    assert (await store.last_seen("irc", "NATE")) is not None
 
 
 async def test_watch_is_unique_per_channel(store):
-    assert await store.add_watch("a", "b", "#one", ["releases"], "alice")
-    assert not await store.add_watch("a", "b", "#one", ["commits"], "alice")
-    assert await store.add_watch("a", "b", "#two", ["releases"], "alice")
+    assert await store.add_watch("irc", "a", "b", "#one", ["releases"], "alice")
+    assert not await store.add_watch("irc", "a", "b", "#one", ["commits"], "alice")
+    assert await store.add_watch("irc", "a", "b", "#two", ["releases"], "alice")
     assert len(await store.watches()) == 2
-    assert len(await store.watches("#one")) == 1
+    assert len(await store.watches("irc", "#one")) == 1
 
 
 async def test_removing_a_watch_drops_its_cursors(store):
-    await store.add_watch("a", "b", "#one", ["releases"], "alice")
+    await store.add_watch("irc", "a", "b", "#one", ["releases"], "alice")
     watch = (await store.watches())[0]
     await store.set_cursor(watch.id, "releases", "v1", "etag")
-    await store.remove_watch("a", "b", "#one")
+    await store.remove_watch("irc", "a", "b", "#one")
     assert await store.get_cursor(watch.id, "releases") == ("", "")
 
 
 async def test_prune_drops_only_old_lines(store):
-    await store.log_line("#chan", "nate", "nate", "recent")
+    await store.log_line("irc", "#chan", "nate", "nate", "recent")
     store._db.execute("UPDATE chatlog SET ts = ts - 100 * 86400")
-    await store.log_line("#chan", "nate", "nate", "fresh")
+    await store.log_line("irc", "#chan", "nate", "nate", "fresh")
     assert await store.prune(30) == 1
-    assert [line.text for line in await store.recent("#chan")] == ["fresh"]
+    assert [line.text for line in await store.recent("irc", "#chan")] == ["fresh"]
 
 
 def write(tmp_path, body: str):
@@ -49,38 +49,53 @@ def write(tmp_path, body: str):
 
 
 MINIMAL = """
+[irc]
+enabled = true
+host = "irc.example.net"
 owners = ["alice"]
 channels = ["lobby"]
-[server]
-host = "irc.example.net"
 """
 
 
 def test_minimal_config_loads_with_defaults(tmp_path):
     cfg = config.load(write(tmp_path, MINIMAL))
-    assert cfg.channels == ["#lobby"]
-    assert cfg.server.port == 6697 and cfg.server.tls
+    assert cfg.irc.channels == ["#lobby"]
+    assert cfg.irc.port == 6697 and cfg.irc.tls
     assert cfg.llm.provider == "claude"
     assert cfg.db_path.startswith(str(tmp_path))
+    assert list(cfg.enabled_transports()) == ["irc"]
 
 
-def test_owner_match_is_case_insensitive_but_never_empty(tmp_path):
-    cfg = config.load(write(tmp_path, MINIMAL))
-    assert cfg.is_owner("ALICE")
-    assert not cfg.is_owner("")
-    assert not cfg.is_owner("mallory")
+def test_each_network_keeps_its_own_owners(tmp_path):
+    body = """
+[irc]
+enabled = true
+host = "x"
+owners = ["alice"]
+
+[signal]
+enabled = true
+phone_number = "+15550000000"
+owners = ["+15551234567"]
+"""
+    cfg = config.load(write(tmp_path, body))
+    assert sorted(cfg.enabled_transports()) == ["irc", "signal"]
+    assert cfg.irc.owners == ["alice"] and cfg.signal.owners == ["+15551234567"]
 
 
 @pytest.mark.parametrize(
     "body, message",
     [
-        ('owners = ["a"]\n[server]\nhost = ""\n', "server.host is required"),
-        ('[server]\nhost = "x"\n', "owners is required"),
-        ('owners = ["a"]\nbogus = 1\n[server]\nhost = "x"\n', "unknown keys"),
+        ('[irc]\nenabled = true\nhost = ""\nowners = ["a"]\n', "irc.host is required"),
+        ('[irc]\nenabled = true\nhost = "x"\n', r"\[irc\] owners is required"),
+        ('[llm]\nprovider = "claude"\n', "no transport is enabled"),
+        ('bogus = 1\n[irc]\nenabled = true\nhost = "x"\nowners = ["a"]\n', "unknown keys"),
+        ('owners = ["a"]\n[server]\nhost = "x"\n', r"\[server\] is now \[irc\]"),
         (
-            'owners = ["a"]\n[server]\nhost = "x"\n[llm]\nprovider = "gpt"\n',
+            '[irc]\nenabled = true\nhost = "x"\nowners = ["a"]\n[llm]\nprovider = "gpt"\n',
             "must be one of claude, none, openrouter, xai",
         ),
+        ('[signal]\nenabled = true\nowners = ["a"]\n', "signal.phone_number is required"),
         ("owners = [\n", "c.toml"),
     ],
 )
