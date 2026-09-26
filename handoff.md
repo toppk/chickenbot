@@ -163,28 +163,35 @@ assume a modern network.
 EXCEPTS=e INVEX=I CASEMAPPING=rfc1459 NICKLEN=30 CHANNELLEN=50 TOPICLEN=390
 TARGMAX=PRIVMSG:4,NOTICE:4 NETWORK=Chonkbase`
 
-**Does NOT offer:** `message-tags`, `account-tag`, `batch`, `echo-message`,
-`labeled-response`, `setname`, `chathistory`, `BOT=`, `WHOX`, `MONITOR`,
-`MODES=`, SASL mechanisms beyond PLAIN. No halfops.
+**Does NOT offer:** `batch`, `echo-message`, `labeled-response`, `setname`,
+`chathistory`, `WHOX`, `MONITOR`, `MODES=`, SASL mechanisms beyond PLAIN. No
+halfops.
 
-The source is now in `upstream/chonkline` (gitignored, from
+The source is in `upstream/chonkline` (gitignored, from
 `github.com/iconidentify/chonkline`), so this is checkable rather than probed:
-`SUPPORTED_CAPS` is at `src/cmds.rs:3201`, the `005` line at `src/cmds.rs:852`,
-and the user modes (`i/w/s/o` only, no `+B`) at `src/state.rs:131`. There is no
-`message-tags` and no bot mode, so IRCv3 bot detection cannot work on this
-network in either direction — `ignore_nicks` is it.
+`SUPPORTED_CAPS` at `src/cmds.rs:3201`, the `005` line at `src/cmds.rs:908`.
 
-**The advertised `CASEMAPPING=rfc1459` is a lie.** Every fold in the server is
-Rust's ASCII `to_lowercase()` (`src/channels.rs:25`, `src/state.rs:183-189`,
-`src/network.rs:360`), while `valid_nick` (`src/cmds.rs:446`) admits
-`` [ ] \ { } ^ ` ``. So `nate[m]` and `nate{m}` are two distinct users that can
-both be present, and a client that folds rfc1459 faithfully collapses them into
-one. `chickenbot.toml` therefore pins `casemapping = "ascii"`.
+**All three issues filed on 2026-09-18 were fixed on 2026-09-26** (their commit
+`7906956`, PR #36), so the network is now considerably better than the one this
+bot was designed around:
 
-Consequences already handled: no `account-tag` is why the account fallback
-chain exists; no `WHOX` is why account resolution uses `WHOIS` per member
-rather than `WHO %a`; `chghost` is requested because cloaks change on services
-login and a stale host bans the wrong mask.
+- `CASEMAPPING=rfc1459` is genuinely implemented — `to_lowercase()` is gone from
+  the whole source, replaced by `norm_nick` (`src/state.rs:27`). The
+  `casemapping = "ascii"` pin in `chickenbot.toml` was therefore **removed**;
+  keeping it would have inverted the original bug, with the bot splitting
+  `nate[m]` and `nate{m}` that the server now treats as one nick.
+  Their canonical form is `[]\~` where ours is `{}|^`. Both partition nicks
+  identically and folded keys never cross the wire, so this does not matter.
+- `message-tags` + bot mode (`+B`, `BOT=B`, the `bot` tag) work, so
+  `Client._claim_bot_mode()` now actually fires and `Message.is_bot` gets real
+  data. `ignore_nicks` is no longer the only defence against bot loops; keep it
+  only for bots that do not set `+B`.
+- `account-tag` works, so `Handler.account_for` gets the account inline and the
+  `WHOIS`-per-member fallback is now a fallback rather than the normal path.
+
+Tags are per-recipient on their side: `bot` only reaches clients that negotiated
+`message-tags`, and a logged-out sender is `account=*`, which `Message.account`
+already maps to `""`.
 
 Services are Atheme-style (NickServ/ChanServ, `REGISTER`/`IDENTIFY`).
 User hosts are cloaked.
@@ -220,21 +227,15 @@ is left:
 - xAI is still accepted but its live-search parameters were never implemented,
   so `provider = "xai"` answers without searching.
 
-### Filed upstream against chonkline (2026-09-18)
+### Filed upstream against chonkline — all three fixed (2026-09-26)
 
-Three issues on `github.com/iconidentify/chonkline`. chickenbot needs **no code**
-for any of them — `WANTED_CAPS` already asks for `message-tags` and `account-tag`,
-`_claim_bot_mode()` already fires on `BOT=`, and `Message.is_bot` / `Message.account`
-are tested. All three light up on their deploy.
-
-- [#33](https://github.com/iconidentify/chonkline/issues/33) — `CASEMAPPING=rfc1459`
-  advertised but ASCII folding. Until it moves, `casemapping = "ascii"` in
-  `chickenbot.toml` is the workaround; drop the pin if they fix the folding, keep it
-  if they change the advertisement to `ascii`.
-- [#34](https://github.com/iconidentify/chonkline/issues/34) — `message-tags` plus bot
-  mode (`+B`, `BOT=B`, the `bot` tag). This is what retires `ignore_nicks`.
-- [#35](https://github.com/iconidentify/chonkline/issues/35) — `account-tag`, which
-  retires the WHOIS-per-member fallback. Depends on #34.
+Issues [#33](https://github.com/iconidentify/chonkline/issues/33) (casemapping),
+[#34](https://github.com/iconidentify/chonkline/issues/34) (message-tags + bot
+mode) and [#35](https://github.com/iconidentify/chonkline/issues/35)
+(account-tag) are closed and shipped. chickenbot needed no code for any of them,
+which was the point: the client halves were already written and tested, so they
+lit up on their deploy. The only change on our side was removing the
+`casemapping` pin. See the network section above for what that changed.
 
 Deliberately not asked for, because chickenbot uses none of them: `WHOX`,
 `chathistory`, `echo-message`, `labeled-response`, `batch`, `multiline`, `setname`,
