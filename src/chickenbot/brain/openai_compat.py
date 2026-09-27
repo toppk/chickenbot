@@ -48,12 +48,18 @@ class OpenAICompatProvider:
     async def aclose(self) -> None:
         await self.client.aclose()
 
-    async def reply(self, *, system: str, history: list[Turn], prompt: str, search: bool, toolbox=None) -> str:
+    async def reply(
+        self, *, system: str, history: list[Turn], prompt: str, search: bool, toolbox=None, session: str = ""
+    ) -> str:
         messages: list[dict] = [{"role": "system", "content": system}]
         messages += [{"role": t.role, "content": t.text} for t in history]
         messages.append({"role": "user", "content": prompt})
 
         body: dict = {"model": self.model, "max_tokens": self.cfg.max_tokens, "messages": messages}
+        if session and self.cfg.session_stickiness:
+            # OpenRouter keeps a conversation on one model and provider rather
+            # than re-shopping every turn.
+            body["session_id"] = session
         body.update(self.cfg.body_params)
         if search and self.cfg.search and self.cfg.search_params:
             body.update(self.cfg.search_params)

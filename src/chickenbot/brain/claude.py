@@ -35,7 +35,9 @@ class ClaudeProvider:
     async def aclose(self) -> None:
         await self.client.close()
 
-    async def reply(self, *, system: str, history: list[Turn], prompt: str, search: bool, toolbox=None) -> str:
+    async def reply(
+        self, *, system: str, history: list[Turn], prompt: str, search: bool, toolbox=None, session: str = ""
+    ) -> str:
         messages: list[dict] = [{"role": t.role, "content": t.text} for t in history]
         messages.append({"role": "user", "content": prompt})
 

@@ -127,6 +127,12 @@ class LLMConfig:
         "unless asked for more. If you do not know, say so."
     )
     tools: bool = True
+    # Voice lives in a file so it can be edited without touching the config.
+    # Empty, or a missing file, falls back to `persona`.
+    soul_path: str = "SOUL.md"
+    # OpenRouter keeps a conversation on one model/provider when it is given a
+    # stable id. Harmless elsewhere, but off is one less unknown field.
+    session_stickiness: bool = True
     history_lines: int = 20
     per_user_per_min: int = 4
     # Merged into every openai-compatible request body: OpenRouter's `provider`
@@ -254,6 +260,10 @@ def load(path: str | Path) -> Config:
     providers = {"claude", "openrouter", "xai", "none"}
     if cfg.llm.provider not in providers:
         raise ConfigError(f"llm.provider must be one of {', '.join(sorted(providers))} (got {cfg.llm.provider!r})")
+    if cfg.llm.soul_path:
+        soul = Path(cfg.llm.soul_path)
+        if not soul.is_absolute():
+            cfg.llm.soul_path = str((path.parent / soul).resolve())
     sock = Path(cfg.tools.socket)
     if not sock.is_absolute():
         cfg.tools.socket = str((path.parent / sock).resolve())

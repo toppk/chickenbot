@@ -19,9 +19,11 @@ class StubProvider:
         self.prompts: list[str] = []
         self.toolbox = None
 
-    async def reply(self, *, system, history, prompt, search, toolbox=None):
+    async def reply(self, *, system, history, prompt, search, toolbox=None, session=""):
         self.prompts.append(prompt)
         self.toolbox = toolbox
+        self.session = session
+        self.system = system
         if self.error:
             raise ProviderError(self.error)
         return self.answer

@@ -27,7 +27,14 @@ class Provider(Protocol):
     supports_tools: bool
 
     async def reply(
-        self, *, system: str, history: list[Turn], prompt: str, search: bool, toolbox: ToolBox | None = None
+        self,
+        *,
+        system: str,
+        history: list[Turn],
+        prompt: str,
+        search: bool,
+        toolbox: ToolBox | None = None,
+        session: str = "",
     ) -> str: ...
 
     async def aclose(self) -> None: ...

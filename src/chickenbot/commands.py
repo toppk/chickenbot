@@ -15,6 +15,7 @@ from .config import Config
 from .events import Event, Kind
 from .observe import activity, note
 from .scheduler import MAX_DELAY, describe, parse_delay
+from .soul import Soul
 from .store import Store
 from .tools import ToolBox
 from .transport import BAN, DEOP, DEVOICE, KICK, OP, TOPIC, UNBAN, VOICE, Transport
@@ -92,6 +93,7 @@ class Handler:
         self.provider = provider
         self.watcher = watcher
         self.started = time.time()
+        self.soul = Soul(cfg.llm.soul_path, cfg.llm.persona)
         self.transports: dict[str, Transport] = {}
         self._asks: dict[str, deque[float]] = defaultdict(deque)
 
@@ -323,11 +325,13 @@ async def cmd_ask(h: Handler, ctx: Context) -> None:
     note(llm=h.provider.name)
     try:
         answer = await h.provider.reply(
-            system=h.cfg.llm.persona + SYSTEM_SUFFIX,
+            # The suffix is a safety rail, not personality: the soul may not edit it.
+            system=h.soul.text() + SYSTEM_SUFFIX,
             history=[],
             prompt=prompt,
             search=True,
             toolbox=toolbox,
+            session=f"{ctx.transport.name}:{ctx.channel}",
         )
     except ProviderError as exc:
         note(outcome="llm-error", error=str(exc)[:60])
@@ -520,6 +524,7 @@ async def _dump_engines(h: Handler, ctx: Context) -> list[str]:
             f"tools={'yes' if (h.cfg.llm.tools and supports) else 'no'} "
             f"search={'on' if h.cfg.llm.search else 'off'} history={h.cfg.llm.history_lines}"
         )
+        out.append(f"soul: {h.cfg.llm.soul_path if h.soul.loaded else 'not loaded, using llm.persona'}")
     jobs = await h.store.jobs()
     now = int(time.time())
     soonest = f", next in {describe(min(j.due_at for j in jobs) - now)}" if jobs else ""
