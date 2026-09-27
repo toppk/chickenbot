@@ -139,6 +139,23 @@ class Tool:
 # -- the socket side ------------------------------------------------------
 
 
+async def serve_forever(tool: Tool, socket_path: str) -> None:
+    """Keep the registration up. chickenbot restarting, or not being up yet, is
+    ordinary: the socket simply is not there for a while."""
+    delay = 1.0
+    while True:
+        try:
+            await serve(tool, socket_path)
+            log.info("chickenbot closed the connection")
+            delay = 1.0
+        except (FileNotFoundError, ConnectionError) as exc:
+            log.debug("tool socket unavailable (%s)", type(exc).__name__)
+        except Exception:
+            log.exception("tool connection failed")
+        await asyncio.sleep(delay)
+        delay = min(delay * 2, 30.0)
+
+
 async def serve(tool: Tool, socket_path: str) -> None:
     reader, writer = await asyncio.open_unix_connection(socket_path)
 
@@ -148,7 +165,15 @@ async def serve(tool: Tool, socket_path: str) -> None:
 
     await send({"type": "hello", "v": PROTOCOL, "process": "github", "tools": TOOLS})
     log.info("declared %d tool(s) on %s", len(TOOLS), socket_path)
+    try:
+        await _pump(tool, reader, send)
+    finally:
+        writer.close()
+        with contextlib.suppress(Exception):
+            await writer.wait_closed()
 
+
+async def _pump(tool: Tool, reader: asyncio.StreamReader, send) -> None:
     while line := await reader.readline():
         try:
             message = json.loads(line)
@@ -158,6 +183,8 @@ async def serve(tool: Tool, socket_path: str) -> None:
             log.info("accepted: %s", ", ".join(message.get("accepted", [])) or "none")
             for bad in message.get("rejected", []):
                 log.warning("rejected %s: %s", bad.get("name"), bad.get("reason"))
+        elif message.get("type") == "error":
+            log.warning("chickenbot refused: %s", message.get("reason"))
         elif message.get("type") == "call":
             name = str(message.get("tool", "")).removeprefix("ext_")
             try:
@@ -180,7 +207,7 @@ async def run(args: argparse.Namespace) -> int:
             return 0
         tasks = [asyncio.create_task(tool.poll_forever(args.interval))]
         if args.socket:
-            tasks.append(asyncio.create_task(serve(tool, args.socket)))
+            tasks.append(asyncio.create_task(serve_forever(tool, args.socket)))
         await asyncio.gather(*tasks)
     finally:
         await api.aclose()

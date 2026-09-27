@@ -48,6 +48,25 @@ owner = false
 Without a grant a tool is registered owner-only and may not push events, which
 is the safe default for something that just appeared on the socket.
 
+## Running it persistently
+
+`deploy/github-tool.service` is a systemd **user** unit:
+
+```bash
+mkdir -p ~/.config/systemd/user
+cp deploy/*.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now chickenbot github-tool
+loginctl enable-linger $USER          # survive logout
+journalctl --user -u github-tool -f
+```
+
+No ordering dependency is declared between the two units, deliberately. The
+tool reconnects with backoff whenever the socket appears, so it can start
+before chickenbot, outlive a restart, or sit waiting while the bot is down. It
+keeps polling GitHub either way, so the mirror stays current and the answers
+are ready the moment it re-registers.
+
 ## What it stores
 
 `repo` (stars, open issues, last push), `activity` (commits, issues, PRs,

@@ -292,6 +292,26 @@ others report their room list, because their libraries own that state.
 Output is capped at `MAX_DUMP_LINES` with an "and N more" tail, since each line
 is a separate message and IRC paces sends at `send_interval`.
 
+## External tools
+
+`docs/tool-protocol.md` is the contract; `toolsocket.py` is the bot's side and
+`external/github/` is the first tool. A tool is a separate process that connects
+to a unix socket, declares what it can do, and answers calls — chickenbot never
+learns how it is implemented.
+
+The gating is the part to keep intact: **the tool does not declare its own
+permissions**. It sends a name, a description and an argument schema; the bot
+reads `owner`/`requires`/`emit` from `[tools.grants.<name>]`, and anything
+unlisted is owner-only with no right to push events. Names are prefixed `ext_`
+so nothing can shadow a built-in, and underscores are mandatory because the
+tool-calling schema rejects dots.
+
+Both processes are independent systemd user units (`deploy/`), with **no
+ordering between them**. The tool reconnects with backoff, so it may start
+first, outlive a bot restart, or wait while the bot is down — it keeps polling
+throughout, and re-registers when the socket returns. A test drives a real
+socket through a full bot restart to pin that.
+
 ## Logging
 
 Three levels that matter, set by `log_level` in the toml or `--log-level` /

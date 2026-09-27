@@ -227,3 +227,55 @@ async def test_the_tool_registers_and_answers_over_the_socket(tmp_path, cfg, sto
         await asyncio.gather(tool_task, server_task, return_exceptions=True)
         for name in [n for n in REGISTRY if n.startswith("ext_")]:
             REGISTRY.pop(name, None)
+
+
+async def test_it_reconnects_when_chickenbot_restarts(tmp_path, cfg, store, gh):
+    """The tool outlives the bot: a restart must re-register it, not leave it
+    polling quietly with nothing declared."""
+    from external.github.__main__ import serve_forever
+
+    from chickenbot.commands import Handler
+    from chickenbot.config import ToolsConfig
+    from chickenbot.tools import TOOLS as REGISTRY
+    from chickenbot.toolsocket import ToolServer
+
+    from .conftest import FakeTransport
+
+    handler = Handler(cfg, store, None, None)
+    handler.transports = {"fake": FakeTransport()}
+    sock = tmp_path / "t.sock"
+    cfg_tools = ToolsConfig(enabled=True, socket=str(sock))
+
+    async def wait_for(predicate, tries=200):
+        for _ in range(tries):
+            if predicate():
+                return True
+            await asyncio.sleep(0.01)
+        return False
+
+    # The tool starts first, before there is any socket to connect to.
+    tool_task = asyncio.create_task(serve_forever(gh, str(sock)))
+    await asyncio.sleep(0.05)
+    assert "ext_github_activity" not in REGISTRY
+
+    first = ToolServer(cfg_tools, handler.transports, handler.dispatch)
+    first_task = asyncio.create_task(first.run())
+    assert await wait_for(lambda: "ext_github_activity" in REGISTRY), "never registered"
+
+    # chickenbot goes away.
+    first_task.cancel()
+    await asyncio.gather(first_task, return_exceptions=True)
+    for name in [n for n in REGISTRY if n.startswith("ext_")]:
+        REGISTRY.pop(name, None)
+
+    # ...and comes back. The tool must find it again on its own.
+    second = ToolServer(cfg_tools, handler.transports, handler.dispatch)
+    second_task = asyncio.create_task(second.run())
+    try:
+        assert await wait_for(lambda: "ext_github_activity" in REGISTRY), "did not re-register"
+    finally:
+        for task in (tool_task, second_task):
+            task.cancel()
+        await asyncio.gather(tool_task, second_task, return_exceptions=True)
+        for name in [n for n in REGISTRY if n.startswith("ext_")]:
+            REGISTRY.pop(name, None)

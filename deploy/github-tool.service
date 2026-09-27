@@ -1,0 +1,21 @@
+# The tool is independent of the bot: it starts, stops and restarts on its own,
+# and reconnects to the socket whenever chickenbot happens to be there. No
+# ordering dependency is declared on purpose.
+[Unit]
+Description=chickenbot github tool
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/workspace/chickenbot
+EnvironmentFile=-%h/workspace/chickenbot/.env
+ExecStart=%h/.local/bin/uv run python -m external.github \
+    --socket %h/workspace/chickenbot/chickenbot-tools.sock \
+    --db %h/workspace/chickenbot/github-tool.db \
+    --interval 900
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target
