@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import tomllib
 from dataclasses import dataclass, field
@@ -9,9 +10,36 @@ from pathlib import Path
 
 from . import irccase
 
+log = logging.getLogger(__name__)
+
 
 class ConfigError(Exception):
     pass
+
+
+def load_env(path: Path) -> int:
+    """Read KEY=value lines from a .env beside the config. Never overrides a real
+    environment variable, so `FOO=x chickenbot` still wins."""
+    if not path.is_file():
+        return 0
+    if path.stat().st_mode & 0o077:
+        log.warning("%s is readable by other users; chmod 600 it", path)
+    loaded = 0
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        key, sep, value = line.removeprefix("export ").partition("=")
+        key = key.strip()
+        if not sep or not key:
+            continue
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        if key not in os.environ:
+            os.environ[key] = value
+            loaded += 1
+    return loaded
 
 
 @dataclass(slots=True)
@@ -152,6 +180,11 @@ def _section(data: dict, name: str, cls):
 
 def load(path: str | Path) -> Config:
     path = Path(path)
+    # Secrets live beside the config, not in it. Loaded before any env-backed
+    # property is read.
+    loaded = load_env(path.parent / ".env")
+    if loaded:
+        log.debug("loaded %d values from %s", loaded, path.parent / ".env")
     try:
         data = tomllib.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError as exc:

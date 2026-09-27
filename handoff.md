@@ -309,10 +309,15 @@ The one-time bootstrap, run by the user from their own client:
    an existing op must `+o` you, because `REGISTER` checks `is_op`).
 3. `/msg ChanServ REGISTER #soup`.
 
-Then set `sasl_user = "chickenbot"` and export `CHICKENBOT_SASL_PASSWORD`. SASL
-PLAIN is the only mechanism offered, and that path is covered by a test against
-a real socket (`tests/test_connect.py`). Until this is done, `.op`/`.kick`/
-`.ban`/`.topic` correctly refuse with "i am not opped".
+**Done as of 2026-09-26**: the account exists and `#soup` is registered to it, so
+ChanServ ops the bot on join. `sasl_user = "chickenbot"` is set, and the password
+lives in `.env` beside `chickenbot.toml` as `CHICKENBOT_SASL_PASSWORD` (both
+gitignored). SASL PLAIN is the only mechanism offered, and that path is covered
+by a test against a real socket (`tests/test_connect.py`).
+
+`config.load_env` reads that `.env` before any env-backed property is touched. It
+never overrides a real environment variable, so `FOO=x chickenbot` still wins,
+and it warns when the file is readable by other users.
 
 **No partyline.** Proposed and rejected 2026-09-26. Its purpose — a private
 admin surface — is already served by direct messages, which need no prefix and

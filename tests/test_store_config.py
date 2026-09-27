@@ -1,3 +1,5 @@
+import os
+
 import pytest
 
 from chickenbot import config
@@ -107,3 +109,27 @@ def test_bad_config_is_rejected_with_a_reason(tmp_path, body, message):
 def test_missing_file_is_a_config_error(tmp_path):
     with pytest.raises(config.ConfigError, match="no config file"):
         config.load(tmp_path / "nope.toml")
+
+
+def test_env_file_fills_secrets_without_overriding_the_real_environment(tmp_path, monkeypatch):
+    (tmp_path / ".env").write_text(
+        "# secrets\n"
+        "CHICKENBOT_SASL_PASSWORD=hunter2\n"
+        'export QUOTED="with spaces"\n'
+        "ALREADY_SET=from-file\n"
+        "\n"
+        "not-a-pair\n"
+    )
+    monkeypatch.setenv("ALREADY_SET", "from-shell")
+    monkeypatch.delenv("CHICKENBOT_SASL_PASSWORD", raising=False)
+    monkeypatch.delenv("QUOTED", raising=False)
+
+    cfg = config.load(write(tmp_path, MINIMAL))
+    assert cfg.irc.sasl_password == "hunter2"
+    assert os.environ["QUOTED"] == "with spaces"
+    # A real environment variable wins over the file.
+    assert os.environ["ALREADY_SET"] == "from-shell"
+
+
+def test_missing_env_file_is_not_an_error(tmp_path):
+    assert config.load_env(tmp_path / "nope.env") == 0
