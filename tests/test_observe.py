@@ -136,3 +136,19 @@ async def test_an_ordinary_command_still_says_ran(handler, transport, caplog):
     with caplog.at_level(logging.INFO):
         await send(handler, transport, "!uptime")
     assert "outcome=ran" in lines(caplog)[0]
+
+
+async def test_an_ask_logs_the_same_either_way(cfg, transport, store, caplog):
+    """`.ask foo` and `chickenbot: foo` are the same work; they should read alike."""
+    from .test_commands import StubProvider
+
+    handler = Handler(cfg, store, StubProvider("42"), None)
+    with caplog.at_level(logging.INFO):
+        await send(handler, transport, "!ask what is six by seven")
+        await send(handler, transport, "chickenbot: what is six by seven")
+
+    typed, addressed = lines(caplog)
+    for line in (typed, addressed):
+        assert "command=ask" in line
+        assert "outcome=answered" in line
+        assert "owner=false" in line

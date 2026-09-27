@@ -190,8 +190,11 @@ class Handler:
 
         if cmd is None:
             # Addressed by name with no command word: send the lot to the model.
+            # Logged as `ask` like the typed command, so the same work reads the
+            # same way however it arrived.
             if not env.text.startswith(self.cfg.prefix):
                 ctx.args = body
+                note(command="ask", owner=ctx.is_owner)
                 await cmd_ask(self, ctx)
             else:
                 note(outcome="no-such-command", command=name)
