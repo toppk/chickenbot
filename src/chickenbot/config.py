@@ -136,6 +136,31 @@ class LLMConfig:
     search_params: dict = field(default_factory=dict)
 
 
+@dataclass(frozen=True, slots=True)
+class Grant:
+    """What an external tool is allowed to be. The tool never sets these."""
+
+    owner: bool = True  # unconfigured tools are owner-only
+    requires: tuple[str, ...] = ()
+    emit: tuple[str, ...] = ()  # "transport:room" it may push events to
+
+
+@dataclass(slots=True)
+class ToolsConfig:
+    enabled: bool = False
+    socket: str = "chickenbot-tools.sock"
+    # tool name -> {owner, requires, emit}; anything unlisted is owner-only.
+    grants: dict = field(default_factory=dict)
+
+    def grant(self, name: str) -> Grant:
+        raw = self.grants.get(name) or {}
+        return Grant(
+            owner=bool(raw.get("owner", True)),
+            requires=tuple(raw.get("requires", ())),
+            emit=tuple(raw.get("emit", ())),
+        )
+
+
 @dataclass(slots=True)
 class GitHubConfig:
     enabled: bool = True
@@ -161,6 +186,7 @@ class Config:
     telegram: TelegramConfig = field(default_factory=TelegramConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
     github: GitHubConfig = field(default_factory=GitHubConfig)
+    tools: ToolsConfig = field(default_factory=ToolsConfig)
 
     def enabled_transports(self) -> dict:
         found = {n: getattr(self, n) for n in ("irc", "signal", "discord", "telegram")}
@@ -209,6 +235,7 @@ def load(path: str | Path) -> Config:
         telegram=_section(data, "telegram", TelegramConfig),
         llm=_section(data, "llm", LLMConfig),
         github=_section(data, "github", GitHubConfig),
+        tools=_section(data, "tools", ToolsConfig),
     )
 
     if not cfg.enabled_transports():
@@ -227,6 +254,9 @@ def load(path: str | Path) -> Config:
     providers = {"claude", "openrouter", "xai", "none"}
     if cfg.llm.provider not in providers:
         raise ConfigError(f"llm.provider must be one of {', '.join(sorted(providers))} (got {cfg.llm.provider!r})")
+    sock = Path(cfg.tools.socket)
+    if not sock.is_absolute():
+        cfg.tools.socket = str((path.parent / sock).resolve())
     # Paths in the toml are relative to the toml, not the working directory.
     db = Path(cfg.db_path)
     if not db.is_absolute():

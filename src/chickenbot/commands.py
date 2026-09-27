@@ -110,6 +110,9 @@ class Handler:
                 await self._run_scheduled(event)
             elif event.kind is Kind.MODE:
                 await self._handle_change(event)
+            elif event.kind is Kind.FEED:
+                note(outcome="announced", source=event.sender)
+                event.transport.say(event.room, event.text)
             else:
                 await self._handle_message(event)
 

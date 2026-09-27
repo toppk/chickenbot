@@ -15,6 +15,7 @@ from .commands import Handler
 from .observe import TRACE
 from .scheduler import Scheduler
 from .store import Store
+from .toolsocket import ToolServer
 from .transport import Transport
 from .transports import build
 from .watcher import Watcher
@@ -96,6 +97,8 @@ async def run(cfg: config.Config) -> int:
     tasks = [asyncio.create_task(supervise(tr), name=f"tr:{name}") for name, tr in transports.items()]
     tasks.append(asyncio.create_task(prune_daily(store, cfg.chatlog_days), name="prune"))
     tasks.append(asyncio.create_task(scheduler.run(), name="scheduler"))
+    if cfg.tools.enabled:
+        tasks.append(asyncio.create_task(ToolServer(cfg.tools, transports, handler.dispatch).run(), name="toolsock"))
     if watcher is not None:
         tasks.append(asyncio.create_task(watcher.run(), name="watcher"))
 
