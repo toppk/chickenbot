@@ -238,3 +238,30 @@ async def test_a_direct_message_says_so(cfg, transport, store):
     handler = Handler(cfg, store, provider, None)
     await send(handler, transport, "hello there", room="nate", is_group=False)
     assert "kind=direct message" in provider.prompts[-1]
+
+
+async def test_the_bot_remembers_what_it_said(cfg, transport, store):
+    """Without this every follow-up reaches the model as a cold start."""
+    import asyncio
+
+    handler = Handler(cfg, store, StubProvider("the kettle is fine"), None)
+    await send(handler, transport, "!ask is the kettle broken")
+    await asyncio.sleep(0)  # the write is fire-and-forget
+
+    recent = [line.text for line in await store.recent("fake", "#chan")]
+    assert "!ask is the kettle broken" in recent
+    assert "nate: the kettle is fine" in recent
+
+
+async def test_a_follow_up_sees_the_previous_exchange(cfg, transport, store):
+    import asyncio
+
+    provider = StubProvider("42")
+    handler = Handler(cfg, store, provider, None)
+    await send(handler, transport, "chickenbot: what is six by seven")
+    await asyncio.sleep(0)
+    await send(handler, transport, "chickenbot: are you sure")
+
+    prompt = provider.prompts[-1]
+    assert "what is six by seven" in prompt
+    assert "nate: 42" in prompt  # its own answer is in the scrollback

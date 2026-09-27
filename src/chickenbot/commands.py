@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import shlex
@@ -38,9 +39,14 @@ class Context:
     args: str
     is_owner: bool
     in_channel: bool
+    handler: Handler | None = None
 
     def say(self, text: str) -> None:
         self.transport.say(self.channel, text)
+        # Logged too, or the bot cannot see what it just said and every
+        # follow-up arrives as a cold start.
+        if self.handler is not None:
+            self.handler.remember_own(self.transport, self.channel, text)
 
     def can(self, action: str) -> bool:
         return action in self.transport.caps
@@ -94,6 +100,7 @@ class Handler:
         self.watcher = watcher
         self.started = time.time()
         self.soul = Soul(cfg.llm.soul_path, cfg.llm.persona)
+        self._writes: set[asyncio.Task] = set()
         self.transports: dict[str, Transport] = {}
         self._asks: dict[str, deque[float]] = defaultdict(deque)
 
@@ -131,9 +138,16 @@ class Handler:
             return
         await self._invoke(cmd, ctx)
 
+    def remember_own(self, tr: Transport, room: str, text: str) -> None:
+        """Fire and forget: the reply has already gone out, logging must not block it."""
+        task = asyncio.create_task(self.store.log_line(tr.name, room, tr.me, "", text, "self"))
+        self._writes.add(task)
+        task.add_done_callback(self._writes.discard)
+
     def _context(self, event: Event, args: str) -> Context:
         tr = event.transport
         return Context(
+            handler=self,
             transport=tr,
             nick=event.sender,
             account=event.account,

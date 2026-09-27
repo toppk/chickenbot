@@ -14,6 +14,7 @@ from . import brain, config
 from .commands import Handler
 from .observe import TRACE
 from .scheduler import Scheduler
+from .soul import seed as seed_soul
 from .store import Store
 from .toolsocket import ToolServer
 from .transport import Transport
@@ -71,6 +72,7 @@ async def run(cfg: config.Config) -> int:
         tr = transports.get(name)
         return tr.fold(text) if tr else text.casefold()
 
+    seed_soul(cfg.llm.soul_path)
     store = Store(cfg.db_path, fold)
     handler = Handler(cfg, store, provider, None)
     handler.transports = transports

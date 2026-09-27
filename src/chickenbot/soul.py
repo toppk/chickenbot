@@ -16,6 +16,26 @@ log = logging.getLogger(__name__)
 MAX_CHARS = 8000
 
 
+TEMPLATE = Path(__file__).resolve().parent.parent.parent / "docs" / "templates" / "SOUL.md"
+
+
+def seed(path: str | Path) -> bool:
+    """Copy the template into place on first run. Called once at startup, never
+    from `Soul` itself: the bot writing its own soul is the thing we avoid, and
+    a silent write from a read path would blur that line."""
+    target = Path(path)
+    if target.exists() or not TEMPLATE.is_file():
+        return False
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(TEMPLATE.read_text(encoding="utf-8"), encoding="utf-8")
+        log.info("seeded %s from the shipped template; it is yours to edit now", target)
+        return True
+    except OSError as exc:
+        log.warning("could not seed %s: %s", target, exc)
+        return False
+
+
 class Soul:
     def __init__(self, path: str | Path, fallback: str) -> None:
         self.path = Path(path)

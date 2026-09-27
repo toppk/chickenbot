@@ -199,7 +199,9 @@ class Store:
         def go() -> list[Line]:
             rows = self._db.execute(
                 "SELECT ts, channel, nick, text FROM chatlog"
-                " WHERE transport = ? AND channel = ? AND kind = 'privmsg' ORDER BY id DESC LIMIT ?",
+                " WHERE transport = ? AND channel = ?"
+                " AND kind IN ('privmsg', 'command', 'self')"  # what was said, to and by the bot
+                " ORDER BY id DESC LIMIT ?",
                 (transport, self.fold(transport, channel), limit),
             ).fetchall()
             return [Line(r["ts"], r["channel"], r["nick"], r["text"]) for r in reversed(rows)]

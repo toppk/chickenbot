@@ -106,11 +106,37 @@ async def test_the_session_is_stable_per_room(cfg, transport, store, spy):
     assert spy.session == "fake:#other"
 
 
-def test_the_shipped_soul_is_loadable():
-    from pathlib import Path
+def test_the_shipped_template_is_loadable():
+    from chickenbot.soul import TEMPLATE
 
-    shipped = Path(__file__).resolve().parent.parent / "SOUL.md"
-    soul = Soul(shipped, "fallback")
+    soul = Soul(TEMPLATE, "fallback")
     text = soul.text()
     assert soul.loaded and len(text) > 200
     assert "chickenbot" in text
+
+
+def test_first_run_seeds_an_instance_from_the_template(tmp_path):
+    """The template is committed; the instance is the user's and gitignored."""
+    from chickenbot.soul import seed
+
+    target = tmp_path / "data" / "soul.md"
+    assert seed(target) is True
+    assert target.is_file()
+    assert "chickenbot" in Soul(target, "fallback").text()
+
+
+def test_seeding_never_overwrites_an_edited_soul(tmp_path):
+    from chickenbot.soul import seed
+
+    target = tmp_path / "data" / "soul.md"
+    target.parent.mkdir(parents=True)
+    target.write_text("mine, edited")
+    assert seed(target) is False
+    assert Soul(target, "fallback").text() == "mine, edited"
+
+
+def test_reading_a_soul_never_writes_one(tmp_path):
+    """Seeding is an explicit startup step, not a side effect of reading."""
+    target = tmp_path / "soul.md"
+    assert Soul(target, "fallback").text() == "fallback"
+    assert not target.exists()

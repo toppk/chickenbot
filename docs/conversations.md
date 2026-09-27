@@ -1,0 +1,128 @@
+# Conversations — design notes
+
+**Status: work in progress.** Written 2026-09-27 from a design discussion.
+Parts one and two are built; the rest is agreed in shape, not in detail.
+
+The problem this addresses: chickenbot answered one question at a time and
+forgot everything, including what it had just said. Asked to set a channel
+topic, it replied "what should it say?", and the next message — "make it up" —
+arrived with an empty scrollback, so it answered something unrelated. That is
+not a model failure, it is missing state.
+
+## 1. The bot is part of the conversation — built
+
+The bot logs its own replies as `kind='self'`, and the scrollback handed to the
+model includes `privmsg`, `command` and `self` lines. Before this it saw only
+other people's ordinary chat: not the question it was asked, and not its own
+answer.
+
+`search` still filters to `privmsg` alone, deliberately — `.history kettle`
+must not match the `.history kettle` that asked for it.
+
+## 2. Where state lives — built
+
+Committed:
+
+```
+docs/templates/SOUL.md     the shipped persona, a starting point
+```
+
+Written at runtime, gitignored:
+
+```
+data/soul.md               this bot's voice; seeded from the template once,
+                           then yours. The bot never writes it again.
+data/others/<id>.md        per-participant dossier            (planned)
+data/conversations/...     exported conversation trees        (planned)
+chickenbot.db              the record: chat log, watches, jobs
+```
+
+Seeding happens once at startup, never from a read path. The bot writing its
+own soul is the thing being avoided; a silent write from inside `Soul.text()`
+would blur that line.
+
+## 3. Attention — planned
+
+Being addressed by name should not be the only way in. A group conversation
+carries on, and other people join it.
+
+The rule, roughly:
+
+- **Enter** on being addressed by name, or by the command prefix.
+- **While engaged**, messages in that room are candidates, whether or not they
+  name the bot — from the person who addressed it, and from anyone else who
+  joins in, because it is a group chat and the original asker is not the only
+  participant.
+- **Wait for a pause.** Around five seconds of quiet before sending anything,
+  so a burst of typing is one exchange rather than three. This also batches the
+  round trips.
+- **Leave** after roughly sixty seconds without the bot being addressed again,
+  or after a few consecutive turns it chose not to answer.
+
+Only then does the model see it, in **one call** that both decides and answers:
+it replies, or it emits a silence sentinel and nothing is sent. A separate
+"probability this is for me" call was considered and rejected — it is a round
+trip to decide whether to make a round trip, and the model has to read the same
+context either way.
+
+The point of the local rules is that the cheap, obvious cases never reach the
+model at all. Idle room, nobody talking to it, a burst still in progress: all
+decided locally, for nothing.
+
+Open questions:
+
+- Does a silence still count as a turn for the leave rule? Probably yes.
+- Should the bot re-enter on its own name appearing in the middle of a
+  sentence, or only at the start? Currently only at the start.
+- Per-room state, or per-room-per-person?
+
+## 4. Participant dossiers — planned
+
+Two kinds of thing are worth keeping about a person:
+
+- **Permanent facts.** Their timezone, what they work on, their GitHub handle,
+  how they like to be addressed. Slow-changing, worth carrying across months.
+- **Temporary activity.** What they are working on this week, what they asked
+  about yesterday, what they are stuck on. Decays.
+
+Both in `data/others/<id>.md`, one file per participant, keyed by the
+authenticated account rather than the nick — nicks are transient and the
+account is the identity everything else already keys on. The file is markdown
+so it can be read and corrected by hand.
+
+Extraction is another **one call**: after a conversation, ask the model to
+report permanent facts and temporary activities it observed. It proposes; the
+file is the bot's to write here, unlike the soul, because a dossier is
+observation rather than identity.
+
+Open questions:
+
+- What stops a dossier growing without bound? Probably: the model rewrites the
+  whole file rather than appending, with a size cap.
+- Untrusted input is the hazard again. A participant can state "facts" about
+  themselves, and about other people. Dossiers should record *who claimed
+  what*, not launder claims into facts.
+- When is extraction triggered? End of an engagement seems natural.
+
+## 5. Exploring the record — planned
+
+sqlite stays the single source of truth. Maintaining a live file mirror
+alongside it means two things to keep in sync and one of them silently wrong.
+
+What is wanted instead is **good tooling over the database**:
+
+- A CLI that makes the log as easy to walk as a directory — list rooms, list
+  days, read a day, follow a conversation.
+- An **export** that explodes the database into
+  `data/conversations/<transport>/<room>/<date>.jsonl` (or markdown) on demand.
+  A snapshot, run when wanted, not a mirror maintained in real time.
+
+## Principles carried over
+
+- The model proposes; deterministic code decides. Authority checks run after
+  the model has spoken, never as something it can talk its way through.
+- Scrollback, tool output and anything a participant says are data, never
+  instructions.
+- Anything the bot can be talked into writing is a durable injection surface.
+  That is why the soul is read-only to it, and why dossiers must attribute
+  rather than assert.

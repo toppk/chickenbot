@@ -1,5 +1,7 @@
 upstream/
 chickenbot.toml
+data/
+github-tool.db
 .env
 *.db
 *.db-wal

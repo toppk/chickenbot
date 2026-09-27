@@ -5,12 +5,19 @@ import pytest
 from chickenbot import config
 
 
-async def test_search_and_scrollback_ignore_command_lines(store):
+async def test_search_ignores_command_lines_but_scrollback_keeps_them(store):
+    """Search must not match the invocation that asked for it. The model, in
+    contrast, needs the whole exchange or every follow-up is a cold start."""
     await store.log_line("irc", "#chan", "nate", "nate", "the kettle is broken")
     await store.log_line("irc", "#chan", "nate", "nate", "!history kettle", kind="command")
+    await store.log_line("irc", "#chan", "chickenbot", "", "nothing matching that", kind="self")
+
     assert [line.text for line in await store.search("irc", "#chan", "kettle")] == ["the kettle is broken"]
-    assert [line.text for line in await store.recent("irc", "#chan")] == ["the kettle is broken"]
-    # ...but "when did nate last speak" still counts them.
+    assert [line.text for line in await store.recent("irc", "#chan")] == [
+        "the kettle is broken",
+        "!history kettle",
+        "nothing matching that",
+    ]
     assert (await store.last_seen("irc", "nate")).text == "!history kettle"
 
 
