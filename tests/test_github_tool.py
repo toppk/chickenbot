@@ -362,3 +362,18 @@ def test_repo_output_spells_stars_rather_than_using_an_asterisk(gh):
     )
     out = gh.github_repos({"user": "toppk"})
     assert "4 stars" in out and "4*" not in out
+
+
+def test_a_fresh_mirror_is_not_refetched_on_startup(gh):
+    """Restarting to debug something should not cost an API call per user."""
+    gh.store.set_cursor("user:toppk", "", int(time.time()) - 60)
+    assert gh.due_in(900) == pytest.approx(840, abs=2)
+
+
+def test_a_stale_mirror_polls_at_once(gh):
+    gh.store.set_cursor("user:toppk", "", int(time.time()) - 5000)
+    assert gh.due_in(900) == 0
+
+
+def test_an_empty_mirror_polls_at_once(gh):
+    assert gh.due_in(900) == 0

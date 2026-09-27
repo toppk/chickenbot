@@ -119,11 +119,22 @@ class Tool:
             log.info("recorded %d new item(s)", fresh)
         return fresh
 
+    def due_in(self, seconds: int) -> int:
+        """Seconds until the next poll is actually due. The mirror is on disk, so
+        restarting is not a reason to re-fetch what we already have -- debugging
+        a socket problem should not cost eight API calls a restart."""
+        last = max((self.store.cursor(f"user:{u}")[1] for u in self.users), default=0)
+        return max(0, int(last + seconds - time.time())) if last else 0
+
     async def poll_forever(self, seconds: int) -> None:
+        wait = self.due_in(seconds)
+        if wait:
+            log.info("mirror is still fresh, next poll in %ds", wait)
         while True:
+            await asyncio.sleep(wait)
             with contextlib.suppress(Exception):
                 await self.poll_once()
-            await asyncio.sleep(seconds)
+            wait = seconds
 
     # -- tool calls --------------------------------------------------------
 

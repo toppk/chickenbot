@@ -76,7 +76,7 @@ Open questions:
   sentence, or only at the start? Currently only at the start.
 - Per-room state, or per-room-per-person?
 
-## 4. Participant dossiers — planned
+## 4. Participant dossiers — half built
 
 Two kinds of thing are worth keeping about a person:
 
@@ -90,18 +90,30 @@ authenticated account rather than the nick — nicks are transient and the
 account is the identity everything else already keys on. The file is markdown
 so it can be read and corrected by hand.
 
-Extraction is another **one call**: after a conversation, ask the model to
-report permanent facts and temporary activities it observed. It proposes; the
-file is the bot's to write here, unlike the soul, because a dossier is
-observation rather than identity.
+**Built: the read side.** `dossier.py` loads `data/others/<account>.md` for
+whoever is asking, plus anyone the conversation names by that filename, and
+puts them in a `<known_people>` block ahead of the scrollback. Capped at four
+people and 1200 characters each; names are checked before they reach the
+filesystem. Files are hand-written, so what is in them is trusted in a way
+scrollback is not.
+
+Starting from the read side was deliberate: owner-written notes have none of
+the hazards below, and they are immediately useful. The first one records that
+the IRC account `chrisk` is GitHub `iconidentify`, which the model could not
+otherwise know and would have no way to guess.
+
+**Not built: extraction.** The intended shape is another **one call** — after a
+conversation, ask the model to report permanent facts and temporary activities
+it observed, and write those to the file. That is where the hazards are.
 
 Open questions:
 
 - What stops a dossier growing without bound? Probably: the model rewrites the
   whole file rather than appending, with a size cap.
-- Untrusted input is the hazard again. A participant can state "facts" about
-  themselves, and about other people. Dossiers should record *who claimed
-  what*, not launder claims into facts.
+- Untrusted input is the hazard. A participant can state "facts" about
+  themselves, and about other people. An extracted dossier must record *who
+  claimed what*, not launder claims into facts — and it must not be able to
+  overwrite an owner-written line.
 - When is extraction triggered? End of an engagement seems natural.
 
 ## 5. Exploring the record — planned

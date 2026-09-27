@@ -10,9 +10,11 @@ import time
 from collections import defaultdict, deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from pathlib import Path
 
 from .brain import Provider, ProviderError
 from .config import Config
+from .dossier import Dossiers
 from .events import Event, Kind
 from .observe import activity, note, note_default
 from .scheduler import MAX_DELAY, describe, parse_delay
@@ -100,6 +102,7 @@ class Handler:
         self.watcher = watcher
         self.started = time.time()
         self.soul = Soul(cfg.llm.soul_path, cfg.llm.persona)
+        self.dossiers = Dossiers(Path(cfg.data_dir) / "others")
         self._writes: set[asyncio.Task] = set()
         self.transports: dict[str, Transport] = {}
         self._asks: dict[str, deque[float]] = defaultdict(deque)
@@ -330,11 +333,12 @@ async def cmd_ask(h: Handler, ctx: Context) -> None:
     # stable prefix stays cacheable.
     where = "group" if ctx.in_channel else "direct message"
     situation = f"<context>network={ctx.transport.name} room={ctx.channel} kind={where} asking={ctx.nick}</context>"
-    prompt = f"{situation}\n\n{ctx.args}"
+    # Owner-written notes about whoever is here. Trusted, unlike scrollback.
+    people = h.dossiers.block(account=ctx.account, text=f"{ctx.args} {scrollback}")
+    head = "\n".join(part for part in (situation, people) if part)
+    prompt = f"{head}\n\n{ctx.args}"
     if scrollback:
-        prompt = (
-            f"{situation}\n<channel_scrollback>\n{scrollback}\n</channel_scrollback>\n\n{ctx.nick} asks: {ctx.args}"
-        )
+        prompt = f"{head}\n<channel_scrollback>\n{scrollback}\n</channel_scrollback>\n\n{ctx.nick} asks: {ctx.args}"
 
     toolbox = None
     if h.cfg.llm.tools and getattr(h.provider, "supports_tools", False):
