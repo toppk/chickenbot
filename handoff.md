@@ -421,6 +421,86 @@ The honest trade: certificates bring expiry, rotation and backup, and a bot that
 silently stops authenticating when one lapses. A password in an env var is
 simpler to operate and easier to steal.
 
+### Halloy channel-list bug — a report to file, not code to write
+
+Found 2026-09-26 while testing chonkbase with Halloy (`upstream/halloy`,
+gitignored, from `github.com/squidowl/halloy`). Nothing here touches chickenbot;
+it is recorded so the analysis is not redone.
+
+**The user files this themselves.** They consider the project hostile to
+AI-generated contributions. Do not open it, and do not comment on it.
+
+Two judgement calls were deliberately left to them: the repro uses `/raw LIST`
+because that is what actually happened, which invites "unsupported path" as a
+deflection — `/list` reaches the same state once the five minute cache expires,
+and saying so may be worth it. And a second finding was left out to keep the
+argument clean: unsolicited LIST output still stamps `Status::Updated`, so one
+stray `/raw LIST` flips a server without SAFELIST from never-auto-fetching into
+auto-fetching whenever the cache goes stale.
+
+The draft, as approved:
+
+> **Title:** Channel list never removes channels, and can't be refreshed once it
+> has content
+>
+> The channel discovery pane only ever adds channels. Nothing removes them.
+>
+> Repro, against a small server where I could control the channel set:
+>
+> 1. Open the channel list — shows `#cardboard` and `#lobby`
+> 2. `/join #soup` (didn't exist, so joining creates it)
+> 3. `/raw LIST` — server returns `#cardboard`, `#soup`, `#lobby`. Pane picks up `#soup`
+> 4. `/part #soup` — it's empty now, so it stops existing
+> 5. `/raw LIST` — server returns `#cardboard` and `#lobby`. **Pane still shows `#soup` with 1 user**
+>
+> I checked the protocol log; the server's three responses were all correct, each
+> properly bracketed with `321`/`323`.
+>
+> In the code, `RPL_LIST` goes to `Manager::push`, which is `channels.insert(...)`
+> — an upsert (`data/src/channel_discovery.rs:42`). `RPL_LISTSTART` only sets
+> `status = Receiving(now)` (`data/src/client.rs:1519`), so it's a liveness
+> timestamp rather than a snapshot boundary. `Manager::clear()` exists at
+> `channel_discovery.rs:33` but has no callers anywhere. The map grows for the
+> life of the process.
+>
+> The naive fix is wrong, which I assume is why it's like this. You can't clear on
+> `321` or on the first `322`, because a filtered list is a partial answer —
+> `LIST >10` or `LIST #dev*` would wipe everything that didn't match. Halloy's own
+> `/list` is always unfiltered (no args, `command.rs:1568`, always sends
+> `Irc::List(None, None)`), but `/raw LIST` can carry anything, and on a bouncer
+> you can receive LIST output you never asked for.
+>
+> So the real question is whether a given `321…323` block is complete, and whether
+> it's yours.
+>
+> **With labeled-response** that's answerable exactly. Libera supports it, as do
+> InspIRCd, UnrealIRCd and Ergo. Tag the request, get the response back
+> attributable. That allows:
+>
+> - a full `LIST` you sent is authoritative — clear and replace
+> - `LIST #chan` on join/part to update one channel, where absence from the reply
+>   means it's gone
+> - a `/list --refresh` that skips the five minute cache
+>
+> Halloy already requests `labeled-response` and `batch`
+> (`data/src/capabilities.rs:460,484`), so negotiation is done.
+>
+> Concurrency is what makes labels necessary rather than merely tidy here: if a
+> join fires `LIST #soup` while a full refresh is still streaming, two unlabeled
+> blocks interleave with nothing to distinguish them.
+>
+> **Without labeled-response** most of the value is still reachable.
+> `Status::Requested` is already set when Halloy sends its own LIST
+> (`client.rs:726`), and that request is unfiltered by construction. So accumulate
+> into a staging map and swap it in on `323` when the block follows your own
+> request; merge without evicting otherwise. That fixes the repro above on any
+> server, and swapping on `323` also stops the pane flickering empty mid-fetch.
+>
+> Related, possibly separate: there's no way to force a refresh once the pane has
+> content. `send_list_command` skips the freshness check, but its only UI caller
+> is the "Request channel list anyway" button, which renders only when the list is
+> empty (`channel_discovery.rs:170`).
+
 ## Unrelated, but worth doing
 
 The user's WeeChat config stores a NickServ password in cleartext in a
