@@ -124,6 +124,14 @@ and from `367`/`346`/`348` on join (the client asks for `MODE #chan +b` when it
 joins). Before 2026-09-27 every non-prefix mode was parsed and discarded, so the
 bot could not see a ban at all.
 
+**`.tool` is the human door to the same capability.** `.tool` lists what you may
+call, `.tool <name> key=value ...` runs it. The command itself is *open*: it
+builds a `ToolBox` from the caller's `Context`, so the per-tool owner and
+capability gates decide, and a non-owner typing `.tool chan_kick` gets the same
+refusal the model would. Values coerce (`true` -> bool, digits -> int), quotes
+hold spaces, and a leading `{` is parsed as JSON. It is how an external tool is
+exercised without a model configured.
+
 **Tool authorisation follows the asking user, never the bot.** `ToolBox` is
 constructed per request from the `Context` of whoever addressed the bot, and the
 provider only ever receives that bound object — it cannot widen the rights. An

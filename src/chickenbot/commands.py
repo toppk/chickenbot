@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import logging
+import shlex
 import time
 from collections import defaultdict, deque
 from collections.abc import Awaitable, Callable
@@ -554,3 +556,45 @@ async def cmd_dump(h: Handler, ctx: Context) -> None:
         ctx.say(line)
     if len(lines) > MAX_DUMP_LINES:
         ctx.say(f"... and {len(lines) - MAX_DUMP_LINES} more")
+
+
+def parse_tool_args(text: str) -> dict:
+    """key=value pairs, or a JSON object. Values coerce to bool/int where they
+    obviously are, because `summarize=true` should not arrive as a string."""
+    text = text.strip()
+    if text.startswith("{"):
+        parsed = json.loads(text)
+        if not isinstance(parsed, dict):
+            raise ValueError("not an object")
+        return parsed
+    args: dict = {}
+    for token in shlex.split(text):
+        key, sep, value = token.partition("=")
+        if not sep:
+            raise ValueError(f"{token!r} is not key=value")
+        lowered = value.lower()
+        if lowered in ("true", "false"):
+            args[key] = lowered == "true"
+        elif value.lstrip("-").isdigit():
+            args[key] = int(value)
+        else:
+            args[key] = value
+    return args
+
+
+@command("tool", usage="tool [name] [key=value ...]", blurb="run a tool directly, without the model")
+async def cmd_tool(h: Handler, ctx: Context) -> None:
+    from .tools import ToolBox
+
+    box = ToolBox(h, ctx)
+    name, _, rest = ctx.args.partition(" ")
+    if not name:
+        usable = [s["function"]["name"] for s in box.schemas]
+        ctx.say(f"{ctx.nick}: " + (", ".join(usable) if usable else "no tools you can use here"))
+        return
+    try:
+        args = parse_tool_args(rest)
+    except ValueError as exc:
+        ctx.say(f"{ctx.nick}: bad arguments ({exc})")
+        return
+    ctx.say(f"{ctx.nick}: {await box.run(name, args)}")
