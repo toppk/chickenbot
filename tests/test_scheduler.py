@@ -16,7 +16,7 @@ def handler(cfg, store) -> Handler:
 
 
 async def send(h, tr, text, **kw):
-    await h.on_message(tr, tr.envelope(text, **kw))
+    await h.dispatch(tr.envelope(text, **kw))
 
 
 @pytest.mark.parametrize(
@@ -70,14 +70,14 @@ async def test_round_trip_schedule_list_and_cancel(handler, transport, store):
 async def test_one_owner_cannot_cancel_anothers_job(handler, store):
     """Owner-only gates who may schedule; the account gate decides whose job it is."""
     two = FakeTransport(owners=["alice", "bob"])
-    await handler.on_message(two, two.envelope("!in 5m say hi", account="alice"))
+    await handler.dispatch(two.envelope("!in 5m say hi", account="alice"))
     two.sent.clear()
 
-    await handler.on_message(two, two.envelope("!unschedule 1", sender="bob", account="bob"))
+    await handler.dispatch(two.envelope("!unschedule 1", sender="bob", account="bob"))
     assert "no job 1 of yours" in two.said()[0]
     assert len(await store.jobs()) == 1
 
-    await handler.on_message(two, two.envelope("!unschedule 1", sender="alice", account="alice"))
+    await handler.dispatch(two.envelope("!unschedule 1", sender="alice", account="alice"))
     assert len(await store.jobs()) == 0
 
 

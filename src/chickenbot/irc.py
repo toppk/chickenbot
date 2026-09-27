@@ -178,6 +178,8 @@ class Channel:
         self.members: dict[str, set[str]] = {}
         self.hosts: dict[str, str] = {}
         self.topic = ""
+        self.modes: set[str] = set()  # simple channel modes, e.g. i m n t
+        self.lists: dict[str, set[str]] = {"b": set(), "e": set(), "I": set()}
         self.fold = fold
 
     def add(self, nick: str, modes: set[str] | None = None) -> None:
@@ -194,6 +196,10 @@ class Channel:
         host = self.hosts.pop(self.fold(old), None)
         if host is not None:
             self.hosts[self.fold(new)] = host.replace(old, new, 1)
+
+    @property
+    def bans(self) -> set[str]:
+        return self.lists["b"]
 
     def has_mode(self, nick: str, mode: str) -> bool:
         return mode in self.members.get(self.fold(nick), set())
@@ -408,6 +414,15 @@ class Client:
                 self._claim_bot_mode()
             case "353":
                 self._handle_names(msg)
+            case "367":  # RPL_BANLIST - <me> <chan> <mask> ...
+                if len(msg.params) >= 3:
+                    self._channel(msg.params[1]).lists["b"].add(msg.params[2])
+            case "348":  # RPL_EXCEPTLIST
+                if len(msg.params) >= 3:
+                    self._channel(msg.params[1]).lists["e"].add(msg.params[2])
+            case "346":  # RPL_INVITELIST
+                if len(msg.params) >= 3:
+                    self._channel(msg.params[1]).lists["I"].add(msg.params[2])
             case "332":
                 if len(msg.params) >= 3:
                     self._channel(msg.params[1]).topic = msg.params[2]
@@ -542,6 +557,7 @@ class Client:
             chan.hosts[chan.fold(msg.nick)] = msg.source
         if self.fold(msg.nick) == self.fold(self.nick):
             self.send("MODE", name)
+            self.send("MODE", name, "+b")
 
     def _handle_part(self, msg: Message) -> None:
         if self.fold(msg.nick) == self.fold(self.nick):
@@ -610,6 +626,11 @@ class Client:
                     modes.add(char)
                 else:
                     modes.discard(char)
+            elif char in chan.lists and arg:
+                entry = chan.lists[char]
+                entry.add(arg) if adding else entry.discard(arg)
+            elif arg is None:
+                chan.modes.add(char) if adding else chan.modes.discard(char)
 
     # -- shutdown --------------------------------------------------------
 

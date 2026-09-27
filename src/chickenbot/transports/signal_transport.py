@@ -11,7 +11,8 @@ import asyncio
 import logging
 
 from ..config import SignalConfig
-from ..transport import Envelope, Membership, Sink, chunk
+from ..events import Event, Kind
+from ..transport import Membership, Sink, chunk
 
 log = logging.getLogger(__name__)
 
@@ -75,14 +76,15 @@ class SignalTransport:
         if account and self.fold(account) == self.fold(self.me):
             return
         await self.sink(
-            self,
-            Envelope(
+            Event(
+                kind=Kind.MESSAGE,
+                transport=self,
                 room=group or account,
                 sender=message.source_name or account,
                 account=account,
                 text=text,
                 is_group=bool(group),
-            ),
+            )
         )
 
     async def run(self) -> None:

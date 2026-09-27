@@ -126,3 +126,67 @@ async def tool_current_time(h: Handler, ctx: Context, args: dict) -> str:
     import datetime
 
     return datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+
+# -- core tools ----------------------------------------------------------
+#
+# Moderation is one tool per action rather than one tool with an action
+# argument, so `requires` can differ per action: a transport that cannot ban
+# never shows the model a ban tool at all.
+
+_WHO = {"type": "object", "properties": {"who": {"type": "string"}}, "required": ["who"]}
+_WHO_WHY = {
+    "type": "object",
+    "properties": {"who": {"type": "string"}, "reason": {"type": "string"}},
+    "required": ["who"],
+}
+
+
+def _moderation_tool(action: str, description: str, params: dict) -> None:
+    async def run(h: Handler, ctx: Context, args: dict) -> str:
+        if not ctx.in_channel:
+            return "error: that only works in a group"
+        target = str(args.get("who") or args.get("text") or "")
+        return await ctx.transport.moderate(action, ctx.channel, target, str(args.get("reason", "")))
+
+    TOOLS[action] = Tool(action, run, True, description, params, frozenset({action}))
+
+
+for _action, _desc in (
+    ("op", "Give someone operator status in this room."),
+    ("deop", "Take operator status away from someone in this room."),
+    ("voice", "Give someone voice in this room."),
+    ("devoice", "Take voice away from someone in this room."),
+):
+    _moderation_tool(_action, _desc, _WHO)
+
+_moderation_tool("kick", "Remove someone from this room. They can rejoin.", _WHO_WHY)
+_moderation_tool("ban", "Ban someone from this room. Takes a nick or a mask.", _WHO_WHY)
+_moderation_tool("unban", "Lift a ban. Takes the exact mask from the ban list.", _WHO)
+_moderation_tool(
+    "topic",
+    "Set this room's topic. Pass the new topic as `who`.",
+    {"type": "object", "properties": {"who": {"type": "string"}}, "required": ["who"]},
+)
+
+
+@tool(
+    "room_state",
+    description=(
+        "Who is in this room, what modes are set, and the current ban list. "
+        "Use before proposing a moderation action, and to check whether a ban already exists."
+    ),
+)
+async def tool_room_state(h: Handler, ctx: Context, args: dict) -> str:
+    chan = getattr(ctx.transport, "client", None) and ctx.transport.client.channels.get(ctx.transport.fold(ctx.channel))
+    if chan is None:
+        return f"error: no state for {ctx.channel} on {ctx.transport.name}"
+    ops = sorted(n for n, m in chan.members.items() if "o" in m)
+    bans = sorted(chan.bans)
+    return (
+        f"{ctx.channel}: {len(chan.members)} here"
+        f"{', ops: ' + ', '.join(ops) if ops else ''}"
+        f"{', modes: +' + ''.join(sorted(chan.modes)) if chan.modes else ''}"
+        f"{', bans: ' + ', '.join(bans) if bans else ', no bans'}"
+        f"{', topic: ' + chan.topic if chan.topic else ''}"
+    )

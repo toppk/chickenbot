@@ -101,6 +101,19 @@ model decides, results come back in the same response. OpenRouter's is the
 is likewise server-side. There is no search routing code in this repo and there
 should not be.
 
+**Moderation is a tool, not just a command.** `tools.py` generates one tool per
+moderation action (`op`, `kick`, `ban`, `topic`, …) rather than a single
+`moderate(action=…)`, so `requires` can differ per action: a transport whose
+`caps` lack `kick` never shows the model a kick tool and refuses one if
+proposed anyway. `room_state` is the read side — members, ops, channel modes and
+the ban list — and exists so the model can check the room before proposing
+anything. All of them run through the same `ToolBox` gates as any other tool.
+
+`Channel` tracks simple modes and the `b`/`e`/`I` lists, fed from `MODE` events
+and from `367`/`346`/`348` on join (the client asks for `MODE #chan +b` when it
+joins). Before 2026-09-27 every non-prefix mode was parsed and discarded, so the
+bot could not see a ban at all.
+
 **Tool authorisation follows the asking user, never the bot.** `ToolBox` is
 constructed per request from the `Context` of whoever addressed the bot, and the
 provider only ever receives that bound object — it cannot widen the rights. An

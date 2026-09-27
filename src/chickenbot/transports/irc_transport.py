@@ -6,8 +6,9 @@ import logging
 
 from ..brain import clean_for_irc
 from ..config import IRCConfig
+from ..events import Event, Kind
 from ..irc import Client, Message
-from ..transport import BAN, DEOP, DEVOICE, KICK, OP, TOPIC, UNBAN, VOICE, Envelope, Membership, Sink, chunk
+from ..transport import BAN, DEOP, DEVOICE, KICK, OP, TOPIC, UNBAN, VOICE, Membership, Sink, chunk
 
 log = logging.getLogger(__name__)
 
@@ -84,6 +85,9 @@ class IRCTransport:
         return f"*!*@{host}" if host else ""
 
     async def _on_irc(self, msg: Message) -> None:
+        if msg.command == "MODE" and msg.source and self.client.isupport.is_channel(msg.target):
+            await self._on_mode(msg)
+            return
         if msg.command != "PRIVMSG" or not msg.source:
             return
         if self.fold(msg.nick) == self.fold(self.me):
@@ -94,15 +98,32 @@ class IRCTransport:
         room = self.client.isupport.channel_of(msg.target)
         account = msg.account or self.client.account_of(msg.nick)
         await self.sink(
-            self,
-            Envelope(
+            Event(
+                kind=Kind.MESSAGE,
+                transport=self,
                 room=room or msg.nick,
                 sender=msg.nick,
                 account=account,
                 text=text,
                 is_group=bool(room),
                 is_bot=msg.is_bot,
-            ),
+            )
+        )
+
+    async def _on_mode(self, msg: Message) -> None:
+        """A mode change is worth noticing even when nobody spoke."""
+        if self.fold(msg.nick) == self.fold(self.me):
+            return  # our own doing
+        await self.sink(
+            Event(
+                kind=Kind.MODE,
+                transport=self,
+                room=msg.target,
+                sender=msg.nick,
+                account=self.client.account_of(msg.nick),
+                change=" ".join(msg.params[1:]),
+                text=msg.source,  # full nick!user@host, so masks can be matched
+            )
         )
 
     async def run(self) -> None:

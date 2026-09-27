@@ -10,8 +10,8 @@ from chickenbot.transports.irc_transport import IRCTransport
 def irc():
     seen: list = []
 
-    async def sink(tr, env):
-        seen.append(env)
+    async def sink(event):
+        seen.append(event)
 
     tr = IRCTransport(
         IRCConfig(

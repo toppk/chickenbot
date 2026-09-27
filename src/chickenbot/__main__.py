@@ -76,7 +76,7 @@ async def run(cfg: config.Config) -> int:
 
     for name in cfg.enabled_transports():
         try:
-            transports[name] = build(cfg, name, handler.on_message)
+            transports[name] = build(cfg, name, handler.dispatch)
         except ImportError as exc:
             log.error("%s needs its extra installed (uv sync --extra %s): %s", name, name, exc)
         except Exception as exc:  # noqa: BLE001 - one bad transport must not stop the rest

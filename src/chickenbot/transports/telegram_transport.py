@@ -6,7 +6,8 @@ import asyncio
 import logging
 
 from ..config import TelegramConfig
-from ..transport import BAN, KICK, TOPIC, Envelope, Membership, Sink, chunk
+from ..events import Event, Kind
+from ..transport import BAN, KICK, TOPIC, Membership, Sink, chunk
 
 log = logging.getLogger(__name__)
 
@@ -77,15 +78,16 @@ class TelegramTransport:
         if self.rooms and room not in self.rooms:
             return
         await self.sink(
-            self,
-            Envelope(
+            Event(
+                kind=Kind.MESSAGE,
+                transport=self,
                 room=room,
                 sender=user.full_name or user.username or str(user.id),
                 account=str(user.id),
                 text=text,
                 is_group=chat.type in {"group", "supergroup"},
                 is_bot=bool(user.is_bot),
-            ),
+            )
         )
 
     async def run(self) -> None:

@@ -86,7 +86,7 @@ async def test_registers_joins_and_answers(toy, cfg, store):
     transport.client.send_interval = 0.0
     handler = Handler(cfg, store, None, None)
     handler.transports = {"irc": transport}
-    transport.sink = handler.on_message
+    transport.sink = handler.dispatch
     client = transport.client
     task = asyncio.create_task(transport.run())
     try:

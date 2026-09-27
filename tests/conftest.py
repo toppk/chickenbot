@@ -1,8 +1,9 @@
 import pytest
 
 from chickenbot.config import Config, GitHubConfig, IRCConfig, LLMConfig
+from chickenbot.events import Event, Kind
 from chickenbot.store import Store
-from chickenbot.transport import BAN, DEOP, DEVOICE, KICK, OP, TOPIC, UNBAN, VOICE, Envelope, Membership, chunk
+from chickenbot.transport import BAN, DEOP, DEVOICE, KICK, OP, TOPIC, UNBAN, VOICE, Membership, chunk
 
 ALL_CAPS = frozenset({OP, DEOP, VOICE, DEVOICE, KICK, BAN, UNBAN, TOPIC})
 
@@ -50,8 +51,20 @@ class FakeTransport:
     def said(self) -> list[str]:
         return [text for _room, text in self.sent]
 
-    def envelope(self, text, *, sender="nate", account="nate", room="#chan", is_group=True, is_bot=False):
-        return Envelope(room=room, sender=sender, account=account, text=text, is_group=is_group, is_bot=is_bot)
+    def envelope(
+        self, text, *, sender="nate", account="nate", room="#chan", is_group=True, is_bot=False, kind=Kind.MESSAGE, **kw
+    ):
+        return Event(
+            kind=kind,
+            transport=self,
+            room=room,
+            sender=sender,
+            account=account,
+            text=text,
+            is_group=is_group,
+            is_bot=is_bot,
+            **kw,
+        )
 
 
 @pytest.fixture

@@ -36,7 +36,7 @@ def handler(cfg, store) -> Handler:
 
 
 async def send(h, tr, text, **kw):
-    await h.on_message(tr, tr.envelope(text, **kw))
+    await h.dispatch(tr.envelope(text, **kw))
 
 
 async def test_logs_room_chat_even_when_not_addressed(handler, transport, store):
@@ -73,7 +73,7 @@ async def test_moderation_a_network_cannot_do_is_refused(cfg, store):
     """Signal has no moderation surface, so the command must say so, not pretend."""
     tr = FakeTransport(caps=frozenset())
     handler = Handler(cfg, store, None, None)
-    await handler.on_message(tr, tr.envelope("!kick nate", account="alice"))
+    await handler.dispatch(tr.envelope("!kick nate", account="alice"))
     assert "cannot kick" in tr.said()[0]
     assert tr.actions == []
 
@@ -158,8 +158,8 @@ async def test_a_watch_belongs_to_one_room_on_one_network(handler, store):
     """The same repo watched from two networks is two watches, announced separately."""
     irc, signal = FakeTransport(), FakeTransport()
     signal.name = "signal"
-    await handler.on_message(irc, irc.envelope("!watch a/b", account="alice"))
-    await handler.on_message(signal, signal.envelope("!watch a/b", account="alice", room="group1"))
+    await handler.dispatch(irc.envelope("!watch a/b", account="alice"))
+    await handler.dispatch(signal.envelope("!watch a/b", account="alice", room="group1"))
 
     assert len(await store.watches()) == 2
     assert [w.transport for w in await store.watches()] == ["fake", "signal"]
@@ -189,7 +189,7 @@ async def test_messages_from_a_flagged_bot_are_logged_not_obeyed(handler, transp
 async def test_ignore_lists_cover_networks_without_bot_flags(cfg, store):
     tr = FakeTransport(ignored=["OtherBot"])
     handler = Handler(cfg, store, None, None)
-    await handler.on_message(tr, tr.envelope("!topic hijacked", sender="otherbot", account="alice"))
+    await handler.dispatch(tr.envelope("!topic hijacked", sender="otherbot", account="alice"))
     assert tr.sent == []
 
 
@@ -200,10 +200,10 @@ async def test_an_owner_on_one_network_is_not_an_owner_on_another(cfg, store):
     signal.name = "signal"
     handler = Handler(cfg, store, None, None)
 
-    await handler.on_message(signal, signal.envelope("!topic nope", account="alice", room="g1"))
+    await handler.dispatch(signal.envelope("!topic nope", account="alice", room="g1"))
     assert "owner-only" in signal.said()[0]
 
-    await handler.on_message(irc, irc.envelope("!topic yes", account="alice"))
+    await handler.dispatch(irc.envelope("!topic yes", account="alice"))
     assert irc.actions == [(TOPIC, "#chan", "yes", "")]
 
 

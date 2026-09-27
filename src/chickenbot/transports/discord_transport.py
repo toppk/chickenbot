@@ -6,7 +6,8 @@ import asyncio
 import logging
 
 from ..config import DiscordConfig
-from ..transport import BAN, KICK, TOPIC, Envelope, Membership, Sink, chunk
+from ..events import Event, Kind
+from ..transport import BAN, KICK, TOPIC, Membership, Sink, chunk
 
 log = logging.getLogger(__name__)
 
@@ -89,15 +90,16 @@ class DiscordTransport:
         if self.rooms and room not in self.rooms:
             return
         await self.sink(
-            self,
-            Envelope(
+            Event(
+                kind=Kind.MESSAGE,
+                transport=self,
                 room=room,
                 sender=message.author.display_name,
                 account=str(message.author.id),
                 text=text,
                 is_group=message.guild is not None,
                 is_bot=bool(message.author.bot),
-            ),
+            )
         )
 
     async def run(self) -> None:

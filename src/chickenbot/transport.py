@@ -11,7 +11,10 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
+
+if TYPE_CHECKING:
+    from .events import Event
 
 # Moderation actions a transport may declare in `caps`.
 OP = "op"
@@ -36,7 +39,7 @@ class Envelope:
     is_bot: bool = False
 
 
-Sink = Callable[["Transport", Envelope], Awaitable[None]]
+Sink = Callable[["Event"], Awaitable[None]]
 
 
 class Transport(Protocol):

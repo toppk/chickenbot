@@ -19,6 +19,7 @@ class Kind(StrEnum):
     MESSAGE = "message"  # somebody spoke in a room we watch
     SCHEDULED = "scheduled"  # a job came due
     FEED = "feed"  # a watcher has something to announce
+    MODE = "mode"  # a room's modes changed, including bans
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,6 +33,7 @@ class Event:
     is_group: bool = True
     is_bot: bool = False
     job_id: int = 0  # SCHEDULED only, for logging
+    change: str = ""  # MODE only, e.g. "+b nate!*@*"
 
     @property
     def authored(self) -> bool:

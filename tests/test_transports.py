@@ -15,8 +15,8 @@ from chickenbot.transport import BAN, KICK, TOPIC, chunk
 def collect():
     seen = []
 
-    async def sink(tr, env):
-        seen.append(env)
+    async def sink(event):
+        seen.append(event)
 
     return sink, seen
 

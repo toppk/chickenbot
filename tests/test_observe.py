@@ -13,7 +13,7 @@ def handler(cfg, store) -> Handler:
 
 
 async def send(h, tr, text, **kw):
-    await h.on_message(tr, tr.envelope(text, **kw))
+    await h.dispatch(tr.envelope(text, **kw))
 
 
 def lines(caplog) -> list[str]:

@@ -15,7 +15,7 @@ from .observe import activity, note
 from .scheduler import MAX_DELAY, describe, parse_delay
 from .store import Store
 from .tools import ToolBox
-from .transport import BAN, DEOP, DEVOICE, KICK, OP, TOPIC, UNBAN, VOICE, Envelope, Transport
+from .transport import BAN, DEOP, DEVOICE, KICK, OP, TOPIC, UNBAN, VOICE, Transport
 from .watcher import FEEDS, Watcher, parse_slug
 
 log = logging.getLogger(__name__)
@@ -95,21 +95,6 @@ class Handler:
 
     # -- entry point -----------------------------------------------------
 
-    async def on_message(self, tr: Transport, env: Envelope) -> None:
-        """Transport sink: turn an inbound line into a MESSAGE event."""
-        await self.dispatch(
-            Event(
-                kind=Kind.MESSAGE,
-                transport=tr,
-                room=env.room,
-                sender=env.sender,
-                account=env.account,
-                text=env.text,
-                is_group=env.is_group,
-                is_bot=env.is_bot,
-            )
-        )
-
     async def dispatch(self, event: Event) -> None:
         """The one door. Every event kind is gated and run the same way, and
         produces exactly one activity line whatever happens inside."""
@@ -123,6 +108,8 @@ class Handler:
         ):
             if event.kind is Kind.SCHEDULED:
                 await self._run_scheduled(event)
+            elif event.kind is Kind.MODE:
+                await self._handle_change(event)
             else:
                 await self._handle_message(event)
 
@@ -163,6 +150,11 @@ class Handler:
             note(outcome="failed")
             log.exception("command %s failed", cmd.name)
             ctx.say(f"{ctx.nick}: that broke, sorry")
+
+    async def _handle_change(self, event: Event) -> None:
+        """A room's modes changed. Channel state is already updated by the
+        transport; heuristics that react to it hook in here."""
+        note(outcome="observed", change=event.change)
 
     async def _handle_message(self, event: Event) -> None:
         tr, env = event.transport, event
