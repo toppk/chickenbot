@@ -1,9 +1,8 @@
-"""The bot's voice, kept in a file rather than a config string.
+"""The bot's voice, stored in the database beside everything else it knows.
 
-Re-read when the file changes, so editing SOUL.md takes effect on the next
-question without a restart. The bot never writes it: channel scrollback reaches
-the same context, and a persona the model can rewrite is the most durable
-prompt injection available -- one sentence in the soul survives every restart.
+Seeded once from the shipped template, then the operator's. The bot does not
+write it: channel scrollback reaches the same context, and a persona the model
+could rewrite would survive every restart.
 """
 
 from __future__ import annotations
@@ -11,56 +10,31 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from .store import Store
+
 log = logging.getLogger(__name__)
 
+TEMPLATE = Path(__file__).resolve().parent.parent.parent / "docs" / "templates" / "SOUL.md"
 MAX_CHARS = 8000
 
 
-TEMPLATE = Path(__file__).resolve().parent.parent.parent / "docs" / "templates" / "SOUL.md"
-
-
-def seed(path: str | Path) -> bool:
-    """Copy the template into place on first run. Called once at startup, never
-    from `Soul` itself: the bot writing its own soul is the thing we avoid, and
-    a silent write from a read path would blur that line."""
-    target = Path(path)
-    if target.exists() or not TEMPLATE.is_file():
+def seed(store: Store) -> bool:
+    """First run gets the shipped template. Never overwrites an existing one."""
+    if store.soul() or not TEMPLATE.is_file():
         return False
-    try:
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(TEMPLATE.read_text(encoding="utf-8"), encoding="utf-8")
-        log.info("seeded %s from the shipped template; it is yours to edit now", target)
-        return True
-    except OSError as exc:
-        log.warning("could not seed %s: %s", target, exc)
-        return False
+    store.set_soul(TEMPLATE.read_text(encoding="utf-8")[:MAX_CHARS])
+    log.info("seeded the soul from the shipped template; edit it with `chickenbot soul set`")
+    return True
 
 
 class Soul:
-    def __init__(self, path: str | Path, fallback: str) -> None:
-        self.path = Path(path)
+    def __init__(self, store: Store, fallback: str) -> None:
+        self.store = store
         self.fallback = fallback
-        self._text = ""
-        self._mtime = -1.0
 
     @property
     def loaded(self) -> bool:
-        return bool(self._text)
+        return bool(self.store.soul())
 
     def text(self) -> str:
-        try:
-            mtime = self.path.stat().st_mtime
-        except OSError:
-            if self._mtime != -1.0:
-                log.warning("%s went away, falling back to llm.persona", self.path)
-                self._text, self._mtime = "", -1.0
-            return self.fallback
-        if mtime != self._mtime:
-            self._mtime = mtime
-            try:
-                self._text = self.path.read_text(encoding="utf-8").strip()[:MAX_CHARS]
-                log.info("loaded soul from %s (%d chars)", self.path, len(self._text))
-            except OSError as exc:
-                log.warning("could not read %s: %s", self.path, exc)
-                self._text = ""
-        return self._text or self.fallback
+        return self.store.soul() or self.fallback

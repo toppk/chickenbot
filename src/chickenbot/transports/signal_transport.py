@@ -63,6 +63,10 @@ class SignalTransport:
         except Exception:
             log.exception("signal send to %s failed", room)
 
+    @property
+    def realm(self) -> str:
+        return self.name  # a single network, unlike IRC
+
     def topic(self, room: str) -> str | None:
         return None  # the library owns this; nothing tracked locally
 

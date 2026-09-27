@@ -129,8 +129,6 @@ class LLMConfig:
     tools: bool = True
     # Voice lives in a file so it can be edited without touching the config.
     # Empty, or a missing file, falls back to `persona`.
-    # Empty means <data_dir>/soul.md, seeded from docs/templates/SOUL.md.
-    soul_path: str = ""
     # OpenRouter keeps a conversation on one model/provider when it is given a
     # stable id. Harmless elsewhere, but off is one less unknown field.
     session_stickiness: bool = True
@@ -268,10 +266,6 @@ def load(path: str | Path) -> Config:
     if not data.is_absolute():
         data = (path.parent / data).resolve()
     cfg.data_dir = str(data)
-    soul = Path(cfg.llm.soul_path) if cfg.llm.soul_path else data / "soul.md"
-    if not soul.is_absolute():
-        soul = (path.parent / soul).resolve()
-    cfg.llm.soul_path = str(soul)
     sock = Path(cfg.tools.socket)
     if not sock.is_absolute():
         cfg.tools.socket = str((path.parent / sock).resolve())

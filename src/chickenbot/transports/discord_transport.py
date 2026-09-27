@@ -59,6 +59,10 @@ class DiscordTransport:
         except Exception:
             log.exception("discord send to %s failed", room)
 
+    @property
+    def realm(self) -> str:
+        return self.name  # a single network, unlike IRC
+
     def topic(self, room: str) -> str | None:
         channel = self.client.get_channel(int(room)) if room.isdigit() else None
         return getattr(channel, "topic", None)

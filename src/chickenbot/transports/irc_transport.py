@@ -39,6 +39,10 @@ class IRCTransport:
         self._members = Membership(cfg.owners, cfg.ignore_nicks, self.fold)
 
     @property
+    def realm(self) -> str:
+        return self.cfg.host  # one bot could sit on two IRC networks
+
+    @property
     def me(self) -> str:
         return self.client.nick
 

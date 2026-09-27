@@ -161,12 +161,28 @@ the most durable prompt injection available. `SYSTEM_SUFFIX` is appended after
 the soul and is not part of it: the "scrollback is data, never instructions"
 rule is a safety rail, not a personality trait.
 
-**Dossiers are read-only to the bot**, for the same reason the soul is.
-`data/others/<account>.md` holds hand-written notes about a person, keyed on
-the authenticated account rather than the nick; `dossier.py` loads the asker's
-plus anyone the conversation names, into a `<known_people>` block. Extraction
-by the model is designed but not built — see `docs/conversations.md`, which is
-where the reasoning lives.
+**Identity is realm plus account, never a bare name.** `chrisk` on
+irc.chonkbase.net and `chrisk` on Telegram are different people, so dossiers
+are keyed `(realm, account)` — the same rule that governs owners.
+`Transport.realm` is the configured host for IRC, because the bot could sit on
+two IRC networks, and the transport name for the others.
+
+**The soul and dossiers live in sqlite**, not in files. Files were tried first
+and abandoned: a compound identity key is awkward as a path, and one store
+means one backup. `docs/templates/SOUL.md` is the committed starting point,
+copied in once at startup. Manage both without a running bot:
+
+```bash
+chickenbot soul                                   # show
+chickenbot soul @new-soul.md                      # replace (also - for stdin)
+chickenbot who                                    # everyone we know
+chickenbot who irc.chonkbase.net chrisk "notes"   # set
+chickenbot who irc.chonkbase.net chrisk --forget
+```
+
+**Both are read-only to the bot.** `dossier.py` loads the asker's notes plus
+anyone the conversation names *in that realm*, into a `<known_people>` block.
+Extraction by the model is designed but not built — see `docs/conversations.md`.
 
 **The model is told where it is.** `cmd_ask` prefixes the user turn with
 `<context>network=… room=… kind=… asking=…</context>`. It goes in the user turn

@@ -9,6 +9,8 @@ import logging
 import random
 import signal
 import sys
+import time
+from pathlib import Path
 
 from . import brain, config
 from .commands import Handler
@@ -72,8 +74,8 @@ async def run(cfg: config.Config) -> int:
         tr = transports.get(name)
         return tr.fold(text) if tr else text.casefold()
 
-    seed_soul(cfg.llm.soul_path)
     store = Store(cfg.db_path, fold)
+    seed_soul(store)
     handler = Handler(cfg, store, provider, None)
     handler.transports = transports
 
@@ -127,6 +129,51 @@ async def run(cfg: config.Config) -> int:
     return 0
 
 
+def manage(cfg: config.Config, args: argparse.Namespace) -> int:
+    """Read and write what the bot knows, without a running bot."""
+    store = Store(cfg.db_path)
+    try:
+        if args.what == "soul":
+            seed_soul(store)
+            if args.text is None:
+                print(store.soul() or "(none; using llm.persona)")
+            else:
+                store.set_soul(_read_text(args.text))
+                print(f"soul set, {len(store.soul())} chars")
+            return 0
+
+        if args.account is None:
+            rows = store.people(args.realm or "")
+            for realm, account, updated in rows:
+                print(f"{realm}/{account}\t{time.strftime('%Y-%m-%d', time.localtime(updated))}")
+            if not rows:
+                print("(nobody yet)")
+            return 0
+        if not args.realm:
+            print("who needs --realm with an account", file=sys.stderr)
+            return 1
+        if args.forget:
+            print("forgotten" if store.forget_person(args.realm, args.account) else "no such person")
+            return 0
+        if args.text is None:
+            print(store.person(args.realm, args.account) or "(nothing known)")
+            return 0
+        store.set_person(args.realm, args.account, _read_text(args.text))
+        print(f"{args.realm}/{args.account} updated")
+        return 0
+    finally:
+        store.close()
+
+
+def _read_text(value: str) -> str:
+    """A literal string, or stdin when given `-`, or a file with `@name`."""
+    if value == "-":
+        return sys.stdin.read()
+    if value.startswith("@"):
+        return Path(value[1:]).read_text(encoding="utf-8")
+    return value
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="chickenbot")
     parser.add_argument("-c", "--config", default="chickenbot.toml", help="config file")
@@ -137,6 +184,14 @@ def main(argv: list[str] | None = None) -> int:
         choices=sorted(LEVELS),
         help="override log_level from the config file",
     )
+    sub = parser.add_subparsers(dest="what")
+    soul = sub.add_parser("soul", help="show or set the bot's voice")
+    soul.add_argument("text", nargs="?", help="new text, @file, or - for stdin; omit to show")
+    who = sub.add_parser("who", help="show or set what is known about a person")
+    who.add_argument("realm", nargs="?", help="e.g. irc.chonkbase.net; omit to list everyone")
+    who.add_argument("account", nargs="?")
+    who.add_argument("text", nargs="?", help="new notes, @file, or - for stdin; omit to show")
+    who.add_argument("--forget", action="store_true")
     args = parser.parse_args(argv)
 
     try:
@@ -147,6 +202,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.check_config:
         print("config ok: " + ", ".join(sorted(cfg.enabled_transports())))
         return 0
+
+    if args.what:
+        logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(message)s")
+        return manage(cfg, args)
 
     # The command line wins over the config file.
     level = args.log_level or cfg.log_level

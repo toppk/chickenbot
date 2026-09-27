@@ -10,7 +10,6 @@ import time
 from collections import defaultdict, deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from pathlib import Path
 
 from .brain import Provider, ProviderError
 from .config import Config
@@ -101,8 +100,8 @@ class Handler:
         self.provider = provider
         self.watcher = watcher
         self.started = time.time()
-        self.soul = Soul(cfg.llm.soul_path, cfg.llm.persona)
-        self.dossiers = Dossiers(Path(cfg.data_dir) / "others")
+        self.soul = Soul(store, cfg.llm.persona)
+        self.dossiers = Dossiers(store)
         self._writes: set[asyncio.Task] = set()
         self.transports: dict[str, Transport] = {}
         self._asks: dict[str, deque[float]] = defaultdict(deque)
@@ -334,7 +333,7 @@ async def cmd_ask(h: Handler, ctx: Context) -> None:
     where = "group" if ctx.in_channel else "direct message"
     situation = f"<context>network={ctx.transport.name} room={ctx.channel} kind={where} asking={ctx.nick}</context>"
     # Owner-written notes about whoever is here. Trusted, unlike scrollback.
-    people = h.dossiers.block(account=ctx.account, text=f"{ctx.args} {scrollback}")
+    people = h.dossiers.block(realm=ctx.transport.realm, account=ctx.account, text=f"{ctx.args} {scrollback}")
     head = "\n".join(part for part in (situation, people) if part)
     prompt = f"{head}\n\n{ctx.args}"
     if scrollback:

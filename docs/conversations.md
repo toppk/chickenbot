@@ -21,25 +21,25 @@ must not match the `.history kettle` that asked for it.
 
 ## 2. Where state lives — built
 
-Committed:
+One store. `chickenbot.db` holds the chat log, watches, jobs, the soul and the
+dossiers; `docs/templates/SOUL.md` is the committed starting point, copied in
+once on first run.
 
-```
-docs/templates/SOUL.md     the shipped persona, a starting point
-```
+Files were tried first and abandoned. The decisive argument was identity:
+`data/others/chrisk.md` implies a global `chrisk`, and `chrisk` on Telegram is
+a different person from `chrisk` on irc.chonkbase.net. Identity is
+**realm plus account** — the same namespace rule that already governs owners —
+and a compound key is awkward as a path and natural as a primary key. One store
+also means one backup and one migration story.
 
-Written at runtime, gitignored:
+`Transport.realm` supplies it: the configured host for IRC, since the bot could
+sit on two IRC networks, and the transport name for Signal, Discord and
+Telegram, which are each a single network.
 
-```
-data/soul.md               this bot's voice; seeded from the template once,
-                           then yours. The bot never writes it again.
-data/others/<id>.md        per-participant dossier            (planned)
-data/conversations/...     exported conversation trees        (planned)
-chickenbot.db              the record: chat log, watches, jobs
-```
-
-Seeding happens once at startup, never from a read path. The bot writing its
-own soul is the thing being avoided; a silent write from inside `Soul.text()`
-would blur that line.
+Editing is `chickenbot soul` and `chickenbot who`, which read and write the
+database without a running bot. Seeding happens once at startup and never from
+a read path: the bot writing its own soul is the thing being avoided, and a
+silent write from inside `Soul.text()` would blur that line.
 
 ## 3. Attention — planned
 

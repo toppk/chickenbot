@@ -22,6 +22,10 @@ class FakeTransport:
         self.topics: dict[str, str] = {}
         self._members = Membership(list(owners), list(ignored), self.fold)
 
+    @property
+    def realm(self) -> str:
+        return self.name
+
     def fold(self, text: str) -> str:
         return text.casefold()
 

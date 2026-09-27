@@ -38,6 +38,23 @@ CREATE TABLE IF NOT EXISTS watch (
     UNIQUE (transport, owner, repo, channel)
 );
 
+-- One row. The bot's voice, edited with `chickenbot soul edit`.
+CREATE TABLE IF NOT EXISTS soul (
+    id         INTEGER PRIMARY KEY CHECK (id = 1),
+    text       TEXT NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+-- What we know about a person, keyed by network: `chrisk` on chonkbase and
+-- `chrisk` on Telegram are different people.
+CREATE TABLE IF NOT EXISTS person (
+    realm      TEXT NOT NULL,
+    account    TEXT NOT NULL,
+    notes      TEXT NOT NULL DEFAULT '',
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (realm, account)
+);
+
 CREATE TABLE IF NOT EXISTS job (
     id         INTEGER PRIMARY KEY,
     due_at     INTEGER NOT NULL,
@@ -230,6 +247,49 @@ class Store:
             return cur.rowcount
 
         return await self._run(go)
+
+    # -- soul and people ---------------------------------------------------
+
+    def soul(self) -> str:
+        row = self._db.execute("SELECT text FROM soul WHERE id = 1").fetchone()
+        return row["text"] if row else ""
+
+    def set_soul(self, text: str) -> None:
+        self._db.execute(
+            "INSERT INTO soul (id, text, updated_at) VALUES (1, ?, ?)"
+            " ON CONFLICT(id) DO UPDATE SET text = excluded.text, updated_at = excluded.updated_at",
+            (text.strip(), int(time.time())),
+        )
+        self._db.commit()
+
+    def person(self, realm: str, account: str) -> str:
+        row = self._db.execute(
+            "SELECT notes FROM person WHERE realm = ? AND account = ? COLLATE NOCASE", (realm, account)
+        ).fetchone()
+        return row["notes"] if row else ""
+
+    def set_person(self, realm: str, account: str, notes: str) -> None:
+        self._db.execute(
+            "INSERT INTO person (realm, account, notes, updated_at) VALUES (?, ?, ?, ?)"
+            " ON CONFLICT(realm, account) DO UPDATE SET notes = excluded.notes,"
+            " updated_at = excluded.updated_at",
+            (realm, account, notes.strip(), int(time.time())),
+        )
+        self._db.commit()
+
+    def forget_person(self, realm: str, account: str) -> bool:
+        cur = self._db.execute("DELETE FROM person WHERE realm = ? AND account = ? COLLATE NOCASE", (realm, account))
+        self._db.commit()
+        return cur.rowcount > 0
+
+    def people(self, realm: str = "") -> list[tuple[str, str, int]]:
+        sql = "SELECT realm, account, updated_at FROM person"
+        args: tuple = ()
+        if realm:
+            sql += " WHERE realm = ?"
+            args = (realm,)
+        rows = self._db.execute(f"{sql} ORDER BY realm, account", args).fetchall()
+        return [(r["realm"], r["account"], r["updated_at"]) for r in rows]
 
     # -- scheduled jobs ----------------------------------------------------
 

@@ -1,8 +1,13 @@
-# SOUL.md — who chickenbot is
+# Who chickenbot is
 
-Edit this file. It is re-read whenever it changes; no restart, no deploy. The
-bot never writes it, on purpose: channel scrollback reaches the same context,
-and a persona the model could rewrite would be a permanent prompt injection.
+This is the shipped starting point. It is copied into the database on first
+run, and from then on it is yours:
+
+    chickenbot soul                 show the current one
+    chickenbot soul @my-soul.md     replace it
+
+The bot never writes it, on purpose: channel scrollback reaches the same
+context, and a persona the model could rewrite would be a permanent injection.
 
 ## Core truths
 

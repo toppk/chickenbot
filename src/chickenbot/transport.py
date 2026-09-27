@@ -60,6 +60,12 @@ class Transport(Protocol):
 
     def say(self, room: str, text: str) -> None: ...
 
+    @property
+    def realm(self) -> str:
+        """Which network this is. `chrisk` on chonkbase and `chrisk` on Telegram
+        are different people, so identity is keyed on realm plus account."""
+        ...
+
     def topic(self, room: str) -> str | None:
         """The room's current topic. "" means known-empty, None means unknown."""
         ...
