@@ -1,4 +1,5 @@
 import asyncio
+import os
 import time
 
 import pytest
@@ -279,3 +280,31 @@ async def test_it_reconnects_when_chickenbot_restarts(tmp_path, cfg, store, gh):
         await asyncio.gather(tool_task, second_task, return_exceptions=True)
         for name in [n for n in REGISTRY if n.startswith("ext_")]:
             REGISTRY.pop(name, None)
+
+
+def test_the_tool_reads_the_same_env_file_as_the_bot(tmp_path, monkeypatch):
+    from external.github.__main__ import load_env
+
+    env = tmp_path / ".env"
+    env.write_text("# secrets\nGITHUB_TOKEN=ghp_fromfile\nCHICKENBOT_SASL_PASSWORD=unrelated\n")
+    env.chmod(0o600)
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+
+    assert load_env(env) == 2
+    assert os.environ["GITHUB_TOKEN"] == "ghp_fromfile"
+
+
+def test_a_real_environment_variable_still_wins(tmp_path, monkeypatch):
+    from external.github.__main__ import load_env
+
+    env = tmp_path / ".env"
+    env.write_text("GITHUB_TOKEN=ghp_fromfile\n")
+    monkeypatch.setenv("GITHUB_TOKEN", "ghp_fromshell")
+    load_env(env)
+    assert os.environ["GITHUB_TOKEN"] == "ghp_fromshell"
+
+
+def test_a_missing_env_file_is_not_an_error(tmp_path):
+    from external.github.__main__ import load_env
+
+    assert load_env(tmp_path / "nope") == 0

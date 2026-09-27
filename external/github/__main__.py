@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import time
+from pathlib import Path
 
 from .github import GitHub
 from .store import Store
@@ -57,6 +58,35 @@ TOOLS = [
         },
     },
 ]
+
+
+def load_env(path: Path) -> int:
+    """Read KEY=value lines from a .env, without overriding the real environment.
+
+    Deliberately a local copy rather than an import from chickenbot: a tool is a
+    separate process that happens to live in this repo, and a third-party one
+    could not import the bot's package either.
+    """
+    if not path.is_file():
+        return 0
+    if path.stat().st_mode & 0o077:
+        log.warning("%s is readable by other users; chmod 600 it", path)
+    loaded = 0
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        key, sep, value = line.removeprefix("export ").partition("=")
+        key = key.strip()
+        if not sep or not key:
+            continue
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        if key not in os.environ:
+            os.environ[key] = value
+            loaded += 1
+    return loaded
 
 
 def ago(seconds: int) -> str:
@@ -219,12 +249,16 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="github-tool")
     parser.add_argument("--socket", default="", help="chickenbot tool socket; omit to poll only")
     parser.add_argument("--db", default="github-tool.db")
+    parser.add_argument("--env", default=".env", help="file to read GITHUB_TOKEN from")
     parser.add_argument("--users", nargs="*", default=USERS)
     parser.add_argument("--interval", type=int, default=900)
     parser.add_argument("--once", action="store_true", help="poll once, print a summary, exit")
     parser.add_argument("-l", "--log-level", default="info")
     args = parser.parse_args(argv)
     logging.basicConfig(level=args.log_level.upper(), format="%(asctime)s %(levelname)-5s %(name)s %(message)s")
+    load_env(Path(args.env))
+    if not os.environ.get("GITHUB_TOKEN"):
+        log.warning("no GITHUB_TOKEN: unauthenticated GitHub allows 60 requests an hour")
     try:
         return asyncio.run(run(args))
     except KeyboardInterrupt:

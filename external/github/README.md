@@ -10,11 +10,22 @@ what it can answer.
 
 ## Running it
 
+The token comes from the same `.env` chickenbot uses — `GITHUB_TOKEN=ghp_...`
+beside `chickenbot.toml`. A real environment variable still wins over the file,
+and `--env` points somewhere else if you want a different one.
+
 ```bash
-export GITHUB_TOKEN=ghp_...        # optional, but 60 req/hour without one
-python -m external.github --once   # poll, print a summary, exit
-python -m external.github --socket ~/workspace/chickenbot/chickenbot-tools.sock
+python -m external.github --once     # poll, print a summary, exit
+python -m external.github --socket chickenbot-tools.sock
 ```
+
+Without a token GitHub allows 60 requests an hour and the tool says so on
+startup. Four users at a 15 minute interval is 32 of those, so it works
+unauthenticated but leaves little room.
+
+The `.env` loader is a local copy rather than an import from chickenbot: a tool
+is a separate process that happens to live in this repo, and a third-party one
+could not import the bot's package either.
 
 Watched users default to `agent2x0r`, `toppk`, `iconidentify`, `a2f0`; override
 with `--users`. Polling interval is `--interval`, default 15 minutes.
