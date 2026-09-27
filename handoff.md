@@ -342,6 +342,85 @@ scratch dir and point `db_path` there too.
   code alive. Do not do that here. Every test in this repo asserts a
   behaviour, and several of them caught real bugs while being written.
 
+## Not requested, but worth knowing
+
+### SASL EXTERNAL (certfp) — a future option, not a plan
+
+The bot authenticates with SASL PLAIN, which means a long-lived NickServ
+password in `CHICKENBOT_SASL_PASSWORD` on an unattended host. SASL EXTERNAL
+takes the identity from a TLS client certificate instead, so there is no
+replayable secret on disk. Discussed 2026-09-26 and judged **too involved to
+build now**; recorded so it is not re-derived from scratch.
+
+What it would take here:
+
+- `ssl.create_default_context()` at `irc.py:312` gains `load_cert_chain(cert, key)`
+- `AUTHENTICATE PLAIN` at `irc.py:474` becomes mechanism selection
+- config for cert and key paths
+
+**Prerequisite, and a real defect today:** `_handle_cap` discards every
+capability *value* — `self._offered.add(token.split("=", 1)[0])` (`irc.py:458`,
+same shape at `:482`). So the client sees that `sasl` is offered but never which
+mechanisms, and could not negotiate `EXTERNAL` even where it exists. Keeping a
+`dict[str, str]` instead of a `set[str]` is about five lines. Worth doing on its
+own merits whenever that file is next touched.
+
+It also needs the server side, which chonkbase does not have — requested as an
+issue upstream, see below. Enrollment is the awkward part everywhere: the
+account must carry the fingerprint *before* EXTERNAL can work, so the migration
+is identify with PLAIN once, register the fingerprint, then switch. PLAIN stays
+advertised throughout; this is additive, never a cutover.
+
+The honest trade: certificates bring expiry, rotation and backup, and a bot that
+silently stops authenticating when one lapses. A password in an env var is
+simpler to operate and easier to steal.
+
+## Not requested, but worth knowing
+
+### SASL EXTERNAL (certfp) — an option, not a plan
+
+The bot authenticates with SASL PLAIN, which means a long-lived NickServ
+password in `CHICKENBOT_SASL_PASSWORD` on an unattended host. SASL EXTERNAL
+takes the identity from a TLS client certificate instead, so there is no
+replayable secret on disk. Discussed 2026-09-26 and judged **too involved to
+build now**. No upstream issue was filed for it either. Recorded so it is not
+re-derived from scratch.
+
+**chonkbase cannot do it today.** `sasl=PLAIN` is a hardcoded string
+(`upstream/chonkline/src/cmds.rs:3283`) and `sasl_mech` is only ever assigned
+`"PLAIN"` (`:3395`). Adding it there is more than a mechanism: the server has to
+retain the client certificate, hash it, store a fingerprint per account, and
+offer an enrollment path (`NickServ CERT ADD`, or auto-associating on first
+identify-while-presenting-one). The hashing already exists —
+`upstream/chonkline/src/tls.rs:191` computes SHA-256 fingerprints, but only for
+server-to-server link pinning, never for client connections.
+
+**Enrollment is the awkward part everywhere.** The account must carry the
+fingerprint *before* EXTERNAL can succeed, so the migration is: identify with
+PLAIN once, register the fingerprint, then switch. PLAIN stays advertised
+throughout. This is additive, never a cutover.
+
+On the wire the mechanism itself is trivial — the cert is presented during the
+TLS handshake, then `AUTHENTICATE EXTERNAL` and an empty payload (`+`, base64
+for the empty string, meaning "use the certificate's identity").
+
+What chickenbot would need:
+
+- `ssl.create_default_context()` at `irc.py:312` gains `load_cert_chain(cert, key)`
+- `AUTHENTICATE PLAIN` at `irc.py:474` becomes mechanism selection
+- config for cert and key paths
+
+**Prerequisite, and a real defect today:** `_handle_cap` discards every
+capability *value* — `self._offered.add(token.split("=", 1)[0])` (`irc.py:458`,
+same shape at `:482`). The client sees that `sasl` is offered but never which
+mechanisms, so it could not negotiate `EXTERNAL` even where one exists. Keeping
+a `dict[str, str]` instead of a `set[str]` is about five lines, and is worth
+doing on its own merits whenever that file is next touched.
+
+The honest trade: certificates bring expiry, rotation and backup, and a bot that
+silently stops authenticating when one lapses. A password in an env var is
+simpler to operate and easier to steal.
+
 ## Unrelated, but worth doing
 
 The user's WeeChat config stores a NickServ password in cleartext in a
