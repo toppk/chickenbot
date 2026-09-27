@@ -140,7 +140,7 @@ class Tool:
                 return f"no activity for {who} in the last {args.get('range', 'day')}"
             return f"{who}: " + ", ".join(f"{n} {kind}" for kind, n in tally.items())
 
-        rows = self.store.activity(actor=user, since=since, limit=12)
+        rows = self.store.activity(actor=user, since=since, limit=8)
         if not rows:
             return f"no activity for {who} in the last {args.get('range', 'day')}"
         now = int(time.time())
@@ -155,7 +155,7 @@ class Tool:
         limit = max(1, min(int(args.get("limit") or 10), 25))
         now = int(time.time())
         return " | ".join(
-            f"{r['full_name']} ({r['stars']}*, {r['open_issues']} open, pushed {ago(now - r['pushed_at'])} ago)"
+            f"{r['full_name']} ({r['stars']} stars, {r['open_issues']} open, pushed {ago(now - r['pushed_at'])} ago)"
             for r in rows[:limit]
         )
 

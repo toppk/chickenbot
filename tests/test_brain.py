@@ -189,3 +189,18 @@ async def test_missing_key_names_the_env_var_it_wanted(monkeypatch):
 )
 def test_markdown_stripping_leaves_snake_case_alone(raw, want):
     assert clean_for_irc(raw) == want
+
+
+@pytest.mark.parametrize(
+    "raw, want",
+    [
+        # Two star counts in one line used to pair up and lose both asterisks.
+        ("a/b (0*, 2 open) | c/d (1*, 0 open)", "a/b (0*, 2 open) | c/d (1*, 0 open)"),
+        ("rated 5* and 4* today", "rated 5* and 4* today"),
+        ("2*3 and 4*5", "2*3 and 4*5"),
+        ("**bold** survives", "bold survives"),
+        ("(*parenthesised*)", "(parenthesised)"),
+    ],
+)
+def test_asterisks_that_are_not_emphasis_are_left_alone(raw, want):
+    assert clean_for_irc(raw) == want

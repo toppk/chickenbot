@@ -95,10 +95,20 @@ def _from_event(raw: dict) -> Item | None:
     title, url, state = "", f"https://github.com/{repo}", ""
 
     if kind == "commit":
+        # The public events feed no longer carries `size` or `commits`: a
+        # PushEvent is just before/head/ref. Report the branch rather than
+        # inventing a count that is always zero.
         commits = payload.get("commits") or []
-        title = f"{payload.get('size', len(commits))} commit(s)"
-        if commits:
-            title += f": {(commits[-1].get('message') or '').splitlines()[0][:80]}"
+        branch = str(payload.get("ref", "")).removeprefix("refs/heads/")
+        size = payload.get("size")
+        if size or commits:
+            title = f"{size or len(commits)} commit(s) to {branch}" if branch else f"{size or len(commits)} commit(s)"
+            if commits:
+                title += f": {(commits[-1].get('message') or '').splitlines()[0][:80]}"
+        else:
+            title = f"pushed {branch}" if branch else "pushed"
+            if payload.get("head"):
+                title += f" ({str(payload['head'])[:7]})"
     elif kind in {"issue", "pr"}:
         node = payload.get("issue") or payload.get("pull_request") or {}
         title = f"{payload.get('action', '')} #{node.get('number', '?')} {node.get('title', '')}".strip()

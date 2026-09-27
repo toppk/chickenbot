@@ -36,10 +36,11 @@ class Provider(Protocol):
 _FENCE = re.compile(r"```[\w-]*\n?")
 _HEADING = re.compile(r"^#{1,6}\s*", re.MULTILINE)
 _BULLET = re.compile(r"^\s*[-*+]\s+", re.MULTILINE)
-_EMPHASIS = re.compile(r"(\*\*|\*)(?=\S)(.+?)(?<=\S)\1", re.DOTALL)
-# Underscore emphasis only at word boundaries. CommonMark forbids it inside a
-# word, and without that rule snake_case is mangled: ext_github_activity had
-# its _github_ read as italics and came out as extgithubactivity.
+_EMPHASIS = re.compile(r"(?<!\w)(\*\*|\*)(?=\S)(.+?)(?<=\S)\1(?!\w)", re.DOTALL)
+# Emphasis only at word boundaries. Without that rule, text that merely
+# contains the delimiters gets eaten: ext_github_activity lost its underscores
+# to _github_, and two "3*" star counts in one line paired up and lost both
+# asterisks. CommonMark forbids intra-word underscore emphasis for this reason.
 _UNDERSCORE = re.compile(r"(?<!\w)(__|_)(?=\S)(.+?)(?<=\S)\1(?!\w)", re.DOTALL)
 _LINK = re.compile(r"\[([^\]]+)\]\((https?://[^)\s]+)\)")
 _CITATION = re.compile(r"\s*\[\d+\](?=[\s.,;:]|$)")

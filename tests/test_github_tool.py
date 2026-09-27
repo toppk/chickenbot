@@ -160,7 +160,7 @@ def test_repos_reports_stars_and_recency(gh):
         }
     )
     out = gh.github_repos({"user": "toppk"})
-    assert out == "toppk/chickenbot (3*, 2 open, pushed 1h ago)"
+    assert out == "toppk/chickenbot (3 stars, 2 open, pushed 1h ago)"
 
 
 def test_declared_schemas_are_valid_for_the_protocol(gh):
@@ -308,3 +308,57 @@ def test_a_missing_env_file_is_not_an_error(tmp_path):
     from external.github.__main__ import load_env
 
     assert load_env(tmp_path / "nope") == 0
+
+
+def test_a_push_reports_the_branch_when_github_omits_the_count():
+    """The public events feed dropped size/commits; a count would always be 0."""
+    item = _from_event(
+        {
+            "id": "9",
+            "type": "PushEvent",
+            "actor": {"login": "iconidentify"},
+            "repo": {"name": "iconidentify/aurora-linux"},
+            "created_at": "2026-09-27T10:00:00Z",
+            "payload": {
+                "ref": "refs/heads/tb-dp-tunnel-t8103",
+                "head": "5eb7f83a961aa48bf5a4c9f72fb6c6d9f010c0e0",
+                "before": "44bcebd",
+                "push_id": 1,
+            },
+        }
+    )
+    assert item.title == "pushed tb-dp-tunnel-t8103 (5eb7f83)"
+    assert "0 commit" not in item.title
+
+
+def test_a_push_still_uses_the_count_when_one_is_present():
+    item = _from_event(
+        {
+            "id": "10",
+            "type": "PushEvent",
+            "actor": {"login": "toppk"},
+            "repo": {"name": "toppk/x"},
+            "created_at": "2026-09-27T10:00:00Z",
+            "payload": {"ref": "refs/heads/main", "size": 3, "commits": [{"message": "fix it\n\nmore"}]},
+        }
+    )
+    assert item.title == "3 commit(s) to main: fix it"
+
+
+def test_repo_output_spells_stars_rather_than_using_an_asterisk(gh):
+    gh.store.save_repo(
+        {
+            "full_name": "toppk/x",
+            "owner": "toppk",
+            "name": "x",
+            "private": 0,
+            "fork": 0,
+            "archived": 0,
+            "stars": 4,
+            "open_issues": 1,
+            "pushed_at": int(time.time()),
+            "description": "",
+        }
+    )
+    out = gh.github_repos({"user": "toppk"})
+    assert "4 stars" in out and "4*" not in out
