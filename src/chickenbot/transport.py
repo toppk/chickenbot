@@ -60,6 +60,10 @@ class Transport(Protocol):
 
     def say(self, room: str, text: str) -> None: ...
 
+    def topic(self, room: str) -> str | None:
+        """The room's current topic. "" means known-empty, None means unknown."""
+        ...
+
     def describe(self) -> list[str]:
         """One line per room this transport knows about, for a state dump."""
         ...

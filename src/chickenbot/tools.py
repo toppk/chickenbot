@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from .observe import note_many
+from .transport import TOPIC
 
 if TYPE_CHECKING:  # commands imports us, so this stays a type-only edge
     from .commands import Context, Handler
@@ -174,11 +175,32 @@ for _action, _desc in (
 _moderation_tool("kick", "Remove someone from this room. They can rejoin.", _WHO_WHY)
 _moderation_tool("ban", "Ban someone from this room. Takes a nick or a mask.", _WHO_WHY)
 _moderation_tool("unban", "Lift a ban. Takes the exact mask from the ban list.", _WHO)
-_moderation_tool(
-    "topic",
-    "Set this room's topic. Pass the new topic as `who`.",
-    {"type": "object", "properties": {"who": {"type": "string"}}, "required": ["who"]},
+
+
+@tool(
+    "chan_topic",
+    owner=True,
+    requires=frozenset({TOPIC}),
+    description=(
+        "Read or set this room's topic. Call with no arguments to read the current one; "
+        "pass `topic` to change it. Read it before changing it unless you were told what to set."
+    ),
+    params={
+        "type": "object",
+        "properties": {"topic": {"type": "string", "description": "omit to read rather than set"}},
+        "required": [],
+    },
 )
+async def tool_chan_topic(h: Handler, ctx: Context, args: dict) -> str:
+    if not ctx.in_channel:
+        return "error: that only works in a group"
+    wanted = args.get("topic")
+    if wanted is None:
+        current = ctx.transport.topic(ctx.channel)
+        if current is None:
+            return f"error: i cannot see {ctx.channel}'s topic"
+        return f"topic of {ctx.channel}: {current}" if current else f"{ctx.channel} has no topic set"
+    return await ctx.transport.moderate(TOPIC, ctx.channel, str(wanted))
 
 
 @tool(
@@ -199,5 +221,5 @@ async def tool_room_state(h: Handler, ctx: Context, args: dict) -> str:
         f"{', ops: ' + ', '.join(ops) if ops else ''}"
         f"{', modes: +' + ''.join(sorted(chan.modes)) if chan.modes else ''}"
         f"{', bans: ' + ', '.join(bans) if bans else ', no bans'}"
-        f"{', topic: ' + chan.topic if chan.topic else ''}"
+        f"{', topic: ' + chan.topic if chan.topic else ', no topic set'}"
     )

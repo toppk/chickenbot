@@ -49,6 +49,9 @@ class TelegramTransport:
         except Exception:
             log.exception("telegram send to %s failed", room)
 
+    def topic(self, room: str) -> str | None:
+        return None  # the library owns this; nothing tracked locally
+
     def describe(self) -> list[str]:
         # No membership tracking here: the library owns that state.
         return [f"chats: {', '.join(self.rooms) or 'any'}"]

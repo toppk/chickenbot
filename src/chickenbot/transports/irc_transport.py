@@ -58,6 +58,10 @@ class IRCTransport:
         for line in self.lines(text):
             self.client.send("PRIVMSG", room, line)
 
+    def topic(self, room: str) -> str | None:
+        chan = self.client.channels.get(self.fold(room))
+        return None if chan is None else chan.topic
+
     def describe(self) -> list[str]:
         out = []
         for chan in self.client.channels.values():

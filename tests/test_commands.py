@@ -265,3 +265,15 @@ async def test_a_follow_up_sees_the_previous_exchange(cfg, transport, store):
     prompt = provider.prompts[-1]
     assert "what is six by seven" in prompt
     assert "nate: 42" in prompt  # its own answer is in the scrollback
+
+
+async def test_bare_topic_reports_rather_than_clearing(handler, transport):
+    """`.topic` alone used to set an empty topic, which is a rotten way to ask."""
+    transport.topics["#chan"] = "kettle repair"
+    await send(handler, transport, "!topic", account="alice")
+    assert "topic: kettle repair" in transport.said()[0]
+    assert transport.actions == []
+
+    transport.sent.clear()
+    await send(handler, transport, "!topic soup", account="alice")
+    assert transport.actions == [(TOPIC, "#chan", "soup", "")]

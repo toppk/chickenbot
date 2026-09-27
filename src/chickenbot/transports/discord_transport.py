@@ -59,6 +59,10 @@ class DiscordTransport:
         except Exception:
             log.exception("discord send to %s failed", room)
 
+    def topic(self, room: str) -> str | None:
+        channel = self.client.get_channel(int(room)) if room.isdigit() else None
+        return getattr(channel, "topic", None)
+
     def describe(self) -> list[str]:
         # No membership tracking here: the library owns that state.
         return [f"channels: {', '.join(self.rooms) or 'any'}"]

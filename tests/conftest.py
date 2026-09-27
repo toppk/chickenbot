@@ -19,6 +19,7 @@ class FakeTransport:
         self.rooms: list[str] = []
         self.sent: list[tuple[str, str]] = []
         self.actions: list[tuple[str, str, str, str]] = []
+        self.topics: dict[str, str] = {}
         self._members = Membership(list(owners), list(ignored), self.fold)
 
     def fold(self, text: str) -> str:
@@ -36,11 +37,17 @@ class FakeTransport:
     def say(self, room: str, text: str) -> None:
         self.sent.append((room, text))
 
+    def topic(self, room: str) -> str | None:
+        # "" is a room we are in with no topic; None is a room we cannot see.
+        return self.topics.get(room, "")
+
     def describe(self) -> list[str]:
         return [f"rooms: {', '.join(self.rooms) or 'none'}"]
 
     async def moderate(self, action: str, room: str, target: str, reason: str = "") -> str:
         self.actions.append((action, room, target, reason))
+        if action == TOPIC:
+            self.topics[room] = target
         return f"{action} {target}"
 
     async def run(self) -> None:

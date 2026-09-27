@@ -31,7 +31,7 @@ async def test_moderation_tools_reach_the_transport(handler, transport):
     assert await b.run("chan_kick", {"who": "nate", "reason": "rude"}) == "kick nate"
     assert transport.actions == [(KICK, "#chan", "nate", "rude")]
 
-    assert await b.run("chan_topic", {"who": "new topic"}) == "topic new topic"
+    assert await b.run("chan_topic", {"topic": "new topic"}) == "topic new topic"
     assert transport.actions[-1] == (TOPIC, "#chan", "new topic", "")
 
 
@@ -138,3 +138,31 @@ async def test_owner_tools_are_not_even_declared_to_a_non_owner(handler, transpo
 async def test_a_non_owner_proposing_one_anyway_is_told_why(handler, transport):
     result = await box(handler, transport, is_owner=False).run("chan_kick", {"who": "nate"})
     assert "owner-only" in result  # not "cannot do that": the gate is who, not where
+
+
+async def test_chan_topic_reads_when_given_nothing(handler, transport):
+    transport.topics["#chan"] = "kettle repair"
+    assert await box(handler, transport).run("chan_topic", {}) == "topic of #chan: kettle repair"
+    assert transport.actions == []  # a read must not write
+
+
+async def test_chan_topic_distinguishes_empty_from_unknown(handler, transport):
+    assert "no topic set" in await box(handler, transport).run("chan_topic", {})
+    unknown = FakeTransport()
+    unknown.topic = lambda room: None
+    assert "cannot see" in await box(handler, unknown).run("chan_topic", {})
+
+
+async def test_chan_topic_sets_when_given_one(handler, transport):
+    from chickenbot.transport import TOPIC as TOPIC_CAP
+
+    await box(handler, transport).run("chan_topic", {"topic": "soup o'clock"})
+    assert transport.actions == [(TOPIC_CAP, "#chan", "soup o'clock", "")]
+    assert transport.topics["#chan"] == "soup o'clock"
+
+
+async def test_chan_topic_takes_a_sensibly_named_argument(handler, transport):
+    schema = next(s for s in box(handler, transport).schemas if s["function"]["name"] == "chan_topic")
+    props = schema["function"]["parameters"]["properties"]
+    assert "topic" in props and "who" not in props
+    assert schema["function"]["parameters"]["required"] == []  # reading needs nothing

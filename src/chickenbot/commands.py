@@ -450,8 +450,17 @@ async def cmd_unban(h: Handler, ctx: Context) -> None:
     await moderate(ctx, UNBAN, ctx.args.split(" ")[0])
 
 
-@command("topic", owner=True, usage="topic <text>", blurb="set the topic")
+@command("topic", owner=True, usage="topic [text]", blurb="show or set the topic")
 async def cmd_topic(h: Handler, ctx: Context) -> None:
+    if not ctx.args:
+        # Bare `.topic` used to set an empty one, which is a rotten way to
+        # find out what the topic was.
+        current = ctx.transport.topic(ctx.channel)
+        if current is None:
+            ctx.say(f"i cannot see {ctx.channel}'s topic")
+        else:
+            ctx.say(f"topic: {current}" if current else "no topic set")
+        return
     await moderate(ctx, TOPIC, ctx.args)
 
 
