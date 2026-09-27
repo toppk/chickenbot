@@ -244,6 +244,7 @@ class Client:
         self._outbox: asyncio.Queue[str] = asyncio.Queue(maxsize=500)
         self._offered: set[str] = set()
         self._pending_caps: set[str] = set()
+        self._registered_sent = False
         self._closing = False
 
     # -- sending ---------------------------------------------------------
@@ -319,14 +320,18 @@ class Client:
         self._offered.clear()
         self._pending_caps.clear()
         self._bot_mode_set = False
+        self._registered_sent = False
         self.nick = self.wanted_nick
         drain = asyncio.create_task(self._drain_outbox())
         try:
             self.send("CAP", "LS", "302")
             if self.server_password:
                 self.send("PASS", self.server_password)
-            self.send("NICK", self.wanted_nick)
-            self.send("USER", self.username, "0", "*", self.realname)
+            # With SASL, NICK/USER are held back until authentication finishes:
+            # a server that marks the connection registered as soon as they pair
+            # up will refuse AUTHENTICATE with 907.
+            if not self.sasl_password:
+                self._send_registration()
             await self._read_loop()
         finally:
             drain.cancel()
@@ -428,10 +433,10 @@ class Client:
                 self.wanted_nick += "_"
                 self.send("NICK", self.wanted_nick)
             case "903":
-                self.send("CAP", "END")
+                self._end_caps()
             case "902" | "904" | "905" | "906" | "907":
                 log.error("SASL failed: %s", msg.text)
-                self.send("CAP", "END")
+                self._end_caps()
 
     def _claim_bot_mode(self) -> None:
         """Tell the network we are a bot so other bots can leave us alone."""
@@ -448,6 +453,18 @@ class Client:
             self.channels[key] = chan
         return chan
 
+    def _send_registration(self) -> None:
+        if self._registered_sent:
+            return
+        self._registered_sent = True
+        self.send("NICK", self.wanted_nick)
+        self.send("USER", self.username, "0", "*", self.realname)
+
+    def _end_caps(self) -> None:
+        """Close negotiation, making sure NICK/USER went out first."""
+        self._send_registration()
+        self.send("CAP", "END")
+
     def _handle_cap(self, msg: Message) -> None:
         if len(msg.params) < 2:
             return
@@ -462,7 +479,7 @@ class Client:
             if not self.sasl_password:
                 want = [c for c in want if c != "sasl"]
             if not want:
-                self.send("CAP", "END")
+                self._end_caps()
                 return
             self._pending_caps = set(want)
             self.send("CAP", "REQ", " ".join(want))
@@ -473,11 +490,11 @@ class Client:
             if "sasl" in acked and self.sasl_password:
                 self.send("AUTHENTICATE", "PLAIN")
             elif not self._pending_caps:
-                self.send("CAP", "END")
+                self._end_caps()
         elif sub == "NAK":
             self._pending_caps -= set(msg.text.split())
             if not self._pending_caps:
-                self.send("CAP", "END")
+                self._end_caps()
         elif sub == "NEW":
             want = sorted(WANTED_CAPS & {t.split("=", 1)[0] for t in msg.text.split()} - self.caps)
             if want:

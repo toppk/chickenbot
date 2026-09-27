@@ -243,6 +243,17 @@ Deliberately not asked for, because chickenbot uses none of them: `WHOX`,
 
 ## Gotchas
 
+- **NICK/USER are withheld until SASL finishes.** chonkline sets
+  `cx.registered = true` the moment NICK and USER pair up
+  (`upstream/chonkline/src/state.rs:814`), deferring only the welcome burst, while
+  `handle_authenticate` answers 907 once `registered` is set. So the ordinary
+  order — CAP LS, NICK, USER, then AUTHENTICATE — cannot authenticate there at
+  all. `Client._connect_once` therefore holds NICK/USER back whenever a SASL
+  password is configured, and every `CAP END` path goes through `_end_caps()`,
+  which sends them first. Reported upstream; the reorder is legal anyway and
+  `tests/test_connect.py::test_sasl_completes_before_nick_and_user_are_sent`
+  pins it against a server that behaves this way.
+
 - **A transport that keeps failing must not take the others down.** `supervise()`
   in `__main__.py` restarts each one on its own backoff, and a missing optional
   extra is logged and skipped, not fatal. Only "no transport at all" exits.

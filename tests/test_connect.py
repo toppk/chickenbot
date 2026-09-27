@@ -133,3 +133,75 @@ async def _wait_for(toy: ToyServer, needle: str, timeout: float = 5.0) -> str:
             await asyncio.sleep(0.02)
 
     return await asyncio.wait_for(poll(), timeout)
+
+
+class StrictSaslServer(ToyServer):
+    """A server that marks the connection registered as soon as NICK and USER pair
+    up, then refuses AUTHENTICATE with 907 -- chonkline's behaviour."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.have_nick = False
+        self.have_user = False
+        self.rejected = False
+
+    async def _serve(self, reader, writer):
+        while True:
+            raw = await reader.readline()
+            if not raw:
+                return
+            line = raw.decode().rstrip("\r\n")
+            self.lines.append(line)
+            if line.startswith("CAP LS"):
+                self.send(":toy CAP * LS :sasl message-tags account-tag server-time")
+            elif line.startswith("CAP REQ"):
+                self.send(":toy CAP * ACK :" + line.split(":", 1)[1])
+            elif line.startswith("NICK "):
+                self.have_nick = True
+            elif line.startswith("USER "):
+                self.have_user = True
+            elif line.startswith("AUTHENTICATE"):
+                if self.have_nick and self.have_user:
+                    self.rejected = True
+                    self.send(":toy 907 * :You have already authenticated using SASL")
+                elif line == "AUTHENTICATE PLAIN":
+                    self.send("AUTHENTICATE +")
+                else:
+                    self.sasl_payload = line.split(" ", 1)[1]
+                    self.send(":toy 903 chickenbot :logged in")
+            elif line.startswith("CAP END"):
+                self.send(":toy 001 chickenbot :welcome")
+                self.registered.set()
+            await writer.drain()
+
+
+async def test_sasl_completes_before_nick_and_user_are_sent(cfg, store):
+    """A server that registers on NICK+USER must still see AUTHENTICATE first."""
+    state = StrictSaslServer()
+    server = await asyncio.start_server(state.serve, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    client = Client(
+        host="127.0.0.1",
+        port=port,
+        tls=False,
+        nick="chickenbot",
+        sasl_user="chickenbot",
+        sasl_password="hunter2",
+        send_interval=0.0,
+    )
+    task = asyncio.create_task(client.run())
+    try:
+        await asyncio.wait_for(state.registered.wait(), 5)
+        assert not state.rejected, "AUTHENTICATE arrived after NICK/USER"
+        assert base64.b64decode(state.sasl_payload) == b"chickenbot\0chickenbot\0hunter2"
+        # NICK and USER still go out, just after authentication.
+        assert any(line.startswith("NICK ") for line in state.lines)
+        assert any(line.startswith("USER ") for line in state.lines)
+        assert state.lines.index("AUTHENTICATE PLAIN") < next(
+            i for i, line in enumerate(state.lines) if line.startswith("NICK ")
+        )
+    finally:
+        await client.close()
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        server.close()
