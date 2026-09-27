@@ -13,6 +13,8 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from .observe import note_many
+
 if TYPE_CHECKING:  # commands imports us, so this stays a type-only edge
     from .commands import Context, Handler
 
@@ -80,7 +82,8 @@ class ToolBox:
     async def run(self, name: str, args: dict) -> str:
         result = await self._run(name, args)
         self.log.append((name, args, result))
-        log.info(
+        note_many("tools", name if not result.startswith("error:") else f"{name}!")
+        log.debug(
             "tool %s by %s (%s) in %s -> %s",
             name,
             self.ctx.nick,

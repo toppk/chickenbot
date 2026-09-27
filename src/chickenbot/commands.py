@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from .brain import Provider, ProviderError
 from .config import Config
 from .events import Event, Kind
+from .observe import activity, note
 from .scheduler import MAX_DELAY, describe, parse_delay
 from .store import Store
 from .tools import ToolBox
@@ -110,11 +111,20 @@ class Handler:
         )
 
     async def dispatch(self, event: Event) -> None:
-        """The one door. Every event kind is gated and run the same way."""
-        if event.kind is Kind.SCHEDULED:
-            await self._run_scheduled(event)
-            return
-        await self._handle_message(event)
+        """The one door. Every event kind is gated and run the same way, and
+        produces exactly one activity line whatever happens inside."""
+        with activity(
+            kind=str(event.kind),
+            transport=event.transport.name,
+            room=event.room,
+            nick=event.sender,
+            account=event.account or "-",
+            job=event.job_id or "",
+        ):
+            if event.kind is Kind.SCHEDULED:
+                await self._run_scheduled(event)
+            else:
+                await self._handle_message(event)
 
     async def _run_scheduled(self, event: Event) -> None:
         """A job came due. Authority is re-checked now, not when it was set."""
@@ -122,6 +132,7 @@ class Handler:
         ctx = self._context(event, args.strip())
         cmd = COMMANDS.get(name.lower().removeprefix(self.cfg.prefix))
         if cmd is None:
+            note(outcome="unknown-command", command=name)
             log.warning("job %d names no command: %s", event.job_id, name)
             return
         await self._invoke(cmd, ctx)
@@ -140,12 +151,16 @@ class Handler:
 
     async def _invoke(self, cmd: Command, ctx: Context) -> None:
         """Gate, then run. Shared by typed commands and scheduled jobs."""
+        note(command=cmd.name, owner=ctx.is_owner)
         if cmd.owner and not ctx.is_owner:
+            note(outcome="denied")
             ctx.say(self._denial(ctx))
             return
         try:
             await cmd.run(self, ctx)
+            note(outcome="ran")
         except Exception:
+            note(outcome="failed")
             log.exception("command %s failed", cmd.name)
             ctx.say(f"{ctx.nick}: that broke, sorry")
 
@@ -153,6 +168,7 @@ class Handler:
         tr, env = event.transport, event
         if env.is_bot or tr.is_ignored(env.sender):
             # Another bot. Log what it says, but never act on it.
+            note(outcome="bot-ignored")
             if env.is_group and env.text:
                 await self.store.log_line(tr.name, env.room, env.sender, env.account, env.text, "bot")
             return
@@ -166,6 +182,7 @@ class Handler:
             await self.store.log_line(tr.name, env.room, env.sender, env.account, env.text, kind)
 
         if body is None:
+            note(outcome="chat")
             return
 
         cmd = COMMANDS.get(name.lower().removeprefix(self.cfg.prefix))
@@ -176,6 +193,8 @@ class Handler:
             if not env.text.startswith(self.cfg.prefix):
                 ctx.args = body
                 await cmd_ask(self, ctx)
+            else:
+                note(outcome="no-such-command", command=name)
             return
         await self._invoke(cmd, ctx)
 
@@ -298,6 +317,7 @@ async def cmd_ask(h: Handler, ctx: Context) -> None:
     if h.cfg.llm.tools and getattr(h.provider, "supports_tools", False):
         toolbox = ToolBox(h, ctx)
 
+    note(llm=h.provider.name)
     try:
         answer = await h.provider.reply(
             system=h.cfg.llm.persona + SYSTEM_SUFFIX,
@@ -307,8 +327,10 @@ async def cmd_ask(h: Handler, ctx: Context) -> None:
             toolbox=toolbox,
         )
     except ProviderError as exc:
+        note(outcome="llm-error", error=str(exc)[:60])
         ctx.say(f"{ctx.nick}: {exc}")
         return
+    note(outcome="answered")
     ctx.say(f"{ctx.nick}: {answer}")
 
 

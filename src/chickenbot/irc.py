@@ -12,6 +12,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 
 from . import irccase
+from .observe import TRACE
 
 log = logging.getLogger(__name__)
 
@@ -29,6 +30,13 @@ WANTED_CAPS = frozenset(
 )
 
 _TAG_UNESCAPE = {":": ";", "s": " ", "\\": "\\", "r": "\r", "n": "\n"}
+
+
+def _safe(line: str) -> str:
+    """Never log a SASL payload: base64 of user\0user\0password is not a secret."""
+    if line.startswith("AUTHENTICATE ") and line != "AUTHENTICATE +":
+        return "AUTHENTICATE <redacted>"
+    return line
 
 
 def unescape_tag(value: str) -> str:
@@ -354,7 +362,7 @@ class Client:
             except Exception as exc:  # noqa: BLE001 - read loop will notice
                 log.debug("write failed: %s", exc)
                 return
-            log.debug(">> %s", line)
+            log.log(TRACE, ">> %s", _safe(line))
             await asyncio.sleep(self.send_interval)
 
     async def _read_loop(self) -> None:
@@ -367,7 +375,7 @@ class Client:
             line = raw.decode("utf-8", "replace").rstrip("\r\n")
             if not line:
                 continue
-            log.debug("<< %s", line)
+            log.log(TRACE, "<< %s", _safe(line))
             msg = parse(line)
             await self._handle_protocol(msg)
             if self.handler is not None:

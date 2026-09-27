@@ -153,7 +153,7 @@ class GitHubConfig:
 class Config:
     prefix: str = "!"
     db_path: str = "chickenbot.db"
-    log_level: str = "info"
+    log_level: str = "info"  # trace | debug | info | warn | error
     chatlog_days: int = 365
     irc: IRCConfig = field(default_factory=IRCConfig)
     signal: SignalConfig = field(default_factory=SignalConfig)

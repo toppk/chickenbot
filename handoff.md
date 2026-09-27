@@ -241,6 +241,31 @@ Deliberately not asked for, because chickenbot uses none of them: `WHOX`,
 `chathistory`, `echo-message`, `labeled-response`, `batch`, `multiline`, `setname`,
 `MONITOR`, `standard-replies`. Keep it that way — asks should track real need.
 
+## Logging
+
+Three levels that matter, set by `log_level` in the toml or `--log-level` /
+`-l` on the command line, which wins:
+
+- **trace** — raw protocol, `>> ` and `<< ` per line. SASL payloads are
+  redacted by `irc._safe`, because base64 of `user\0user\0password` is not a
+  secret. Turn it on to read the wire, not to run.
+- **debug** — internal decisions, individual tool calls.
+- **info** — exactly one line per event, and the lifecycle messages.
+
+`observe.py` implements the one-line-per-event part. `Handler.dispatch` opens an
+`activity(...)`, everything downstream adds fields to it through `note()` /
+`note_many()` without plumbing (a `ContextVar`, so concurrent events do not
+mix), and it is written once when handling ends — including when handling
+raises, which is recorded as `outcome=crashed` and re-raised. The intent is that
+one grep gives the whole story of a message rather than fifteen fragments:
+
+```
+kind=message transport=irc room=#soup nick=toppk account=toppk command=ask owner=true llm=claude tools=current_time outcome=answered ms=1840
+```
+
+Outcomes in use: `chat`, `bot-ignored`, `denied`, `ran`, `failed`, `answered`,
+`llm-error`, `no-such-command`, `unknown-command`, `crashed`.
+
 ## Gotchas
 
 - **NICK/USER are withheld until SASL finishes.** chonkline sets

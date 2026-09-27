@@ -12,6 +12,7 @@ import sys
 
 from . import brain, config
 from .commands import Handler
+from .observe import TRACE
 from .scheduler import Scheduler
 from .store import Store
 from .transport import Transport
@@ -20,7 +21,13 @@ from .watcher import Watcher
 
 log = logging.getLogger("chickenbot")
 
-LEVELS = {"debug": logging.DEBUG, "info": logging.INFO, "warn": logging.WARNING, "error": logging.ERROR}
+LEVELS = {
+    "trace": TRACE,  # raw protocol lines
+    "debug": logging.DEBUG,
+    "info": logging.INFO,  # one activity line per event
+    "warn": logging.WARNING,
+    "error": logging.ERROR,
+}
 
 
 async def supervise(tr: Transport) -> None:
@@ -119,6 +126,12 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="chickenbot")
     parser.add_argument("-c", "--config", default="chickenbot.toml", help="config file")
     parser.add_argument("--check-config", action="store_true", help="validate the config and exit")
+    parser.add_argument(
+        "-l",
+        "--log-level",
+        choices=sorted(LEVELS),
+        help="override log_level from the config file",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -130,10 +143,14 @@ def main(argv: list[str] | None = None) -> int:
         print("config ok: " + ", ".join(sorted(cfg.enabled_transports())))
         return 0
 
+    # The command line wins over the config file.
+    level = args.log_level or cfg.log_level
     logging.basicConfig(
-        level=LEVELS.get(cfg.log_level.lower(), logging.INFO),
+        level=LEVELS.get(level.lower(), logging.INFO),
         format="%(asctime)s %(levelname)-5s %(name)s %(message)s",
     )
+    if level.lower() not in LEVELS:
+        log.warning("unknown log level %r, using info", level)
     try:
         return asyncio.run(run(cfg))
     except KeyboardInterrupt:
