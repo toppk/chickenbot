@@ -60,6 +60,14 @@ def note(**kw: object) -> None:
         activity.set(**kw)
 
 
+def note_default(**kw: object) -> None:
+    """Fill fields only if nothing set them already, so a generic outcome from
+    an outer frame cannot clobber the specific one an inner frame recorded."""
+    if (activity := _current.get()) is not None:
+        for key, value in kw.items():
+            activity.fields.setdefault(key, value)
+
+
 def note_many(key: str, value: str) -> None:
     if (activity := _current.get()) is not None:
         activity.add(key, value)

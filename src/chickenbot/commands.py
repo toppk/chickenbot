@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from .brain import Provider, ProviderError
 from .config import Config
 from .events import Event, Kind
-from .observe import activity, note
+from .observe import activity, note, note_default
 from .scheduler import MAX_DELAY, describe, parse_delay
 from .soul import Soul
 from .store import Store
@@ -152,7 +152,8 @@ class Handler:
             return
         try:
             await cmd.run(self, ctx)
-            note(outcome="ran")
+            # A command that recorded something more specific keeps it.
+            note_default(outcome="ran")
         except Exception:
             note(outcome="failed")
             log.exception("command %s failed", cmd.name)

@@ -110,3 +110,29 @@ def test_trace_sits_below_debug():
 def test_note_outside_an_activity_is_harmless():
     note(outcome="nothing")  # must not raise
     note_many("tools", "x")
+
+
+async def test_a_specific_outcome_survives_the_generic_one(cfg, transport, store, caplog):
+    """cmd_ask says `answered`; _invoke must not overwrite it with `ran`."""
+    from .test_commands import StubProvider
+
+    handler = Handler(cfg, store, StubProvider("42"), None)
+    with caplog.at_level(logging.INFO):
+        await send(handler, transport, "!ask what is six by seven")
+    line = lines(caplog)[0]
+    assert "outcome=answered" in line and "outcome=ran" not in line
+
+
+async def test_a_provider_error_is_not_overwritten_either(cfg, transport, store, caplog):
+    from .test_commands import StubProvider
+
+    handler = Handler(cfg, store, StubProvider(error="rate limited"), None)
+    with caplog.at_level(logging.INFO):
+        await send(handler, transport, "!ask hi")
+    assert "outcome=llm-error" in lines(caplog)[0]
+
+
+async def test_an_ordinary_command_still_says_ran(handler, transport, caplog):
+    with caplog.at_level(logging.INFO):
+        await send(handler, transport, "!uptime")
+    assert "outcome=ran" in lines(caplog)[0]
