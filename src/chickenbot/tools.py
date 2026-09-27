@@ -36,6 +36,10 @@ class Tool:
     requires: frozenset[str] = frozenset()  # transport capabilities this tool needs
 
 
+# Tools are named <family>_<verb>: chan_ for room moderation and state, log_ for
+# the chat log, feed_ for watchers, job_ for scheduling, ext_ for external
+# processes. The families exist so a bare "search" is never ambiguous once there
+# are several. Underscores, not dots: the schema allows only [A-Za-z0-9_-].
 TOOLS: dict[str, Tool] = {}
 
 
@@ -77,6 +81,10 @@ class ToolBox:
         ]
 
     def _available(self, spec: Tool) -> bool:
+        """Usable here, by this person. Declaring a tool the caller cannot use
+        just buys a refused round trip and wastes the context it occupies."""
+        if spec.owner and not self.ctx.is_owner:
+            return False
         return spec.requires <= self.ctx.transport.caps
 
     async def run(self, name: str, args: dict) -> str:
@@ -143,13 +151,16 @@ _WHO_WHY = {
 
 
 def _moderation_tool(action: str, description: str, params: dict) -> None:
+    """Registered as chan_<action>; `action` stays the capability name."""
+
     async def run(h: Handler, ctx: Context, args: dict) -> str:
         if not ctx.in_channel:
             return "error: that only works in a group"
         target = str(args.get("who") or args.get("text") or "")
         return await ctx.transport.moderate(action, ctx.channel, target, str(args.get("reason", "")))
 
-    TOOLS[action] = Tool(action, run, True, description, params, frozenset({action}))
+    name = f"chan_{action}"
+    TOOLS[name] = Tool(name, run, True, description, params, frozenset({action}))
 
 
 for _action, _desc in (
@@ -171,7 +182,7 @@ _moderation_tool(
 
 
 @tool(
-    "room_state",
+    "chan_state",
     description=(
         "Who is in this room, what modes are set, and the current ban list. "
         "Use before proposing a moderation action, and to check whether a ban already exists."

@@ -101,11 +101,21 @@ model decides, results come back in the same response. OpenRouter's is the
 is likewise server-side. There is no search routing code in this repo and there
 should not be.
 
+**Tools are named `<family>_<verb>`** — `chan_` for room moderation and state,
+then `log_`, `feed_`, `job_` as those land, and `ext_` for external processes.
+The families exist so a bare `search` is never ambiguous once there are several
+sources. **Underscores, never dots**: the tool-calling schema accepts only
+`[A-Za-z0-9_-]`, so `ext.foo` is rejected by strict providers. Tools are *not*
+prefixed by network — `ctx.transport` is fixed by the event, so the model never
+chooses one, and `requires`/`caps` already decides what is usable where.
+
 **Moderation is a tool, not just a command.** `tools.py` generates one tool per
-moderation action (`op`, `kick`, `ban`, `topic`, …) rather than a single
+moderation action (`chan_op`, `chan_kick`, `chan_ban`, …) rather than a single
 `moderate(action=…)`, so `requires` can differ per action: a transport whose
 `caps` lack `kick` never shows the model a kick tool and refuses one if
-proposed anyway. `room_state` is the read side — members, ops, channel modes and
+proposed anyway. `ToolBox.schemas` also hides owner-only tools from non-owners,
+because declaring what the caller cannot use only buys a refused round trip and
+the context it occupied. `chan_state` is the read side — members, ops, channel modes and
 the ban list — and exists so the model can check the room before proposing
 anything. All of them run through the same `ToolBox` gates as any other tool.
 
@@ -130,6 +140,12 @@ checks, a per-request call budget (`MAX_CALLS`), a per-call timeout
 (`TIMEOUT`), a loop cap (`MAX_TOOL_TURNS`), and turning every tool failure into
 a short error string so no traceback or credential reaches the channel. Every
 call is logged with the asking account.
+
+**The model is told where it is.** `cmd_ask` prefixes the user turn with
+`<context>network=… room=… kind=… asking=…</context>`. It goes in the user turn
+rather than the system prompt so the stable prefix stays cacheable, and it
+exists because the tool list alone does not tell the model which network it is
+acting on.
 
 **Vendor-specific request fields are config, not code.** `llm.body_params` is
 merged into every openai-compatible request body and `llm.search_params` on top

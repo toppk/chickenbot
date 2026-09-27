@@ -43,7 +43,7 @@ Bot → tool:
 
 ```json
 {"type":"welcome","v":1,
- "accepted":["ext.twitter_list"],
+ "accepted":["ext_twitter_list"],
  "rejected":[{"name":"irc_kick","reason":"name collides with a built-in"}]}
 ```
 
@@ -58,7 +58,7 @@ permission, so the bot decides:
 [tools]
 socket = "/run/chickenbot/tools.sock"
 
-[tools.grants."ext.twitter_list"]
+[tools.grants."ext_twitter_list"]
 owner = false          # anyone in the room may call it
 requires = []          # no transport capability needed
 emit = ["irc:#soup"]   # rooms it may push events to
@@ -68,8 +68,9 @@ A tool with no entry is registered **owner-only, with no emit rights**. That way
 an unconfigured tool is useful for development without being reachable by
 everyone the moment it appears.
 
-Names are namespaced with `ext.` so an external tool can never shadow a
-built-in. A declaration is rejected if the name is not a plain identifier, if it
+Names are namespaced with `ext_` so an external tool can never shadow a
+built-in. Underscore rather than a dot: the tool-calling schema accepts only
+`[A-Za-z0-9_-]`, and a dot is rejected by strict providers. A declaration is rejected if the name is not a plain identifier, if it
 collides with another live external tool, or if the schema is not an object
 schema.
 
@@ -78,7 +79,7 @@ schema.
 Bot → tool:
 
 ```json
-{"type":"call","id":"c17","tool":"ext.twitter_list",
+{"type":"call","id":"c17","tool":"ext_twitter_list",
  "args":{"limit":5},
  "caller":{"transport":"irc","room":"#soup","nick":"toppk","account":"toppk"},
  "deadline_ms":20000}

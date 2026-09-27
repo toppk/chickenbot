@@ -301,9 +301,15 @@ async def cmd_ask(h: Handler, ctx: Context) -> None:
         recent = await h.store.recent(ctx.transport.name, ctx.channel, h.cfg.llm.history_lines)
         scrollback = "\n".join(f"<{line.nick}> {line.text}" for line in recent)
 
-    prompt = ctx.args
+    # Volatile context goes in the user turn, not the system prompt, so the
+    # stable prefix stays cacheable.
+    where = "group" if ctx.in_channel else "direct message"
+    situation = f"<context>network={ctx.transport.name} room={ctx.channel} kind={where} asking={ctx.nick}</context>"
+    prompt = f"{situation}\n\n{ctx.args}"
     if scrollback:
-        prompt = f"<channel_scrollback>\n{scrollback}\n</channel_scrollback>\n\n{ctx.nick} asks: {ctx.args}"
+        prompt = (
+            f"{situation}\n<channel_scrollback>\n{scrollback}\n</channel_scrollback>\n\n{ctx.nick} asks: {ctx.args}"
+        )
 
     toolbox = None
     if h.cfg.llm.tools and getattr(h.provider, "supports_tools", False):

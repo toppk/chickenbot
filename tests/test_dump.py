@@ -99,8 +99,8 @@ async def test_engines_copes_with_no_model(cfg, store, transport):
 
 async def test_tools_shows_gates_and_availability_here(handler, transport):
     blob = "\n".join(await dump(handler, transport, "tools"))
-    assert "kick: owner, needs kick, usable here: yes" in blob
-    assert "room_state: open, needs -, usable here: yes" in blob
+    assert "chan_kick: owner, needs kick, usable here: yes" in blob
+    assert "chan_state: open, needs -, usable here: yes" in blob
 
 
 async def test_tools_marks_what_this_network_cannot_do(handler, store):
@@ -108,7 +108,7 @@ async def test_tools_marks_what_this_network_cannot_do(handler, store):
     signal.name = "signal"
     handler.transports = {"signal": signal}
     blob = "\n".join(await dump(handler, signal, "tools"))
-    assert "kick: owner, needs kick, usable here: no (signal)" in blob
+    assert "chan_kick: owner, needs kick, usable here: no (signal)" in blob
 
 
 async def test_a_long_dump_is_truncated_not_flooded(handler, transport, monkeypatch):

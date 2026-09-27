@@ -222,3 +222,17 @@ def test_ago_formats_coarsely():
     assert ago(now - 120) == "2m"
     assert ago(now - 7500) == "2h5m"
     assert ago(now - 200000) == "2d7h"
+
+
+async def test_the_prompt_says_which_network_and_room_it_is_in(cfg, transport, store):
+    provider = StubProvider()
+    handler = Handler(cfg, store, provider, None)
+    await send(handler, transport, "!ask what is this")
+    assert "<context>network=fake room=#chan kind=group asking=nate</context>" in provider.prompts[-1]
+
+
+async def test_a_direct_message_says_so(cfg, transport, store):
+    provider = StubProvider()
+    handler = Handler(cfg, store, provider, None)
+    await send(handler, transport, "hello there", room="nate", is_group=False)
+    assert "kind=direct message" in provider.prompts[-1]
