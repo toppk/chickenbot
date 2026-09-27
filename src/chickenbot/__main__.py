@@ -12,6 +12,7 @@ import sys
 
 from . import brain, config
 from .commands import Handler
+from .scheduler import Scheduler
 from .store import Store
 from .transport import Transport
 from .transports import build
@@ -83,8 +84,11 @@ async def run(cfg: config.Config) -> int:
         watcher = Watcher(store, cfg.github, handler.announce, provider)
         handler.watcher = watcher
 
+    scheduler = Scheduler(store, transports, handler.dispatch)
+
     tasks = [asyncio.create_task(supervise(tr), name=f"tr:{name}") for name, tr in transports.items()]
     tasks.append(asyncio.create_task(prune_daily(store, cfg.chatlog_days), name="prune"))
+    tasks.append(asyncio.create_task(scheduler.run(), name="scheduler"))
     if watcher is not None:
         tasks.append(asyncio.create_task(watcher.run(), name="watcher"))
 

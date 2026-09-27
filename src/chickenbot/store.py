@@ -38,6 +38,19 @@ CREATE TABLE IF NOT EXISTS watch (
     UNIQUE (transport, owner, repo, channel)
 );
 
+CREATE TABLE IF NOT EXISTS job (
+    id         INTEGER PRIMARY KEY,
+    due_at     INTEGER NOT NULL,
+    transport  TEXT NOT NULL,
+    room       TEXT NOT NULL,
+    nick       TEXT NOT NULL,
+    account    TEXT NOT NULL,
+    is_group   INTEGER NOT NULL DEFAULT 1,
+    command    TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS job_due ON job (due_at);
+
 CREATE TABLE IF NOT EXISTS cursor (
     watch_id INTEGER NOT NULL REFERENCES watch(id) ON DELETE CASCADE,
     feed     TEXT NOT NULL,
@@ -54,6 +67,18 @@ class Line:
     channel: str
     nick: str
     text: str
+
+
+@dataclass(frozen=True, slots=True)
+class Job:
+    id: int
+    due_at: int
+    transport: str
+    room: str
+    nick: str
+    account: str
+    is_group: bool
+    command: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -187,6 +212,94 @@ class Store:
             cur = self._db.execute("DELETE FROM chatlog WHERE ts < ?", (cutoff,))
             self._db.commit()
             return cur.rowcount
+
+        return await self._run(go)
+
+    # -- scheduled jobs ----------------------------------------------------
+
+    async def add_job(
+        self, *, due_at: int, transport: str, room: str, nick: str, account: str, is_group: bool, command: str
+    ) -> int:
+        def go() -> int:
+            cur = self._db.execute(
+                "INSERT INTO job (due_at, transport, room, nick, account, is_group, command, created_at)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    due_at,
+                    transport,
+                    self.fold(transport, room),
+                    nick,
+                    account,
+                    int(is_group),
+                    command,
+                    int(time.time()),
+                ),
+            )
+            self._db.commit()
+            return int(cur.lastrowid or 0)
+
+        return await self._run(go)
+
+    async def due_jobs(self, now: int) -> list[Job]:
+        """Claim everything due. Rows are deleted as they are handed out, so a
+        job cannot fire twice even if handling it is slow."""
+
+        def go() -> list[Job]:
+            rows = self._db.execute(
+                "SELECT id, due_at, transport, room, nick, account, is_group, command"
+                " FROM job WHERE due_at <= ? ORDER BY due_at",
+                (now,),
+            ).fetchall()
+            if rows:
+                self._db.executemany("DELETE FROM job WHERE id = ?", [(r["id"],) for r in rows])
+                self._db.commit()
+            return [
+                Job(
+                    r["id"],
+                    r["due_at"],
+                    r["transport"],
+                    r["room"],
+                    r["nick"],
+                    r["account"],
+                    bool(r["is_group"]),
+                    r["command"],
+                )
+                for r in rows
+            ]
+
+        return await self._run(go)
+
+    async def jobs(self, transport: str = "", room: str = "") -> list[Job]:
+        def go() -> list[Job]:
+            sql = "SELECT id, due_at, transport, room, nick, account, is_group, command FROM job"
+            args: tuple = ()
+            if transport and room:
+                sql += " WHERE transport = ? AND room = ?"
+                args = (transport, self.fold(transport, room))
+            rows = self._db.execute(f"{sql} ORDER BY due_at", args).fetchall()
+            return [
+                Job(
+                    r["id"],
+                    r["due_at"],
+                    r["transport"],
+                    r["room"],
+                    r["nick"],
+                    r["account"],
+                    bool(r["is_group"]),
+                    r["command"],
+                )
+                for r in rows
+            ]
+
+        return await self._run(go)
+
+    async def drop_job(self, job_id: int, account: str) -> bool:
+        """Only the account that scheduled it may cancel it."""
+
+        def go() -> bool:
+            cur = self._db.execute("DELETE FROM job WHERE id = ? AND account = ?", (job_id, account))
+            self._db.commit()
+            return cur.rowcount > 0
 
         return await self._run(go)
 

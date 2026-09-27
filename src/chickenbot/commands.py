@@ -10,6 +10,8 @@ from dataclasses import dataclass
 
 from .brain import Provider, ProviderError
 from .config import Config
+from .events import Event, Kind
+from .scheduler import MAX_DELAY, describe, parse_delay
 from .store import Store
 from .tools import ToolBox
 from .transport import BAN, DEOP, DEVOICE, KICK, OP, TOPIC, UNBAN, VOICE, Envelope, Transport
@@ -93,6 +95,62 @@ class Handler:
     # -- entry point -----------------------------------------------------
 
     async def on_message(self, tr: Transport, env: Envelope) -> None:
+        """Transport sink: turn an inbound line into a MESSAGE event."""
+        await self.dispatch(
+            Event(
+                kind=Kind.MESSAGE,
+                transport=tr,
+                room=env.room,
+                sender=env.sender,
+                account=env.account,
+                text=env.text,
+                is_group=env.is_group,
+                is_bot=env.is_bot,
+            )
+        )
+
+    async def dispatch(self, event: Event) -> None:
+        """The one door. Every event kind is gated and run the same way."""
+        if event.kind is Kind.SCHEDULED:
+            await self._run_scheduled(event)
+            return
+        await self._handle_message(event)
+
+    async def _run_scheduled(self, event: Event) -> None:
+        """A job came due. Authority is re-checked now, not when it was set."""
+        name, _, args = event.text.partition(" ")
+        ctx = self._context(event, args.strip())
+        cmd = COMMANDS.get(name.lower().removeprefix(self.cfg.prefix))
+        if cmd is None:
+            log.warning("job %d names no command: %s", event.job_id, name)
+            return
+        await self._invoke(cmd, ctx)
+
+    def _context(self, event: Event, args: str) -> Context:
+        tr = event.transport
+        return Context(
+            transport=tr,
+            nick=event.sender,
+            account=event.account,
+            channel=event.room,
+            args=args,
+            is_owner=tr.is_owner(event.account),
+            in_channel=event.is_group,
+        )
+
+    async def _invoke(self, cmd: Command, ctx: Context) -> None:
+        """Gate, then run. Shared by typed commands and scheduled jobs."""
+        if cmd.owner and not ctx.is_owner:
+            ctx.say(self._denial(ctx))
+            return
+        try:
+            await cmd.run(self, ctx)
+        except Exception:
+            log.exception("command %s failed", cmd.name)
+            ctx.say(f"{ctx.nick}: that broke, sorry")
+
+    async def _handle_message(self, event: Event) -> None:
+        tr, env = event.transport, event
         if env.is_bot or tr.is_ignored(env.sender):
             # Another bot. Log what it says, but never act on it.
             if env.is_group and env.text:
@@ -111,15 +169,7 @@ class Handler:
             return
 
         cmd = COMMANDS.get(name.lower().removeprefix(self.cfg.prefix))
-        ctx = Context(
-            transport=tr,
-            nick=env.sender,
-            account=env.account,
-            channel=env.room,
-            args=args.strip(),
-            is_owner=tr.is_owner(env.account),
-            in_channel=env.is_group,
-        )
+        ctx = self._context(event, args.strip())
 
         if cmd is None:
             # Addressed by name with no command word: send the lot to the model.
@@ -127,14 +177,7 @@ class Handler:
                 ctx.args = body
                 await cmd_ask(self, ctx)
             return
-        if cmd.owner and not ctx.is_owner:
-            ctx.say(self._denial(ctx))
-            return
-        try:
-            await cmd.run(self, ctx)
-        except Exception:
-            log.exception("command %s failed", cmd.name)
-            ctx.say(f"{ctx.nick}: that broke, sorry")
+        await self._invoke(cmd, ctx)
 
     def _extract(self, tr: Transport, text: str, in_group: bool) -> str | None:
         """Return the command body, or None when the bot was not being spoken to."""
@@ -369,3 +412,51 @@ async def cmd_topic(h: Handler, ctx: Context) -> None:
 async def cmd_say(h: Handler, ctx: Context) -> None:
     if ctx.args:
         ctx.say(ctx.args)
+
+
+@command("in", owner=True, usage="in <delay> <command>", blurb="run a command later")
+async def cmd_in(h: Handler, ctx: Context) -> None:
+    delay_text, _, rest = ctx.args.partition(" ")
+    delay = parse_delay(delay_text)
+    rest = rest.strip()
+    if not delay or not rest:
+        ctx.say(f"usage: {h.cfg.prefix}in <delay> <command>  e.g. {h.cfg.prefix}in 5m say kettle is ready")
+        return
+    if delay > MAX_DELAY:
+        ctx.say("that is further off than a year")
+        return
+    name = rest.split(" ", 1)[0].lower().removeprefix(h.cfg.prefix)
+    if name not in COMMANDS:
+        ctx.say(f"no command called {name}")
+        return
+    job_id = await h.store.add_job(
+        due_at=int(time.time()) + delay,
+        transport=ctx.transport.name,
+        room=ctx.channel,
+        nick=ctx.nick,
+        account=ctx.account,
+        is_group=ctx.in_channel,
+        command=rest,
+    )
+    ctx.say(f"{ctx.nick}: job {job_id} in {describe(delay)}")
+
+
+@command("jobs", blurb="what is scheduled here")
+async def cmd_jobs(h: Handler, ctx: Context) -> None:
+    jobs = await h.store.jobs(ctx.transport.name, ctx.channel)
+    if not jobs:
+        ctx.say("nothing scheduled here")
+        return
+    now = int(time.time())
+    ctx.say(", ".join(f"{j.id}: {j.command} (in {describe(j.due_at - now)})" for j in jobs[:5]))
+
+
+@command("unschedule", owner=True, usage="unschedule <id>", blurb="cancel a scheduled job")
+async def cmd_unschedule(h: Handler, ctx: Context) -> None:
+    raw = ctx.args.split(" ")[0] if ctx.args else ""
+    if not raw.isdigit():
+        ctx.say(f"usage: {h.cfg.prefix}unschedule <id>")
+        return
+    # Only whoever scheduled it may cancel it, owner or not.
+    ok = await h.store.drop_job(int(raw), ctx.account)
+    ctx.say(f"dropped job {raw}" if ok else f"no job {raw} of yours")
