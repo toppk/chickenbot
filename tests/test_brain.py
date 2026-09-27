@@ -204,3 +204,32 @@ def test_markdown_stripping_leaves_snake_case_alone(raw, want):
 )
 def test_asterisks_that_are_not_emphasis_are_left_alone(raw, want):
     assert clean_for_irc(raw) == want
+
+
+async def test_the_serving_provider_and_cost_reach_the_activity_line(monkeypatch):
+    """Provider shopping means the endpoint varies per request; record which."""
+    import httpx
+
+    from chickenbot.brain.openai_compat import OpenAICompatProvider
+    from chickenbot.observe import activity
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "provider": "Novita",
+                "model": "deepseek/deepseek-v4.1-flash",
+                "usage": {"cost": 2.184e-05},
+                "choices": [{"message": {"role": "assistant", "content": "ok"}}],
+            },
+        )
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "k")
+    p = OpenAICompatProvider(LLMConfig(provider="openrouter"))
+    p.client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    with activity(kind="message") as record:
+        assert await p.reply(system="s", history=[], prompt="p", search=False) == "ok"
+    await p.aclose()
+    assert record.fields["served"] == "Novita"
+    assert record.fields["cost"] == "0.000022"
+    assert record.fields["model"] == "deepseek/deepseek-v4.1-flash"

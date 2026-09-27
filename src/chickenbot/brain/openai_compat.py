@@ -13,6 +13,7 @@ import os
 import httpx
 
 from ..config import LLMConfig
+from ..observe import note
 from . import ProviderError, Turn
 
 log = logging.getLogger(__name__)
@@ -92,9 +93,16 @@ class OpenAICompatProvider:
         if response.status_code >= 400:
             raise ProviderError(f"api error {response.status_code}")
         try:
-            return response.json()["choices"][0]["message"]
+            payload = response.json()
+            message = payload["choices"][0]["message"]
         except (KeyError, IndexError, ValueError) as exc:
             raise ProviderError("unexpected response shape") from exc
+        # Which endpoint actually served this, since the policy shops per request.
+        note(served=payload.get("provider", ""), model=payload.get("model", ""))
+        usage = payload.get("usage") or {}
+        if usage.get("cost") is not None:
+            note(cost=f"{usage['cost']:.6f}")
+        return message
 
     async def _run_call(self, toolbox, call: dict) -> dict:
         fn = call.get("function") or {}

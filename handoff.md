@@ -178,6 +178,13 @@ old field is accepted and ignored, so a policy written against it silently does
 nothing. `require_parameters = true` matters for this bot specifically: without
 it a request can route to an endpoint that ignores `tools`.
 
+Live as of 2026-09-27: `provider = "openrouter"`, model
+`deepseek/deepseek-v4.1-flash`, with `zdr`/`data_collection=deny`/`sort=price`/
+`require_parameters` in `[llm.body_params.provider]`. A first real call routed
+to Novita and cost $0.0000218. `openai_compat` records `served=` and `cost=`
+onto the activity line, because with provider shopping the endpoint differs
+per request and otherwise nothing would say which one answered.
+
 The one part that could not be config is `session_id`, which has to be derived
 per conversation. `cmd_ask` sends `"{transport}:{room}"`, gated by
 `llm.session_stickiness`, so OpenRouter keeps a room on one model and provider
