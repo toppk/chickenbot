@@ -283,14 +283,41 @@ Deliberately not asked for, because chickenbot uses none of them: `WHOX`,
 irc.chonkbase.net:6697 TLS, `prefix = "."` (so it does not fight whatever owns
 `!`), `channels = ["#soup"]`, `owners = ["toppk"]`.
 
-**Permission boundary as of this handoff:** the user authorised connecting to
-chonkbase *only* to join `#soup`, the testing channel. Do not join `#lobby`.
-There is no NickServ account for the bot yet — `sasl_user` is empty and the
-user said they would create it later. Do not attempt to register one.
+**Permission boundary:** the user authorised connecting to chonkbase *only* to
+join `#soup`, the testing channel. Do not join `#lobby`. **chickenbot never
+talks to NickServ or ChanServ itself** — the user does the services bootstrap by
+hand from their own client, decided 2026-09-26. Do not add autonomous
+registration, and do not add a raw-protocol command to enable it: anything that
+emits arbitrary protocol must stay human-only and must never be an LLM tool,
+since scrollback reaches the model.
 
-Once the account exists: set `sasl_user = "chickenbot"` and export
-`CHICKENBOT_SASL_PASSWORD`. The SASL PLAIN path is already covered by a test
-against a real socket (`tests/test_connect.py`).
+**Why the bot has to be the channel founder.** chonkline's ChanServ is three
+commands — `REGISTER`, `INFO`, `DROP` (`src/cmds.rs:2215`). There is no access
+list: no `FLAGS`, no `AOP`/`SOP`, no `ChanServ OP`. A registration stores one
+founder account (`src/channels.rs:19`), and `apply_founder_status` auto-ops only
+that account. So a human founder cannot grant the bot persistent ops; the bot's
+account must be the founder. On an unregistered channel the creator is opped
+(`admit_as_op`, `cmds.rs:1003`); once registered that is withheld so only the
+founder is opped.
+
+The one-time bootstrap, run by the user from their own client:
+
+1. Connect **as the nick `chickenbot`** — NickServ `REGISTER <password>` names
+   the account after the current nick (`cmds.rs:2113`), it takes no account
+   argument.
+2. `/msg ChanServ INFO #soup`, then join (unregistered and empty gives `+o`, else
+   an existing op must `+o` you, because `REGISTER` checks `is_op`).
+3. `/msg ChanServ REGISTER #soup`.
+
+Then set `sasl_user = "chickenbot"` and export `CHICKENBOT_SASL_PASSWORD`. SASL
+PLAIN is the only mechanism offered, and that path is covered by a test against
+a real socket (`tests/test_connect.py`). Until this is done, `.op`/`.kick`/
+`.ban`/`.topic` correctly refuse with "i am not opped".
+
+**No partyline.** Proposed and rejected 2026-09-26. Its purpose — a private
+admin surface — is already served by direct messages, which need no prefix and
+gate on the services account, and which work on all four transports. A partyline
+would be the one IRC-shaped thing in a bot that now speaks four networks.
 
 To watch protocol traffic, copy the config with `log_level = "debug"` into a
 scratch dir and point `db_path` there too.
