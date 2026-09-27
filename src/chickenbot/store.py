@@ -206,6 +206,20 @@ class Store:
 
         return await self._run(go)
 
+    async def known_accounts(self, limit: int = 20) -> list[tuple[str, str, str, int]]:
+        """Everyone we have seen identified, newest first, across every network."""
+
+        def go() -> list[tuple[str, str, str, int]]:
+            rows = self._db.execute(
+                "SELECT transport, account, nick, MAX(ts) AS seen FROM chatlog"
+                " WHERE account != '' GROUP BY transport, account"
+                " ORDER BY seen DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+            return [(r["transport"], r["account"], r["nick"], r["seen"]) for r in rows]
+
+        return await self._run(go)
+
     async def prune(self, keep_days: int) -> int:
         def go() -> int:
             cutoff = int(time.time()) - keep_days * 86400

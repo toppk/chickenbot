@@ -63,6 +63,10 @@ class SignalTransport:
         except Exception:
             log.exception("signal send to %s failed", room)
 
+    def describe(self) -> list[str]:
+        # No membership tracking here: the library owns that state.
+        return [f"groups: {', '.join(self.rooms) or 'any'}"]
+
     async def moderate(self, action: str, room: str, target: str, reason: str = "") -> str:
         return f"error: signal cannot {action}"
 

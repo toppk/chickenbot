@@ -36,6 +36,9 @@ class FakeTransport:
     def say(self, room: str, text: str) -> None:
         self.sent.append((room, text))
 
+    def describe(self) -> list[str]:
+        return [f"rooms: {', '.join(self.rooms) or 'none'}"]
+
     async def moderate(self, action: str, room: str, target: str, reason: str = "") -> str:
         self.actions.append((action, room, target, reason))
         return f"{action} {target}"

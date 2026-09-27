@@ -58,6 +58,26 @@ class IRCTransport:
         for line in self.lines(text):
             self.client.send("PRIVMSG", room, line)
 
+    def describe(self) -> list[str]:
+        out = []
+        for chan in self.client.channels.values():
+            ops = sorted(n for n, m in chan.members.items() if "o" in m)
+            bits = [f"{len(chan.members)} here"]
+            if ops:
+                bits.append(f"ops {'+'.join(ops)}")
+            if chan.modes:
+                bits.append("+" + "".join(sorted(chan.modes)))
+            if chan.bans:
+                bits.append(f"bans {', '.join(sorted(chan.bans))}")
+            if chan.topic:
+                bits.append(f'topic "{chan.topic[:60]}"')
+            out.append(f"{chan.name}: {', '.join(bits)}")
+        joined = {self.fold(c.name) for c in self.client.channels.values()}
+        missing = [r for r in self.rooms if self.fold(r) not in joined]
+        if missing:
+            out.append(f"not in: {', '.join(missing)}")
+        return out or ["no channels joined"]
+
     async def moderate(self, action: str, room: str, target: str, reason: str = "") -> str:
         if action == TOPIC:
             limit = self.client.isupport.topiclen

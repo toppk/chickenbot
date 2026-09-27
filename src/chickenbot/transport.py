@@ -60,6 +60,10 @@ class Transport(Protocol):
 
     def say(self, room: str, text: str) -> None: ...
 
+    def describe(self) -> list[str]:
+        """One line per room this transport knows about, for a state dump."""
+        ...
+
     async def moderate(self, action: str, room: str, target: str, reason: str = "") -> str:
         """Perform a moderation action, or explain why it did not happen."""
         ...

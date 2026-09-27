@@ -474,3 +474,74 @@ async def cmd_unschedule(h: Handler, ctx: Context) -> None:
     # Only whoever scheduled it may cancel it, owner or not.
     ok = await h.store.drop_job(int(raw), ctx.account)
     ctx.say(f"dropped job {raw}" if ok else f"no job {raw} of yours")
+
+
+# -- state dumps ---------------------------------------------------------
+
+MAX_DUMP_LINES = 12
+
+
+async def _dump_comms(h: Handler, ctx: Context) -> list[str]:
+    """Every network, every room, and everyone we have seen identified."""
+    out: list[str] = []
+    for name, tr in sorted(h.transports.items()):
+        caps = "+".join(sorted(tr.caps)) or "none"
+        out.append(f"[{name}] as {tr.me}, can: {caps}")
+        out += [f"  {line}" for line in tr.describe()]
+    if not out:
+        out.append("no transports")
+    known = await h.store.known_accounts()
+    if known:
+        out.append(
+            "known: " + ", ".join(f"{acct}@{transport} ({ago(seen)} ago)" for transport, acct, _n, seen in known)
+        )
+    return out
+
+
+async def _dump_engines(h: Handler, ctx: Context) -> list[str]:
+    out = [f"up {ago(int(h.started))}, prefix {h.cfg.prefix!r}"]
+    if h.provider is None:
+        out.append("llm: none configured")
+    else:
+        supports = getattr(h.provider, "supports_tools", False)
+        out.append(
+            f"llm: {h.provider.name} model={getattr(h.provider, 'model', '-')} "
+            f"tools={'yes' if (h.cfg.llm.tools and supports) else 'no'} "
+            f"search={'on' if h.cfg.llm.search else 'off'} history={h.cfg.llm.history_lines}"
+        )
+    jobs = await h.store.jobs()
+    now = int(time.time())
+    soonest = f", next in {describe(min(j.due_at for j in jobs) - now)}" if jobs else ""
+    out.append(f"scheduler: {len(jobs)} job(s){soonest}")
+    watches = await h.store.watches()
+    out.append(f"github: {'on' if h.cfg.github.enabled else 'off'}, {len(watches)} watch(es)")
+    return out
+
+
+async def _dump_tools(h: Handler, ctx: Context) -> list[str]:
+    from .tools import TOOLS
+
+    out = []
+    for name, spec in sorted(TOOLS.items()):
+        gate = "owner" if spec.owner else "open"
+        needs = "+".join(sorted(spec.requires)) or "-"
+        here = "yes" if spec.requires <= ctx.transport.caps else f"no ({ctx.transport.name})"
+        out.append(f"{name}: {gate}, needs {needs}, usable here: {here}")
+    return out or ["no tools registered"]
+
+
+_DUMPS = {"comms": _dump_comms, "engines": _dump_engines, "tools": _dump_tools}
+
+
+@command("dump", owner=True, usage="dump <comms|engines|tools>", blurb="what the bot currently knows")
+async def cmd_dump(h: Handler, ctx: Context) -> None:
+    section = (ctx.args.split(" ")[0] if ctx.args else "").lower()
+    dumper = _DUMPS.get(section)
+    if dumper is None:
+        ctx.say(f"usage: {h.cfg.prefix}dump <{'|'.join(_DUMPS)}>")
+        return
+    lines = await dumper(h, ctx)
+    for line in lines[:MAX_DUMP_LINES]:
+        ctx.say(line)
+    if len(lines) > MAX_DUMP_LINES:
+        ctx.say(f"... and {len(lines) - MAX_DUMP_LINES} more")

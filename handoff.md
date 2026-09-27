@@ -254,6 +254,28 @@ Deliberately not asked for, because chickenbot uses none of them: `WHOX`,
 `chathistory`, `echo-message`, `labeled-response`, `batch`, `multiline`, `setname`,
 `MONITOR`, `standard-replies`. Keep it that way — asks should track real need.
 
+## Introspection
+
+`.dump <comms|engines|tools>`, owner-only, and **global rather than scoped to
+the network it was asked on** — a dump typed on IRC reports the Signal groups
+too. That is deliberate (one bot, one state), and it is why it is owner-gated:
+it leaks room names and account names across networks.
+
+- **comms** — every transport, its capabilities, what `Transport.describe()`
+  reports per room, and everyone seen identified anywhere (`Store.known_accounts`
+  groups the chat log by transport and account).
+- **engines** — model and its settings, scheduler backlog and next firing,
+  GitHub watcher.
+- **tools** — each tool's gate, what it requires, and whether it is usable on
+  the transport you asked from.
+
+`describe()` is on the `Transport` protocol so no caller needs to know which
+network it is looking at. IRC reports members, ops, modes, bans and topic; the
+others report their room list, because their libraries own that state.
+
+Output is capped at `MAX_DUMP_LINES` with an "and N more" tail, since each line
+is a separate message and IRC paces sends at `send_interval`.
+
 ## Logging
 
 Three levels that matter, set by `log_level` in the toml or `--log-level` /

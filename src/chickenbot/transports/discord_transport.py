@@ -59,6 +59,10 @@ class DiscordTransport:
         except Exception:
             log.exception("discord send to %s failed", room)
 
+    def describe(self) -> list[str]:
+        # No membership tracking here: the library owns that state.
+        return [f"channels: {', '.join(self.rooms) or 'any'}"]
+
     async def moderate(self, action: str, room: str, target: str, reason: str = "") -> str:
         channel = self.client.get_channel(int(room))
         if channel is None:
