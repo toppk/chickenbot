@@ -36,7 +36,11 @@ class Provider(Protocol):
 _FENCE = re.compile(r"```[\w-]*\n?")
 _HEADING = re.compile(r"^#{1,6}\s*", re.MULTILINE)
 _BULLET = re.compile(r"^\s*[-*+]\s+", re.MULTILINE)
-_EMPHASIS = re.compile(r"(\*\*|__|\*|_)(?=\S)(.+?)(?<=\S)\1", re.DOTALL)
+_EMPHASIS = re.compile(r"(\*\*|\*)(?=\S)(.+?)(?<=\S)\1", re.DOTALL)
+# Underscore emphasis only at word boundaries. CommonMark forbids it inside a
+# word, and without that rule snake_case is mangled: ext_github_activity had
+# its _github_ read as italics and came out as extgithubactivity.
+_UNDERSCORE = re.compile(r"(?<!\w)(__|_)(?=\S)(.+?)(?<=\S)\1(?!\w)", re.DOTALL)
 _LINK = re.compile(r"\[([^\]]+)\]\((https?://[^)\s]+)\)")
 _CITATION = re.compile(r"\s*\[\d+\](?=[\s.,;:]|$)")
 
@@ -49,6 +53,7 @@ def clean_for_irc(text: str) -> str:
     text = _HEADING.sub("", text)
     text = _BULLET.sub("", text)
     text = _EMPHASIS.sub(r"\2", text)
+    text = _UNDERSCORE.sub(r"\2", text)
     text = _CITATION.sub("", text)
     text = text.replace("`", "")
     # IRC formatting codes: bold, colour, reset, reverse, italic, underline.

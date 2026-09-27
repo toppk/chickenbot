@@ -172,3 +172,20 @@ async def test_missing_key_names_the_env_var_it_wanted(monkeypatch):
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     with pytest.raises(ProviderError, match="OPENROUTER_API_KEY"):
         OpenAICompatProvider(LLMConfig(provider="openrouter"))
+
+
+@pytest.mark.parametrize(
+    "raw, want",
+    [
+        ("ext_github_activity", "ext_github_activity"),  # the bug: was extgithubactivity
+        ("chan_ban and chan_unban", "chan_ban and chan_unban"),
+        ("call some_function_name(a_b)", "call some_function_name(a_b)"),
+        ("see src/chickenbot/tool_socket.py", "see src/chickenbot/tool_socket.py"),
+        ("_italic_ here", "italic here"),  # boundary emphasis still works
+        ("__bold__ here", "bold here"),
+        ("**star** and *one*", "star and one"),
+        ("a _b c_ d", "a b c d"),
+    ],
+)
+def test_markdown_stripping_leaves_snake_case_alone(raw, want):
+    assert clean_for_irc(raw) == want
