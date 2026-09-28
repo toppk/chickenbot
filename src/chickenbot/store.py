@@ -254,6 +254,56 @@ class Store:
 
         return await self._run(go)
 
+    # -- browsing ----------------------------------------------------------
+    #
+    # Synchronous, because the CLI reads the database with no event loop and no
+    # bot running. The async wrappers above are for the bot's own hot path.
+
+    def rooms(self) -> list[tuple[str, str, int, int]]:
+        """(transport, channel, lines, last_ts), busiest last seen first."""
+        rows = self._db.execute(
+            "SELECT transport, channel, COUNT(*) AS n, MAX(ts) AS last FROM chatlog"
+            " GROUP BY transport, channel ORDER BY last DESC"
+        ).fetchall()
+        return [(r["transport"], r["channel"], r["n"], r["last"]) for r in rows]
+
+    def days(self, transport: str, channel: str) -> list[tuple[str, int]]:
+        """(YYYY-MM-DD, lines) for one room, oldest first, in local time."""
+        rows = self._db.execute(
+            "SELECT date(ts, 'unixepoch', 'localtime') AS day, COUNT(*) AS n FROM chatlog"
+            " WHERE transport = ? AND channel = ? GROUP BY day ORDER BY day",
+            (transport, self.fold(transport, channel)),
+        ).fetchall()
+        return [(r["day"], r["n"]) for r in rows]
+
+    def conversation(
+        self,
+        transport: str,
+        channel: str,
+        *,
+        day: str = "",
+        since: int = 0,
+        grep: str = "",
+        limit: int = 500,
+    ) -> list[tuple[int, str, str, str, str]]:
+        """(ts, nick, account, kind, text) oldest first: everything said, including
+        the bot's own lines and other bots', unlike the model's scrollback."""
+        sql = "SELECT ts, nick, account, kind, text FROM chatlog WHERE transport = ? AND channel = ?"
+        args: list = [transport, self.fold(transport, channel)]
+        if day:
+            sql += " AND date(ts, 'unixepoch', 'localtime') = ?"
+            args.append(day)
+        if since:
+            sql += " AND ts >= ?"
+            args.append(since)
+        if grep:
+            sql += " AND text LIKE ?"
+            args.append(f"%{grep}%")
+        sql += " ORDER BY id DESC LIMIT ?"
+        args.append(limit)
+        rows = self._db.execute(sql, args).fetchall()
+        return [(r["ts"], r["nick"], r["account"], r["kind"], r["text"]) for r in reversed(rows)]
+
     async def prune(self, keep_days: int) -> int:
         def go() -> int:
             cutoff = int(time.time()) - keep_days * 86400

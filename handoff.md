@@ -388,6 +388,18 @@ first, outlive a bot restart, or wait while the bot is down — it keeps polling
 throughout, and re-registers when the socket returns. A test drives a real
 socket through a full bot restart to pin that.
 
+## Reading the record back
+
+`chickenbot log` browses the chat log without a running bot: no argument lists
+rooms across every transport, `transport/#room` reads one, with `--days`,
+`--date`, `--since HOURS`, `--grep` and `--limit`. `chickenbot export <dir>`
+explodes it to `<transport>/<room>/<date>.jsonl` — a snapshot on request, not a
+mirror, because two copies of the truth is one too many.
+
+It shows every kind, marked: ` ` chat, `>` addressed to the bot, `<` the bot,
+`~` another bot. That is deliberately wider than what the model is given, where
+`search` still filters to `privmsg` alone.
+
 ## Logging
 
 Three levels that matter, set by `log_level` in the toml or `--log-level` /

@@ -122,18 +122,30 @@ Open questions:
   overwrite an owner-written line.
 - When is extraction triggered? End of an engagement seems natural.
 
-## 5. Exploring the record — planned
+## 5. Exploring the record — built
 
-sqlite stays the single source of truth. Maintaining a live file mirror
-alongside it means two things to keep in sync and one of them silently wrong.
+sqlite stays the single source of truth. A live file mirror would mean two
+things to keep in sync and one of them silently wrong. Good tooling over the
+database instead:
 
-What is wanted instead is **good tooling over the database**:
+```bash
+chickenbot log                              # rooms, across every transport
+chickenbot log irc/#soup --days             # which days have traffic
+chickenbot log irc/#soup                    # read it
+chickenbot log irc/#soup --date 2026-09-26
+chickenbot log irc/#soup --since 6          # last six hours
+chickenbot log irc/#soup --grep kettle
+chickenbot export ./somewhere               # explode to <transport>/<room>/<date>.jsonl
+```
 
-- A CLI that makes the log as easy to walk as a directory — list rooms, list
-  days, read a day, follow a conversation.
-- An **export** that explodes the database into
-  `data/conversations/<transport>/<room>/<date>.jsonl` (or markdown) on demand.
-  A snapshot, run when wanted, not a mirror maintained in real time.
+Unlike the scrollback the model sees, the browser shows **every** kind, marked
+so they are distinguishable at a glance: ` ` ordinary chat, `>` addressed to the
+bot, `<` the bot's own words, `~` another bot. Reading back a conversation is
+useless if half of it is invisible.
+
+`export` is a snapshot taken on request, never a mirror kept in step — running
+it again rewrites the tree from the database, which is the only way to be sure
+the files say what the record says.
 
 ## Principles carried over
 

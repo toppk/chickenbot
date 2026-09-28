@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
+import json
 import logging
 import random
 import signal
@@ -161,6 +162,87 @@ def manage(cfg: config.Config, args: argparse.Namespace) -> int:
         store.close()
 
 
+# How each kind of line is marked when reading the log back. The bot's own
+# words and other bots' need to be distinguishable at a glance from human chat.
+MARKS = {"privmsg": " ", "command": ">", "self": "<", "bot": "~"}
+
+
+def browse(cfg: config.Config, args: argparse.Namespace) -> int:
+    store = Store(cfg.db_path)
+    try:
+        if not args.room:
+            rooms = store.rooms()
+            for transport, channel, count, last in rooms:
+                when = time.strftime("%Y-%m-%d %H:%M", time.localtime(last))
+                print(f"{transport}/{channel:<20} {count:7} lines   last {when}")
+            if not rooms:
+                print("(nothing logged yet)")
+            return 0
+
+        transport, _, room = args.room.partition("/")
+        if not room:
+            print("room looks like transport/#channel", file=sys.stderr)
+            return 1
+
+        if args.days:
+            days = store.days(transport, room)
+            for day, count in days:
+                print(f"{day}  {count:6} lines")
+            if not days:
+                print("(nothing logged for that room)")
+            return 0
+
+        since = int(time.time()) - args.since * 3600 if args.since else 0
+        lines = store.conversation(
+            transport, room, day=args.date or "", since=since, grep=args.grep or "", limit=args.limit
+        )
+        for ts, nick, _account, kind, text in lines:
+            stamp = time.strftime("%H:%M" if (args.date or since) else "%m-%d %H:%M", time.localtime(ts))
+            print(f"{stamp} {MARKS.get(kind, '?')}{nick:>12} {text}")
+        if not lines:
+            print("(nothing matching)")
+        return 0
+    finally:
+        store.close()
+
+
+def export(cfg: config.Config, args: argparse.Namespace) -> int:
+    """Explode the log into files. A snapshot taken on request, never a mirror
+    kept in step -- two copies of the truth is one copy too many."""
+    store = Store(cfg.db_path)
+    root = Path(args.into)
+    written = 0
+    try:
+        for transport, channel, _count, _last in store.rooms():
+            for day, _n in store.days(transport, channel):
+                rows = store.conversation(transport, channel, day=day, limit=100000)
+                target = root / transport / channel.lstrip("#&") / f"{day}.jsonl"
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with target.open("w", encoding="utf-8") as handle:
+                    for ts, nick, account, kind, text in rows:
+                        handle.write(
+                            json.dumps(
+                                {
+                                    "ts": ts,
+                                    "time": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(ts)),
+                                    "transport": transport,
+                                    "room": channel,
+                                    "nick": nick,
+                                    "account": account,
+                                    "kind": kind,
+                                    "text": text,
+                                },
+                                ensure_ascii=False,
+                            )
+                            + "\n"
+                        )
+                written += 1
+        print(f"wrote {written} file(s) under {root}")
+        return 0
+    finally:
+        store.close()
+
+
 def _document(cfg_store: Store, kind: str, key: str, args: argparse.Namespace, write) -> int:
     """Show, set, list history, print an old revision, or restore one."""
     current = cfg_store.soul() if kind == "soul" else cfg_store.person(*key.split("/", 1))
@@ -235,6 +317,17 @@ def main(argv: list[str] | None = None) -> int:
     who.add_argument("account", nargs="?")
     who.add_argument("text", nargs="?", help="new notes, @file, or - for stdin; omit to show")
     who.add_argument("--forget", action="store_true")
+
+    log_cmd = sub.add_parser("log", help="browse what was said")
+    log_cmd.add_argument("room", nargs="?", help="transport/#channel; omit to list rooms")
+    log_cmd.add_argument("--days", action="store_true", help="list the days with traffic")
+    log_cmd.add_argument("--date", help="a single day, YYYY-MM-DD")
+    log_cmd.add_argument("--since", type=int, metavar="HOURS", help="the last N hours")
+    log_cmd.add_argument("--grep", help="only lines containing this")
+    log_cmd.add_argument("--limit", type=int, default=200)
+
+    export_cmd = sub.add_parser("export", help="explode the log into files")
+    export_cmd.add_argument("into", help="directory to write under")
     args = parser.parse_args(argv)
 
     try:
@@ -248,6 +341,10 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.what:
         logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(message)s")
+        if args.what == "log":
+            return browse(cfg, args)
+        if args.what == "export":
+            return export(cfg, args)
         return manage(cfg, args)
 
     # The command line wins over the config file.

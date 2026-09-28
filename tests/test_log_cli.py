@@ -1,0 +1,131 @@
+import io
+import json
+import time
+from contextlib import redirect_stdout
+
+import pytest
+
+from chickenbot.__main__ import main
+
+
+def cli(tmp_path, *args) -> tuple[int, str]:
+    toml = tmp_path / "c.toml"
+    toml.write_text(f'db_path = "{tmp_path / "c.db"}"\n[irc]\nenabled = true\nhost = "x"\nowners = ["a"]\n')
+    out = io.StringIO()
+    with redirect_stdout(out):
+        code = main(["-c", str(toml), *args])
+    return code, out.getvalue()
+
+
+@pytest.fixture
+def logged(tmp_path):
+    from chickenbot.store import Store
+
+    st = Store(tmp_path / "c.db")
+    now = int(time.time())
+    rows = [
+        ("irc", "#soup", "toppk", "toppk", "the kettle is broken", "privmsg", now - 7200),
+        ("irc", "#soup", "toppk", "toppk", ".ask about kettles", "command", now - 3600),
+        ("irc", "#soup", "chickenbot", "", "toppk: kettles boil water", "self", now - 3500),
+        ("irc", "#soup", "otherbot", "", "beep", "bot", now - 3400),
+        ("signal", "g1", "Nate", "uuid", "hello there", "privmsg", now - 60),
+    ]
+    for transport, room, nick, account, text, kind, ts in rows:
+        st._db.execute(
+            "INSERT INTO chatlog (ts, transport, channel, nick, nick_key, account, kind, text)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (ts, transport, room, nick, nick.casefold(), account, kind, text),
+        )
+    st._db.commit()
+    st.close()
+    return tmp_path
+
+
+def test_listing_rooms_spans_transports(logged):
+    code, out = cli(logged, "log")
+    assert code == 0
+    assert "irc/#soup" in out and "signal/g1" in out
+    assert "4 lines" in out or "4" in out
+
+
+def test_an_empty_database_says_so(tmp_path):
+    assert "nothing logged" in cli(tmp_path, "log")[1]
+
+
+def test_reading_a_room_shows_every_kind(logged):
+    out = cli(logged, "log", "irc/#soup")[1]
+    assert "the kettle is broken" in out
+    assert ".ask about kettles" in out  # commands are part of the record
+    assert "kettles boil water" in out  # so is the bot's own reply
+    assert "beep" in out  # and other bots'
+
+
+def test_kinds_are_marked_distinctly(logged):
+    out = cli(logged, "log", "irc/#soup")[1]
+    lines = {line.split()[2][0] if len(line.split()) > 2 else "" for line in out.splitlines() if line.strip()}
+    assert {">", "<", "~"} <= lines  # command, self, bot
+
+
+def test_it_reads_oldest_first(logged):
+    out = cli(logged, "log", "irc/#soup")[1]
+    assert out.index("kettle is broken") < out.index("kettles boil water")
+
+
+def test_days_lists_traffic_per_day(logged):
+    out = cli(logged, "log", "irc/#soup", "--days")[1]
+    assert time.strftime("%Y-%m-%d") in out
+
+
+def test_grep_filters(logged):
+    out = cli(logged, "log", "irc/#soup", "--grep", "kettle")[1]
+    assert "kettle" in out and "beep" not in out
+
+
+def test_since_filters_by_hours(logged):
+    # the oldest line is exactly two hours back, so ask for one
+    assert "kettle is broken" not in cli(logged, "log", "irc/#soup", "--since", "1")[1]
+    assert "kettle is broken" in cli(logged, "log", "irc/#soup", "--since", "24")[1]
+
+
+def test_a_room_with_no_slash_is_refused(logged):
+    assert cli(logged, "log", "soup")[0] == 1
+
+
+def test_an_unknown_room_says_nothing_matching(logged):
+    assert "nothing matching" in cli(logged, "log", "irc/#nowhere")[1]
+
+
+# -- export --------------------------------------------------------------
+
+
+def test_export_writes_one_file_per_room_per_day(logged, tmp_path):
+    target = tmp_path / "out"
+    code, out = cli(logged, "export", str(target))
+    assert code == 0 and "wrote 2 file(s)" in out
+
+    files = sorted(p.relative_to(target).as_posix() for p in target.rglob("*.jsonl"))
+    assert len(files) == 2
+    assert any(f.startswith("irc/soup/") for f in files)
+    assert any(f.startswith("signal/g1/") for f in files)
+
+
+def test_exported_lines_carry_the_whole_row(logged, tmp_path):
+    target = tmp_path / "out"
+    cli(logged, "export", str(target))
+    path = next(target.rglob("soup/*.jsonl"))
+    rows = [json.loads(line) for line in path.read_text().splitlines()]
+    assert [r["kind"] for r in rows] == ["privmsg", "command", "self", "bot"]
+    assert rows[0]["room"] == "#soup" and rows[0]["account"] == "toppk"
+    assert rows[0]["text"] == "the kettle is broken"
+    assert "T" in rows[0]["time"]  # readable, alongside the epoch
+
+
+def test_export_is_a_snapshot_not_a_mirror(logged, tmp_path):
+    """Re-exporting rewrites; nothing keeps the tree in step on its own."""
+    target = tmp_path / "out"
+    cli(logged, "export", str(target))
+    path = next(target.rglob("soup/*.jsonl"))
+    before = path.read_text()
+    path.write_text("tampered\n")
+    cli(logged, "export", str(target))
+    assert path.read_text() == before
