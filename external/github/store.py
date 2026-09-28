@@ -40,6 +40,28 @@ CREATE INDEX IF NOT EXISTS activity_ts    ON activity (ts DESC);
 CREATE INDEX IF NOT EXISTS activity_actor ON activity (actor, ts DESC);
 CREATE INDEX IF NOT EXISTS activity_repo  ON activity (repo, ts DESC);
 
+-- Open issues and pull requests, from both directions: things sitting on our
+-- own repositories waiting to be dealt with, and things we have opened in
+-- other people's. One row either way; which it is falls out of who owns the
+-- repo and who wrote it.
+CREATE TABLE IF NOT EXISTS item (
+    id         TEXT PRIMARY KEY,   -- owner/repo#number
+    kind       TEXT NOT NULL,      -- issue | pr
+    repo       TEXT NOT NULL,
+    repo_owner TEXT NOT NULL,
+    number     INTEGER NOT NULL,
+    author     TEXT NOT NULL,
+    title      TEXT NOT NULL DEFAULT '',
+    url        TEXT NOT NULL DEFAULT '',
+    draft      INTEGER NOT NULL DEFAULT 0,
+    comments   INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL DEFAULT 0,
+    updated_at INTEGER NOT NULL DEFAULT 0,
+    seen_at    INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS item_owner  ON item (repo_owner, updated_at DESC);
+CREATE INDEX IF NOT EXISTS item_author ON item (author, updated_at DESC);
+
 CREATE TABLE IF NOT EXISTS poll (
     scope   TEXT PRIMARY KEY,        -- what was polled, e.g. "user:toppk"
     etag    TEXT NOT NULL DEFAULT '',
@@ -145,6 +167,64 @@ class Store:
             args.append(actor)
         sql += " GROUP BY kind ORDER BY n DESC"
         return {r["kind"]: r["n"] for r in self.db.execute(sql, args)}
+
+    # -- open items --------------------------------------------------------
+
+    def save_item(self, row: dict) -> None:
+        self.db.execute(
+            "INSERT INTO item (id, kind, repo, repo_owner, number, author, title, url, draft,"
+            " comments, created_at, updated_at, seen_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            " ON CONFLICT(id) DO UPDATE SET title=excluded.title, draft=excluded.draft,"
+            " comments=excluded.comments, updated_at=excluded.updated_at, seen_at=excluded.seen_at",
+            (
+                row["id"],
+                row["kind"],
+                row["repo"],
+                row["repo_owner"],
+                row["number"],
+                row["author"],
+                row["title"],
+                row["url"],
+                row["draft"],
+                row["comments"],
+                row["created_at"],
+                row["updated_at"],
+                int(time.time()),
+            ),
+        )
+        self.db.commit()
+
+    def forget_closed(self, before: int) -> int:
+        """Anything a full pass did not see again has been closed or merged."""
+        cur = self.db.execute("DELETE FROM item WHERE seen_at < ?", (before,))
+        self.db.commit()
+        return cur.rowcount
+
+    def pending(self, owners: list[str], *, owner: str = "", limit: int = 20) -> list[sqlite3.Row]:
+        """Open on repositories we own: what is waiting to be dealt with."""
+        wanted = [owner] if owner else owners
+        if not wanted:
+            return []
+        marks = ",".join("?" * len(wanted))
+        return self.db.execute(
+            f"SELECT * FROM item WHERE repo_owner IN ({marks}) COLLATE NOCASE ORDER BY updated_at DESC LIMIT ?",
+            (*wanted, limit),
+        ).fetchall()
+
+    def outgoing(self, owners: list[str], *, author: str = "", limit: int = 20) -> list[sqlite3.Row]:
+        """Open elsewhere, written by us: what we have out in the world."""
+        wanted = [author] if author else owners
+        if not wanted or not owners:
+            return []
+        authors = ",".join("?" * len(wanted))
+        ours = ",".join("?" * len(owners))
+        return self.db.execute(
+            f"SELECT * FROM item WHERE author IN ({authors}) COLLATE NOCASE"
+            f" AND repo_owner NOT IN ({ours}) COLLATE NOCASE"
+            " ORDER BY updated_at DESC LIMIT ?",
+            (*wanted, *owners, limit),
+        ).fetchall()
 
     # -- poll cursors ------------------------------------------------------
 

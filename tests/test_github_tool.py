@@ -377,3 +377,154 @@ def test_a_stale_mirror_polls_at_once(gh):
 
 def test_an_empty_mirror_polls_at_once(gh):
     assert gh.due_in(900) == 0
+
+
+# -- hunting and gathering ------------------------------------------------
+
+
+def item(**kw) -> dict:
+    base = {
+        "id": "o/r#1",
+        "kind": "issue",
+        "repo": "o/r",
+        "repo_owner": "o",
+        "number": 1,
+        "author": "toppk",
+        "title": "t",
+        "url": "u",
+        "draft": 0,
+        "comments": 0,
+        "created_at": 100,
+        "updated_at": 200,
+    }
+    return {**base, **kw}
+
+
+@pytest.fixture
+def hunted(tmp_path):
+    store = Store(tmp_path / "h.db")
+    # on our own repo, by us and by a stranger
+    store.save_item(item(id="toppk/chickenbot#1", repo="toppk/chickenbot", repo_owner="toppk", author="toppk"))
+    store.save_item(
+        item(
+            id="toppk/chickenbot#2", repo="toppk/chickenbot", repo_owner="toppk", author="stranger", number=2, kind="pr"
+        )
+    )
+    # ours, opened on someone else's repo
+    store.save_item(
+        item(
+            id="ghostty-org/ghostty#3",
+            repo="ghostty-org/ghostty",
+            repo_owner="ghostty-org",
+            author="toppk",
+            number=3,
+            kind="pr",
+            updated_at=300,
+        )
+    )
+    # a stranger's, on a stranger's repo: neither of ours
+    store.save_item(item(id="other/thing#4", repo="other/thing", repo_owner="other", author="stranger", number=4))
+    tool = Tool(store, None, ["toppk", "iconidentify"])
+    yield tool
+    store.close()
+
+
+def test_pending_is_what_sits_on_our_repos_whoever_wrote_it(hunted):
+    out = hunted.github_pending({})
+    assert "toppk/chickenbot#1" in out and "toppk/chickenbot#2" in out
+    assert "ghostty" not in out  # not our repo
+    assert "other/thing" not in out
+
+
+def test_outgoing_is_what_we_opened_on_other_peoples_repos(hunted):
+    out = hunted.github_outgoing({})
+    assert "ghostty-org/ghostty#3" in out
+    assert "toppk/chickenbot" not in out  # our own repo is tending, not participation
+    assert "other/thing" not in out  # not ours at all
+
+
+def test_the_two_views_never_overlap(hunted):
+    pending, outgoing = hunted.github_pending({}), hunted.github_outgoing({})
+    ours = {"toppk/chickenbot#1", "toppk/chickenbot#2"}
+    theirs = {"ghostty-org/ghostty#3"}
+    assert all(i in pending and i not in outgoing for i in ours)
+    assert all(i in outgoing and i not in pending for i in theirs)
+
+
+def test_filtering_by_kind(hunted):
+    assert "#2" in hunted.github_pending({"kind": "pr"})
+    assert "#1" not in hunted.github_pending({"kind": "pr"})
+
+
+def test_filtering_by_user(hunted):
+    assert "nothing open" in hunted.github_pending({"user": "iconidentify"})
+
+
+def test_a_quiet_result_says_so_rather_than_being_blank(tmp_path):
+    store = Store(tmp_path / "empty.db")
+    tool = Tool(store, None, ["toppk"])
+    assert "nothing open" in tool.github_pending({})
+    assert "nothing open" in tool.github_outgoing({})
+    store.close()
+
+
+def test_closed_items_are_forgotten_after_a_clean_pass(hunted):
+    import time as clock
+
+    assert len(hunted.store.pending(["toppk"], limit=10)) == 2
+    later = int(clock.time()) + 5
+    assert hunted.store.forget_closed(later) == 4  # nothing was seen again
+    assert hunted.store.pending(["toppk"], limit=10) == []
+
+
+def test_re_seeing_an_item_updates_it_rather_than_duplicating(hunted):
+    hunted.store.save_item(
+        item(id="toppk/chickenbot#1", repo="toppk/chickenbot", repo_owner="toppk", author="toppk", title="renamed")
+    )
+    rows = hunted.store.pending(["toppk"], limit=10)
+    assert len(rows) == 2
+    assert any(r["title"] == "renamed" for r in rows)
+
+
+def test_search_results_are_normalised(tmp_path):
+    from external.github.github import GitHub
+
+    raw = {
+        "number": 7,
+        "title": "a title",
+        "html_url": "https://example/7",
+        "comments": 3,
+        "created_at": "2026-09-01T10:00:00Z",
+        "updated_at": "2026-09-27T10:00:00Z",
+        "repository_url": "https://api.github.com/repos/ghostty-org/ghostty",
+        "user": {"login": "toppk"},
+        "pull_request": {"draft": True},
+    }
+    import asyncio
+
+    import httpx
+
+    def handler(request):
+        return httpx.Response(200, json={"items": [raw]})
+
+    async def go():
+        api = GitHub("")
+        api.client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        rows = await api.search_issues("anything is:pull-request")
+        await api.aclose()
+        return rows
+
+    rows = asyncio.run(go())
+    assert rows[0]["id"] == "ghostty-org/ghostty#7"
+    assert rows[0]["kind"] == "pr" and rows[0]["draft"] == 1
+    assert rows[0]["repo_owner"] == "ghostty-org" and rows[0]["author"] == "toppk"
+
+
+def test_the_declared_queries_name_a_kind():
+    """/search/issues rejects a query that does not say issue or pull-request."""
+    user = "toppk"
+    queries = [
+        f"{scope}:{user} state:open {kind}" for scope in ("user", "author") for kind in ("is:issue", "is:pull-request")
+    ]
+    assert len(queries) == 4
+    assert all("is:issue" in q or "is:pull-request" in q for q in queries)

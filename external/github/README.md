@@ -32,10 +32,23 @@ with `--users`. Polling interval is `--interval`, default 15 minutes.
 
 ## What it declares
 
-| tool | arguments |
+| tool | answers |
 |---|---|
-| `ext_github_activity` | `user`, `range` (hour/day/week/month/all), `summarize` |
-| `ext_github_repos` | `user`, `limit` |
+| `ext_github_pending` | open issues and PRs **on** our repositories, from anyone — what needs tending |
+| `ext_github_outgoing` | open issues and PRs **we opened elsewhere** — what is out in the world |
+| `ext_github_activity` | recent events: commits, issues, PRs, stars, releases |
+| `ext_github_repos` | repositories owned, with stars and last push |
+
+The first two are the same question asked from opposite ends. Tending your own
+projects and participating in other people's are different jobs, and mixing
+them into one list makes both harder to read. Which a row is falls out of who
+owns the repository and who wrote the item, so nothing is stored twice.
+
+`pending` and `outgoing` take `user`, `kind` (`issue`/`pr`) and `limit`;
+`activity` takes `user`, `range` and `summarize`.
+
+**Discussions are not covered.** `/search/issues` cannot see them — they need
+the GraphQL API — so they are absent rather than faked.
 
 `summarize` is a shape, not an instruction to an LLM — this process has no
 model. True gives counts per kind, false gives the individual items. When the
@@ -81,6 +94,13 @@ are ready the moment it re-registers.
 ## What it stores
 
 `repo` (stars, open issues, last push), `activity` (commits, issues, PRs,
-stars, releases, keyed by GitHub's event id so re-polling is idempotent) and
-`poll` cursors. One user's public event timeline covers all five kinds in a
+stars, releases, keyed by GitHub's event id so re-polling is idempotent),
+`item` (everything currently open, either direction) and `poll` cursors.
+
+Open items are refreshed by four searches per user — `user:` and `author:`,
+each split into `is:issue` and `is:pull-request`, because `/search/issues` now
+rejects a query that does not say which it wants. Anything a clean pass does
+not see again has been closed or merged, and is dropped; a pass with any
+failure in it skips that step rather than evicting the world. Searches are
+paced, since the endpoint allows 30 a minute and dislikes bursts. One user's public event timeline covers all five kinds in a
 single request, which is much cheaper than walking every repository.

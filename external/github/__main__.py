@@ -25,9 +25,49 @@ log = logging.getLogger("github-tool")
 
 PROTOCOL = 1
 USERS = ["agent2x0r", "toppk", "iconidentify", "a2f0"]
+SEARCH_PACE = 2.0  # seconds between searches; the endpoint dislikes bursts
 RANGES = {"hour": 3600, "day": 86400, "week": 604800, "month": 2592000, "all": 0}
 
+
+def _age(row, now: int) -> str:
+    return f"{ago(now - row['updated_at'])} ago" if row["updated_at"] else "?"
+
+
 TOOLS = [
+    {
+        "name": "github_pending",
+        "description": (
+            "Open issues and pull requests ON the watched users' own repositories, from anyone. "
+            "This is the tending view: what is waiting to be dealt with. "
+            "Use it for questions like 'what needs my attention' or 'what is open on my repos'."
+        ),
+        "params": {
+            "type": "object",
+            "properties": {
+                "user": {"type": "string", "description": "whose repositories; omit for all watched"},
+                "kind": {"type": "string", "enum": ["issue", "pr"], "description": "omit for both"},
+                "limit": {"type": "integer"},
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "github_outgoing",
+        "description": (
+            "Open issues and pull requests the watched users have opened in OTHER people's "
+            "repositories. This is the participation view: what we have out in the world "
+            "waiting on someone else. Does not cover discussions."
+        ),
+        "params": {
+            "type": "object",
+            "properties": {
+                "user": {"type": "string", "description": "whose; omit for all watched"},
+                "kind": {"type": "string", "enum": ["issue", "pr"]},
+                "limit": {"type": "integer"},
+            },
+            "required": [],
+        },
+    },
     {
         "name": "github_activity",
         "description": (
@@ -106,15 +146,40 @@ class Tool:
 
     async def poll_once(self) -> int:
         fresh = 0
+        started = int(time.time())
+        complete = True
         for user in self.users:
+            # Separate concerns: a failing search must not discard the repository
+            # and event work that already succeeded.
             try:
                 for repo in await self.api.repos(user):
                     self.store.save_repo(repo)
-                items = await self.api.events(user)
-                fresh += self.store.record(items)
+                fresh += self.store.record(await self.api.events(user))
                 self.store.set_cursor(f"user:{user}", "", int(time.time()))
             except Exception as exc:  # noqa: BLE001 - one bad user must not stop the rest
                 log.warning("polling %s failed: %s", user, exc)
+
+            # Both directions -- open on their repositories, and open by them
+            # on everyone else's -- and both kinds, because /search/issues now
+            # insists the query says which it wants.
+            queries = [
+                f"{scope}:{user} state:open {kind}"
+                for scope in ("user", "author")
+                for kind in ("is:issue", "is:pull-request")
+            ]
+            for query in queries:
+                try:
+                    for row in await self.api.search_issues(query):
+                        self.store.save_item(row)
+                except Exception as exc:  # noqa: BLE001
+                    complete = False
+                    log.warning("searching %r failed: %s", query, exc)
+                await asyncio.sleep(SEARCH_PACE)  # search is 30/min, and touchy in bursts
+        if complete:
+            # Only safe after a clean pass: a failed one would evict the world.
+            gone = self.store.forget_closed(started)
+            if gone:
+                log.info("%d item(s) closed since the last pass", gone)
         if fresh:
             log.info("recorded %d new item(s)", fresh)
         return fresh
@@ -170,8 +235,39 @@ class Tool:
             for r in rows[:limit]
         )
 
+    def _items(self, rows, now: int, *, whose: str) -> str:
+        if not rows:
+            return f"nothing open {whose}"
+        return " | ".join(
+            f"{r['kind']} {r['repo']}#{r['number']}"
+            f"{' (draft)' if r['draft'] else ''} by {r['author']}: {r['title'][:60]}"
+            f" ({_age(r, now)})"
+            for r in rows
+        )
+
+    def github_pending(self, args: dict) -> str:
+        limit = max(1, min(int(args.get("limit") or 10), 25))
+        rows = self.store.pending(self.users, owner=str(args.get("user") or ""), limit=limit * 3)
+        if kind := str(args.get("kind") or ""):
+            rows = [r for r in rows if r["kind"] == kind]
+        who = args.get("user") or "us"
+        return self._items(rows[:limit], int(time.time()), whose=f"on repos owned by {who}")
+
+    def github_outgoing(self, args: dict) -> str:
+        limit = max(1, min(int(args.get("limit") or 10), 25))
+        rows = self.store.outgoing(self.users, author=str(args.get("user") or ""), limit=limit * 3)
+        if kind := str(args.get("kind") or ""):
+            rows = [r for r in rows if r["kind"] == kind]
+        who = args.get("user") or "us"
+        return self._items(rows[:limit], int(time.time()), whose=f"elsewhere by {who}")
+
     def call(self, name: str, args: dict) -> str:
-        handler = {"github_activity": self.github_activity, "github_repos": self.github_repos}.get(name)
+        handler = {
+            "github_activity": self.github_activity,
+            "github_repos": self.github_repos,
+            "github_pending": self.github_pending,
+            "github_outgoing": self.github_outgoing,
+        }.get(name)
         if handler is None:
             return f"error: no tool {name}"
         return handler(args)

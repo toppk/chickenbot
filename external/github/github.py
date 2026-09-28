@@ -42,6 +42,11 @@ class GitHub:
             return [], ""
         if response.status_code == 403 and "rate limit" in response.text.lower():
             raise RuntimeError("github rate limit reached")
+        if response.status_code == 422:
+            # Search answers 422 for a malformed query, but also, intermittently,
+            # for back-to-back requests it considers abusive. Either way it is
+            # this call that failed, not the poll.
+            raise RuntimeError(f"github rejected {path} ({response.text[:80]})")
         response.raise_for_status()
         return response.json(), response.headers.get("etag", "")
 
@@ -64,6 +69,39 @@ class GitHub:
             for r in payload
             if isinstance(r, dict)
         ]
+
+    async def search_issues(self, query: str, limit: int = 100) -> list[dict]:
+        """Open issues and pull requests matching a search, normalised.
+
+        Two queries answer the two questions: `user:X` is everything open on
+        X's repositories, whoever wrote it; `author:X` is everything X has
+        open anywhere. Discussions are not searchable this way -- they need
+        the GraphQL API -- so they are simply absent rather than faked.
+        """
+        payload, _ = await self.get("/search/issues", q=query, per_page=min(limit, 100), sort="updated")
+        items = payload.get("items", []) if isinstance(payload, dict) else []
+        out = []
+        for raw in items:
+            repo = raw.get("repository_url", "").split("/repos/")[-1]
+            if not repo or "/" not in repo:
+                continue
+            out.append(
+                {
+                    "id": f"{repo}#{raw.get('number')}",
+                    "kind": "pr" if "pull_request" in raw else "issue",
+                    "repo": repo,
+                    "repo_owner": repo.split("/", 1)[0],
+                    "number": int(raw.get("number", 0)),
+                    "author": (raw.get("user") or {}).get("login", ""),
+                    "title": (raw.get("title") or "")[:200],
+                    "url": raw.get("html_url", ""),
+                    "draft": int(bool((raw.get("pull_request") or {}).get("draft") or raw.get("draft"))),
+                    "comments": int(raw.get("comments", 0)),
+                    "created_at": _ts(raw.get("created_at")),
+                    "updated_at": _ts(raw.get("updated_at")),
+                }
+            )
+        return out
 
     async def events(self, user: str) -> list[Item]:
         """A user's public timeline, which covers pushes, issues, PRs and stars
