@@ -11,6 +11,7 @@ from collections import defaultdict, deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
+from .attention import FOLLOW_NOTE, SILENT, Attention
 from .brain import Provider, ProviderError
 from .config import Config
 from .dossier import Dossiers
@@ -107,6 +108,13 @@ class Handler:
         self.started = time.time()
         self.soul = Soul(store, cfg.llm.persona)
         self.dossiers = Dossiers(store)
+        self.attention = Attention(
+            follow_seconds=cfg.llm.follow_seconds,
+            pause_seconds=cfg.llm.pause_seconds,
+            max_silences=cfg.llm.max_silences,
+            on_ready=self._follow_up,
+        )
+        self._rooms: dict[str, tuple[Transport, str]] = {}
         self._writes: set[asyncio.Task] = set()
         self.transports: dict[str, Transport] = {}
         self._asks: dict[str, deque[float]] = defaultdict(deque)
@@ -186,6 +194,27 @@ class Handler:
             log.exception("command %s failed", cmd.name)
             ctx.say(f"{ctx.nick}: that broke, sorry")
 
+    async def _follow_up(self, key: str, held: list[tuple[str, str, str]]) -> None:
+        """A pause in a conversation we are part of. Ask once; it may decline."""
+        spot = self._rooms.get(key)
+        if spot is None or self.provider is None:
+            return
+        tr, room = spot
+        nick, account, _text = held[-1]
+        lines = "\n".join(f"<{who}> {what}" for who, _acct, what in held)
+        ctx = Context(
+            handler=self,
+            transport=tr,
+            nick=nick,
+            account=account,
+            channel=room,
+            args=lines,
+            is_owner=tr.is_owner(account),
+            in_channel=True,
+        )
+        with activity(kind="follow", realm=tr.realm, room=room, nick=nick, account=account or "-"):
+            await cmd_ask(self, ctx, following=True)
+
     async def _handle_change(self, event: Event) -> None:
         """A room's modes changed. Channel state is already updated by the
         transport; heuristics that react to it hook in here."""
@@ -202,6 +231,8 @@ class Handler:
 
         body = self._extract(tr, env.text, env.is_group)
         name, _, args = body.partition(" ") if body else ("", "", "")
+        key = f"{tr.realm}/{env.room}"
+        self._rooms[key] = (tr, env.room)
         if env.is_group:
             # Anything aimed at the bot is an invocation, not room chat, so it
             # stays out of search and out of the scrollback handed to the model.
@@ -209,11 +240,20 @@ class Handler:
             await self.store.log_line(tr.realm, env.room, env.sender, env.account, env.text, kind)
 
         if body is None:
+            # Not addressed. If this room is mid-conversation with us, hold the
+            # line and wait for a pause rather than answering every message.
+            if self.cfg.llm.follow and env.is_group and self.attention.engaged(key):
+                note(outcome="following")
+                self.attention.hold(key, env.sender, env.account, env.text)
+                return
             note(outcome="chat")
             return
 
         cmd = COMMANDS.get(name.lower().removeprefix(self.cfg.prefix))
         ctx = self._context(event, args.strip())
+        # Being addressed at all opens or renews the engagement.
+        if self.cfg.llm.follow and env.is_group:
+            self.attention.engage(key)
 
         if cmd is None:
             # Addressed by name with no command word: send the lot to the model.
@@ -327,7 +367,7 @@ async def cmd_history(h: Handler, ctx: Context) -> None:
 
 
 @command("ask", usage="ask <question>", blurb="ask the model; it searches when it needs to")
-async def cmd_ask(h: Handler, ctx: Context) -> None:
+async def cmd_ask(h: Handler, ctx: Context, *, following: bool = False) -> None:
     if h.provider is None:
         ctx.say("no model is configured")
         return
@@ -362,7 +402,7 @@ async def cmd_ask(h: Handler, ctx: Context) -> None:
     try:
         answer = await h.provider.reply(
             # The suffix is a safety rail, not personality: the soul may not edit it.
-            system=h.soul.text() + SYSTEM_SUFFIX,
+            system=h.soul.text() + SYSTEM_SUFFIX + (FOLLOW_NOTE if following else ""),
             history=[],
             prompt=prompt,
             search=True,
@@ -373,6 +413,12 @@ async def cmd_ask(h: Handler, ctx: Context) -> None:
         note(outcome="llm-error", error=str(exc)[:60])
         ctx.say(f"{ctx.nick}: {exc}")
         return
+    if following and answer.strip() == SILENT:
+        # It had nothing to add. A few of those and we stop listening.
+        note(outcome="silent")
+        h.attention.note_silence(f"{ctx.transport.realm}/{ctx.channel}")
+        return
+    answer = answer.removeprefix(f"{ctx.nick}:").strip() or answer
     note(outcome="answered")
     ctx.say(f"{ctx.nick}: {answer}")
 

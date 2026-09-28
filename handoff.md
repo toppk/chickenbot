@@ -353,6 +353,18 @@ Deliberately not asked for, because chickenbot uses none of them: `WHOX`,
 `chathistory`, `echo-message`, `labeled-response`, `batch`, `multiline`, `setname`,
 `MONITOR`, `standard-replies`. Keep it that way — asks should track real need.
 
+## Attention
+
+Being addressed opens an engagement for that room (`attention.py`). While it is
+open, anything said there is held, and a pause of `pause_seconds` means the
+burst is over and worth one model call — which may answer or reply `<silent>`
+and say nothing. `follow_seconds` without being addressed again closes it, as
+do `max_silences` consecutive declines.
+
+The local rules exist so the cheap cases never cost a model call: an idle room,
+a burst still being typed, a room nobody has addressed. Commands bypass the
+whole thing and answer immediately.
+
 ## Introspection
 
 `.dump <comms|engines|tools>`, owner-only, and **global rather than scoped to

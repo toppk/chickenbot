@@ -57,7 +57,7 @@ wanted here. Seeding happens once at startup and never from
 a read path: the bot writing its own soul is the thing being avoided, and a
 silent write from inside `Soul.text()` would blur that line.
 
-## 3. Attention — planned
+## 3. Attention — built
 
 Being addressed by name should not be the only way in. A group conversation
 carries on, and other people join it.
@@ -85,12 +85,23 @@ The point of the local rules is that the cheap, obvious cases never reach the
 model at all. Idle room, nobody talking to it, a burst still in progress: all
 decided locally, for nothing.
 
-Open questions:
+`attention.py` holds it, one `Engagement` per `realm/room`. Settings live under
+`[llm]`: `follow`, `follow_seconds` (60), `pause_seconds` (5), `max_silences`
+(3).
 
-- Does a silence still count as a turn for the leave rule? Probably yes.
-- Should the bot re-enter on its own name appearing in the middle of a
-  sentence, or only at the start? Currently only at the start.
-- Per-room state, or per-room-per-person?
+Two details that matter in practice. **Commands are never delayed** — `.uptime`
+answers at once, because waiting five seconds for a typed command would be
+absurd; only conversation is batched. And **a silence counts as a turn**: three
+consecutive "nothing to add" and the bot stops listening, which is what stops
+it lurking in a conversation that has moved on without it.
+
+Still open:
+
+- Should the bot re-enter on its name mid-sentence, or only at the start?
+  Currently only at the start, via the same `_extract` the prefix uses.
+- Per-room state, not per-room-per-person. A group conversation is one thing.
+- A burst that arrives while the model is still answering the previous one is
+  simply held for the next pause; there is no cancellation.
 
 ## 4. Participant dossiers — half built
 

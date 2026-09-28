@@ -121,6 +121,7 @@ async def run(cfg: config.Config) -> int:
     await stop.wait()
     log.info("shutting down")
 
+    await handler.attention.aclose()
     await handler.drain()  # let the last few log writes land
     for tr in transports.values():
         with contextlib.suppress(Exception):  # going away regardless

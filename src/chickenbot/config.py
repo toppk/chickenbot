@@ -127,6 +127,11 @@ class LLMConfig:
         "unless asked for more. If you do not know, say so."
     )
     tools: bool = True
+    # Keep listening after being addressed, instead of needing the name every time.
+    follow: bool = True
+    follow_seconds: int = 60  # interest lapses this long after the last mention
+    pause_seconds: float = 5.0  # wait for a gap, so a burst is one exchange
+    max_silences: int = 3  # consecutive "nothing to add" before it stops listening
     # Voice lives in a file so it can be edited without touching the config.
     # Empty, or a missing file, falls back to `persona`.
     # OpenRouter keeps a conversation on one model/provider when it is given a
