@@ -151,10 +151,34 @@ async def run(cfg: config.Config) -> int:
     return 0
 
 
+def manage_bots(store: Store, args: argparse.Namespace) -> int:
+    """Who else in the room is a bot. IRCv3 bot mode and the platform flags
+    cover the well-behaved ones; this is for the rest."""
+    if not args.handle:
+        rows = store.bots(args.realm or "")
+        for realm, handle, added in rows:
+            print(f"{realm}/{handle}\tsince {time.strftime('%Y-%m-%d', time.localtime(added))}")
+        if not rows:
+            print("(none marked; bot mode and platform flags are honoured automatically)")
+        return 0
+    if not args.realm:
+        print("bot needs a realm, e.g. irc:irc.chonkbase.net", file=sys.stderr)
+        return 1
+    if args.forget:
+        print("forgotten" if store.forget_bot(args.realm, args.handle) else "was not marked")
+        return 0
+    marked = store.mark_bot(args.realm, args.handle)
+    print(f"{args.handle} is a bot on {args.realm}" if marked else "already marked")
+    return 0
+
+
 def manage(cfg: config.Config, args: argparse.Namespace) -> int:
     """Read and write what the bot knows, without a running bot."""
     store = Store(cfg.db_path)
     try:
+        if args.what == "bot":
+            return manage_bots(store, args)
+
         if args.what == "soul":
             seed_soul(store)
             return _document(store, "soul", "", args, lambda text: store.set_soul(text))
@@ -552,6 +576,11 @@ def main(argv: list[str] | None = None) -> int:
     who.add_argument("text", nargs="?", help="new notes, @file, or - for stdin; omit to show")
     who.add_argument("--forget", action="store_true")
     who.add_argument("--alias", metavar="REALM/HANDLE", help="another name the same person goes by")
+
+    bot_cmd = sub.add_parser("bot", help="mark an account as a bot, for networks that do not")
+    bot_cmd.add_argument("realm", nargs="?", help="e.g. irc:irc.chonkbase.net; omit to list")
+    bot_cmd.add_argument("handle", nargs="?", help="nick or services account")
+    bot_cmd.add_argument("--forget", action="store_true", help="it was never a bot, or is not one now")
 
     log_cmd = sub.add_parser("log", help="browse what was said")
     log_cmd.add_argument("room", nargs="?", help="transport/#channel; omit to list rooms")

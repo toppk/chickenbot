@@ -220,6 +220,11 @@ class Handler:
         )
         return render_scrollback(recent)
 
+    def known_bot(self, realm: str, nick: str, account: str) -> bool:
+        """Told to us, for a network that does not set the bot flag itself.
+        Either name will do: an account is stabler, a nick is what you can see."""
+        return self.store.is_bot(realm, nick) or self.store.is_bot(realm, account)
+
     def remember_own(self, tr: Transport, room: str, text: str, kind: str = "self") -> None:
         """Fire and forget: the reply has already gone out, logging must not block it."""
         task = asyncio.create_task(self.store.log_line(tr.realm, room, tr.me, "", text, kind))
@@ -313,7 +318,7 @@ class Handler:
 
     async def _handle_message(self, event: Event) -> None:
         tr, env = event.transport, event
-        if env.is_bot or tr.is_ignored(env.sender):
+        if env.is_bot or tr.is_ignored(env.sender) or self.known_bot(tr.realm, env.sender, env.account):
             # Another bot. Log what it says, but never act on it.
             note(outcome="bot-ignored")
             if env.is_group and env.text:
@@ -722,6 +727,8 @@ async def _dump_comms(h: Handler, ctx: Context) -> list[str]:
         out += [f"  {line}" for line in tr.describe()]
     if not out:
         out.append("no transports")
+    if marked := h.store.bots():
+        out.append("told to be bots: " + ", ".join(f"{handle}@{realm}" for realm, handle, _ts in marked))
     known = await h.store.known_accounts()
     if known:
         out.append(

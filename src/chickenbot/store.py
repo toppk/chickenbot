@@ -88,6 +88,17 @@ CREATE TABLE IF NOT EXISTS room (
     PRIMARY KEY (realm, name)
 );
 
+-- Accounts that are bots on a network that does not say so. IRCv3 bot mode and
+-- the platform flags cover the well-behaved ones; this is for the rest, and it
+-- is a nick or an account, whichever is stabler on that network.
+CREATE TABLE IF NOT EXISTS bot (
+    realm    TEXT NOT NULL,
+    handle   TEXT NOT NULL,
+    author   TEXT NOT NULL DEFAULT 'cli',
+    added_at INTEGER NOT NULL,
+    PRIMARY KEY (realm, handle)
+);
+
 -- Every change to a soul or a dossier, append-only. These are mutable state
 -- that someone will want to undo, and without this the previous wording is
 -- simply gone. Not git: a table is enough for documents this small.
@@ -573,6 +584,39 @@ class Store:
             (text, int(time.time())),
         )
         self._keep_revision("soul", "", text, author)
+
+    def mark_bot(self, realm: str, handle: str, author: str = "cli") -> bool:
+        """True if this is news. Folded, so a nick that changes case still matches."""
+        if self.is_bot(realm, handle):
+            return False
+        self._db.execute(
+            "INSERT INTO bot (realm, handle, author, added_at) VALUES (?, ?, ?, ?)",
+            (realm, self.fold(realm, handle), author, int(time.time())),
+        )
+        self._db.commit()
+        return True
+
+    def forget_bot(self, realm: str, handle: str) -> bool:
+        cur = self._db.execute("DELETE FROM bot WHERE realm = ? AND handle = ?", (realm, self.fold(realm, handle)))
+        self._db.commit()
+        return cur.rowcount > 0
+
+    def is_bot(self, realm: str, handle: str) -> bool:
+        if not handle:
+            return False
+        row = self._db.execute(
+            "SELECT 1 FROM bot WHERE realm = ? AND handle = ?", (realm, self.fold(realm, handle))
+        ).fetchone()
+        return row is not None
+
+    def bots(self, realm: str = "") -> list[tuple[str, str, int]]:
+        sql = "SELECT realm, handle, added_at FROM bot"
+        args: list = []
+        if realm:
+            sql += " WHERE realm = ?"
+            args.append(realm)
+        sql += " ORDER BY realm, handle"
+        return [(r["realm"], r["handle"], r["added_at"]) for r in self._db.execute(sql, args)]
 
     def room_notes(self, realm: str, room: str) -> str:
         row = self._db.execute(

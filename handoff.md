@@ -472,6 +472,22 @@ Deliberately not asked for, because chickenbot uses none of them: `WHOX`,
 `chathistory`, `echo-message`, `labeled-response`, `batch`, `multiline`, `setname`,
 `MONITOR`, `standard-replies`. Keep it that way — asks should track real need.
 
+## Bots that will not say so
+
+IRCv3 bot mode and the platform flags (Discord, Telegram) are honoured
+automatically, and `ignore_nicks` in the toml is the static fallback. For a bot
+discovered at runtime:
+
+```bash
+chickenbot bot irc:irc.chonkbase.net eggbot   # nick or services account
+chickenbot bot                                 # list them
+chickenbot bot irc:irc.chonkbase.net eggbot --forget
+```
+
+Marked handles are folded per the network's casemapping, checked against both
+the nick and the account, and never shared between realms. What they say is
+still logged as `kind=bot`; it is simply never acted on.
+
 ## Names
 
 **The bot answers to several.** `Handler.wake_words` is its nick on that
