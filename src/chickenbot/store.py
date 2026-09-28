@@ -71,12 +71,23 @@ CREATE TABLE IF NOT EXISTS alias (
 );
 CREATE INDEX IF NOT EXISTS alias_handle ON alias (handle COLLATE NOCASE);
 
+-- What a room is like. A channel has a character of its own -- how formal it
+-- is, what the running jokes are, what not to touch -- and that shapes how the
+-- bot behaves there quite apart from who is in it.
+CREATE TABLE IF NOT EXISTS room (
+    realm      TEXT NOT NULL,
+    name       TEXT NOT NULL,
+    notes      TEXT NOT NULL DEFAULT '',
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (realm, name)
+);
+
 -- Every change to a soul or a dossier, append-only. These are mutable state
 -- that someone will want to undo, and without this the previous wording is
 -- simply gone. Not git: a table is enough for documents this small.
 CREATE TABLE IF NOT EXISTS revision (
     id     INTEGER PRIMARY KEY,
-    kind   TEXT NOT NULL,              -- soul | person
+    kind   TEXT NOT NULL,              -- soul | person | room
     key    TEXT NOT NULL DEFAULT '',   -- '' for the soul, realm/account for a person
     text   TEXT NOT NULL,              -- the value as of this change
     author TEXT NOT NULL DEFAULT '',
@@ -530,6 +541,44 @@ class Store:
             (text, int(time.time())),
         )
         self._keep_revision("soul", "", text, author)
+
+    def room_notes(self, realm: str, room: str) -> str:
+        row = self._db.execute(
+            "SELECT notes FROM room WHERE realm = ? AND name = ?", (realm, self.fold(realm, room))
+        ).fetchone()
+        return row["notes"] if row else ""
+
+    def set_room_notes(self, realm: str, room: str, notes: str, author: str = "cli") -> None:
+        name = self.fold(realm, room)
+        self._db.execute(
+            "INSERT INTO room (realm, name, notes, updated_at) VALUES (?, ?, ?, ?)"
+            " ON CONFLICT(realm, name) DO UPDATE SET notes = excluded.notes, updated_at = excluded.updated_at",
+            (realm, name, notes, int(time.time())),
+        )
+        self._keep_revision("room", f"{realm}/{name}", notes, author)
+
+    def room_checked(self, realm: str, room: str) -> int:
+        """When the room's notes were last written, 0 if never."""
+        row = self._db.execute(
+            "SELECT updated_at FROM room WHERE realm = ? AND name = ?", (realm, self.fold(realm, room))
+        ).fetchone()
+        return int(row["updated_at"]) if row else 0
+
+    def described_rooms(self) -> list[tuple[str, str, int]]:
+        """(realm, room, updated_at) for every room with notes."""
+        rows = self._db.execute(
+            "SELECT realm, name, updated_at FROM room WHERE notes != '' ORDER BY realm, name"
+        ).fetchall()
+        return [(r["realm"], r["name"], r["updated_at"]) for r in rows]
+
+    def tenure(self, realm: str, room: str) -> tuple[int, int]:
+        """(days seen, lines heard) in one room: how well the bot knows the place."""
+        row = self._db.execute(
+            "SELECT COUNT(DISTINCT date(ts, 'unixepoch', 'localtime')) AS days, COUNT(*) AS lines"
+            " FROM chatlog WHERE realm = ? AND channel = ? AND kind IN ('privmsg', 'command')",
+            (realm, self.fold(realm, room)),
+        ).fetchone()
+        return (int(row["days"] or 0), int(row["lines"] or 0)) if row else (0, 0)
 
     def person_id(self, realm: str, handle: str) -> int | None:
         row = self._db.execute(

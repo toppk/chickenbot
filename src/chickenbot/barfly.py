@@ -59,6 +59,9 @@ class Barfly:
                     await self.remark(tr, room, now)
 
     def _due(self, realm: str, room: str, now: float) -> bool:
+        # A guest does not hold forth in a room it has only just walked into.
+        if not self.h.rooms.may_act_out(realm, room):
+            return False
         if not self.h.rhythm.lively_now(realm, room, now):
             return False
         last = self.h.store.last_human_line(realm, room)

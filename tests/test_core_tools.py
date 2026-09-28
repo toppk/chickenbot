@@ -1,3 +1,5 @@
+import time
+
 import pytest
 
 from chickenbot.commands import Context, Handler
@@ -11,6 +13,18 @@ from .test_irc_transport import feed, irc  # noqa: F401 - fixture
 @pytest.fixture
 def handler(cfg, store) -> Handler:
     return Handler(cfg, store, None, None)
+
+
+def settle_in(store, realm="fake", room="#chan", days=5) -> None:
+    """Enough days in the room that the bot is no longer a guest in it."""
+    now = time.time()
+    for day in range(1, days + 1):
+        store._db.execute(
+            "INSERT INTO chatlog (ts, realm, channel, nick, nick_key, account, kind, text)"
+            " VALUES (?, ?, ?, 'nate', 'nate', '', 'privmsg', 'hi')",
+            (int(now - day * 86400), realm, store.fold(realm, room)),
+        )
+    store._db.commit()
 
 
 def box(handler, transport, *, is_owner=True) -> ToolBox:
@@ -27,6 +41,7 @@ def box(handler, transport, *, is_owner=True) -> ToolBox:
 
 
 async def test_moderation_tools_reach_the_transport(handler, transport):
+    settle_in(handler.store)
     b = box(handler, transport)
     assert await b.run("chan_kick", {"who": "nate", "reason": "rude"}) == "kick nate"
     assert transport.actions == [(KICK, "#chan", "nate", "rude")]
@@ -156,9 +171,20 @@ async def test_chan_topic_distinguishes_empty_from_unknown(handler, transport):
 async def test_chan_topic_sets_when_given_one(handler, transport):
     from chickenbot.transport import TOPIC as TOPIC_CAP
 
+    settle_in(handler.store)
     await box(handler, transport).run("chan_topic", {"topic": "soup o'clock"})
     assert transport.actions == [(TOPIC_CAP, "#chan", "soup o'clock", "")]
     assert transport.topics["#chan"] == "soup o'clock"
+
+
+async def test_a_guest_does_not_rewrite_the_topic(handler, transport):
+    """Often the room's oldest joke. Reading it is fine; changing it is not,
+    until the bot has been there long enough to know what it is looking at."""
+    transport.topics["#chan"] = "The printer is out of cyan again"
+    result = await box(handler, transport).run("chan_topic", {"topic": "printer fixed"})
+    assert "still new" in result
+    assert transport.actions == []
+    assert transport.topics["#chan"] == "The printer is out of cyan again"
 
 
 async def test_chan_topic_takes_a_sensibly_named_argument(handler, transport):

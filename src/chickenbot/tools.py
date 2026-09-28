@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from .observe import note_many
+from .rooms import GUEST
 from .transport import TOPIC
 
 if TYPE_CHECKING:  # commands imports us, so this stays a type-only edge
@@ -203,6 +204,11 @@ async def tool_chan_topic(h: Handler, ctx: Context, args: dict) -> str:
         if current is None:
             return f"error: i cannot see {ctx.channel}'s topic"
         return f"topic of {ctx.channel}: {current}" if current else f"{ctx.channel} has no topic set"
+    # The topic is often the room's oldest joke. Changing one before the bot
+    # knows the place is how a running gag gets tidied away; an owner who
+    # really means it can still use the command.
+    if h.rooms.standing(ctx.transport.realm, ctx.channel) == GUEST:
+        return f"error: i am still new in {ctx.channel}, its topic is not mine to change yet"
     result = await ctx.transport.moderate(TOPIC, ctx.channel, str(wanted))
     ctx.remember_action(f"topic {wanted}", result)
     return result

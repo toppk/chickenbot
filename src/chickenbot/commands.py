@@ -18,6 +18,8 @@ from .dossier import Dossiers
 from .events import Event, Kind
 from .observe import activity, note, note_default
 from .rhythm import Rhythm
+from .rooms import MAX_CHARS as ROOM_NOTES_MAX
+from .rooms import Rooms
 from .scheduler import MAX_DELAY, describe, parse_delay
 from .soul import Soul
 from .store import Store
@@ -109,7 +111,9 @@ def compose(h: Handler, ctx: Context, scrollback: str, *, following: bool = Fals
     )
     # Owner-written notes about whoever is here. Trusted, unlike scrollback.
     people = h.dossiers.block(realm=ctx.transport.realm, account=ctx.account, text=f"{ctx.args} {scrollback}")
-    head = "\n".join(part for part in (situation, people) if part)
+    # ...and about the room itself, which has a character of its own.
+    room = h.rooms.block(ctx.transport.realm, ctx.channel) if ctx.in_channel else ""
+    head = "\n".join(part for part in (situation, room, people) if part)
     if scrollback:
         return (
             system,
@@ -155,6 +159,7 @@ class Handler:
         self._wake_cache: dict[str, list[str]] = {}
         self.rhythm = Rhythm(store)
         self.welcome = Welcome(store)
+        self.rooms = Rooms(store)
         self._writes: set[asyncio.Task] = set()
         self.transports: dict[str, Transport] = {}
         self._asks: dict[str, deque[float]] = defaultdict(deque)
@@ -610,6 +615,24 @@ async def cmd_topic(h: Handler, ctx: Context) -> None:
     await moderate(ctx, TOPIC, ctx.args)
 
 
+@command("vibe", usage="vibe [notes]", blurb="what this room is like")
+async def cmd_vibe(h: Handler, ctx: Context) -> None:
+    if not ctx.in_channel:
+        ctx.say("rooms have a vibe; a direct message does not")
+        return
+    realm = ctx.transport.realm
+    if not ctx.args:
+        ctx.say(f"{ctx.channel}: {h.rooms.describe(realm, ctx.channel)}")
+        for line in h.rooms.notes(realm, ctx.channel).splitlines()[:MAX_DUMP_LINES]:
+            ctx.say(f"  {line}")
+        return
+    if not ctx.is_owner:
+        ctx.say(f"{ctx.nick}: reading is open, writing is not")
+        return
+    h.store.set_room_notes(realm, ctx.channel, ctx.args[:ROOM_NOTES_MAX], author=ctx.account or ctx.nick)
+    ctx.say(f"noted, that is what {ctx.channel} is like")
+
+
 @command("say", owner=True, usage="say <text>", blurb="speak")
 async def cmd_say(h: Handler, ctx: Context) -> None:
     if ctx.args:
@@ -728,7 +751,8 @@ async def _dump_rhythm(h: Handler, ctx: Context) -> list[str]:
             quiet = f"quiet {ago(last)}" if last else "never heard anyone"
             awake = "awake now" if h.rhythm.lively_now(tr.realm, room) else "off hours"
             out.append(f"[{tr.realm}] {room}: {awake}, {quiet}")
-            out.append(f"  {h.rhythm.describe(tr.realm, room)}")
+            out.append(f"  hours: {h.rhythm.describe(tr.realm, room)}")
+            out.append(f"  standing: {h.rooms.describe(tr.realm, room)}")
     return out or ["not in any rooms"]
 
 
