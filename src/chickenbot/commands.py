@@ -17,6 +17,7 @@ from .config import Config
 from .dossier import Dossiers
 from .events import Event, Kind
 from .observe import activity, note, note_default
+from .rhythm import Rhythm
 from .scheduler import MAX_DELAY, describe, parse_delay
 from .soul import Soul
 from .store import Store
@@ -151,6 +152,7 @@ class Handler:
         self._rooms: dict[str, tuple[Transport, str]] = {}
         self.tool_server = None  # set at startup when the tool socket is enabled
         self._wake_cache: dict[str, list[str]] = {}
+        self.rhythm = Rhythm(store)
         self._writes: set[asyncio.Task] = set()
         self.transports: dict[str, Transport] = {}
         self._asks: dict[str, deque[float]] = defaultdict(deque)
@@ -282,6 +284,8 @@ class Handler:
             # stays out of search and out of the scrollback handed to the model.
             kind = "command" if body is not None else "privmsg"
             await self.store.log_line(tr.realm, env.room, env.sender, env.account, env.text, kind)
+            # Learning the room's hours is a side effect of watching it.
+            self.store.note_presence(tr.realm, env.room)
 
         if body is None:
             # Not addressed. If this room is mid-conversation with us, hold the

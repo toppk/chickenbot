@@ -106,6 +106,18 @@ CREATE TABLE IF NOT EXISTS activity (
 );
 CREATE INDEX IF NOT EXISTS activity_ts ON activity (ts DESC);
 
+-- When a room is actually alive, counted per hour of the week. The bot learns
+-- the rhythm of a place by sitting in it, and the decision engine uses the
+-- counts directly: no model call to answer "is anyone usually about now".
+CREATE TABLE IF NOT EXISTS presence (
+    realm TEXT NOT NULL,
+    room  TEXT NOT NULL,
+    dow   INTEGER NOT NULL,   -- 0 = Monday, local time
+    hour  INTEGER NOT NULL,
+    lines INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (realm, room, dow, hour)
+);
+
 CREATE TABLE IF NOT EXISTS job (
     id         INTEGER PRIMARY KEY,
     due_at     INTEGER NOT NULL,
@@ -435,6 +447,30 @@ class Store:
             return cur.rowcount
 
         return await self._run(go)
+
+    # -- when a room is alive ----------------------------------------------
+
+    def note_presence(self, realm: str, room: str, when: float | None = None) -> None:
+        stamp = time.localtime(when) if when else time.localtime()
+        self._db.execute(
+            "INSERT INTO presence (realm, room, dow, hour, lines) VALUES (?, ?, ?, ?, 1)"
+            " ON CONFLICT(realm, room, dow, hour) DO UPDATE SET lines = lines + 1",
+            (realm, room, stamp.tm_wday, stamp.tm_hour),
+        )
+        self._db.commit()
+
+    def presence(self, realm: str = "", room: str = "") -> dict[tuple[int, int], int]:
+        """(day, hour) -> lines seen. Summed across rooms when none is given."""
+        sql = "SELECT dow, hour, SUM(lines) AS n FROM presence"
+        args: list = []
+        if realm:
+            sql += " WHERE realm = ?"
+            args.append(realm)
+            if room:
+                sql += " AND room = ?"
+                args.append(room)
+        sql += " GROUP BY dow, hour"
+        return {(r["dow"], r["hour"]): int(r["n"]) for r in self._db.execute(sql, args)}
 
     # -- soul and people ---------------------------------------------------
 
