@@ -14,6 +14,7 @@ import time
 from pathlib import Path
 
 from . import brain, config
+from .barfly import Barfly
 from .commands import Handler
 from .observe import TRACE, set_sink
 from .scheduler import Scheduler
@@ -113,6 +114,10 @@ async def run(cfg: config.Config) -> int:
         tasks.append(asyncio.create_task(tool_server.run(), name="toolsock"))
     if watcher is not None:
         tasks.append(asyncio.create_task(watcher.run(), name="watcher"))
+    if provider is not None:
+        # No configuration: it stays quiet until it has watched a room enough
+        # to know when that room is awake.
+        tasks.append(asyncio.create_task(Barfly(handler).run(), name="barfly"))
 
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()

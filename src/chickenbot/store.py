@@ -497,6 +497,15 @@ class Store:
         )
         self._db.commit()
 
+    def last_human_line(self, realm: str, room: str) -> int:
+        """When a person last said anything here, 0 if never. The bot's own
+        lines do not count: talking to itself is not a lively room."""
+        row = self._db.execute(
+            "SELECT MAX(ts) AS ts FROM chatlog WHERE realm = ? AND channel = ? AND kind IN ('privmsg', 'command')",
+            (realm, self.fold(realm, room)),
+        ).fetchone()
+        return int(row["ts"] or 0) if row else 0
+
     def last_spoke(self, realm: str, room: str, nick: str) -> int:
         """When this person last said something here, 0 if never. A regular is
         somebody we have actually heard from, not anybody who wandered in."""

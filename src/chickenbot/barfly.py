@@ -1,0 +1,107 @@
+"""Speaking up unprompted, when the room is awake but nobody is talking.
+
+The decision of *when* is arithmetic on what the bot has watched: a lively
+hour, a lull, and not too recently. Only the wording is asked of a model, and
+it is free to answer <silent> and leave the silence alone.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import time
+from typing import TYPE_CHECKING
+
+from .attention import SILENT
+from .brain import ProviderError
+from .observe import activity, note
+
+if TYPE_CHECKING:
+    from .commands import Handler
+
+log = logging.getLogger(__name__)
+
+TICK = 300.0
+QUIET = 45 * 60  # a lull, rather than a gap between two sentences
+SPELL = 4 * 3600  # at most one unprompted remark per room per spell
+TODAY = 8 * 3600  # somebody must have been around this recently: not an empty room
+
+REMARK = (
+    "Nobody has said anything for a while, and no one has asked you anything. "
+    "If the conversation above leaves you with something worth saying — a remark, "
+    "a question, a small observation — say it in one line. If you have nothing "
+    f"real to add, reply with exactly {SILENT} and say nothing."
+)
+
+
+class Barfly:
+    """Starts itself: sitting in a room long enough is the only setup."""
+
+    def __init__(self, handler: Handler) -> None:
+        self.h = handler
+        self._spoke: dict[str, float] = {}
+
+    async def run(self) -> None:
+        while True:
+            try:
+                await self.tick()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                log.exception("barfly tick failed")
+            await asyncio.sleep(TICK)
+
+    async def tick(self, now: float | None = None) -> None:
+        now = now or time.time()
+        for tr in self.h.transports.values():
+            for room in list(tr.rooms):
+                if self._due(tr.realm, room, now):
+                    await self.remark(tr, room, now)
+
+    def _due(self, realm: str, room: str, now: float) -> bool:
+        if not self.h.rhythm.lively_now(realm, room, now):
+            return False
+        last = self.h.store.last_human_line(realm, room)
+        if not last or not QUIET <= now - last <= TODAY:
+            return False
+        return now - self._spoke.get(f"{realm}/{room}", 0.0) >= SPELL
+
+    async def remark(self, tr, room: str, now: float) -> None:
+        from .commands import Context, compose, render_scrollback
+
+        if self.h.provider is None:
+            return
+        # Claimed before the call, so a slow model cannot be asked twice.
+        self._spoke[f"{tr.realm}/{room}"] = now
+        with activity(kind="barfly", realm=tr.realm, room=room, nick=tr.me, account="-"):
+            recent = await self.h.store.recent(tr.realm, room, self.h.cfg.llm.history_lines)
+            ctx = Context(
+                handler=self.h,
+                transport=tr,
+                nick=tr.me,
+                account="",
+                channel=room,
+                args=REMARK,
+                is_owner=False,
+                in_channel=True,
+            )
+            system, prompt = compose(self.h, ctx, render_scrollback(recent))
+            note(llm=self.h.provider.name)
+            try:
+                said = await self.h.provider.reply(
+                    system=system,
+                    history=[],
+                    prompt=prompt,
+                    search=False,
+                    session=f"{tr.name}:{room}",
+                )
+            except ProviderError as exc:
+                note(outcome="llm-error", error=str(exc)[:60])
+                return
+            said = said.strip()
+            if not said or said == SILENT:
+                note(outcome="silent")
+                return
+            note(outcome="remarked")
+            tr.say(room, said)
+            self.h.remember_own(tr, room, said)
