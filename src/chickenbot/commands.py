@@ -24,6 +24,7 @@ from .store import Store
 from .tools import ToolBox
 from .transport import BAN, DEOP, DEVOICE, KICK, OP, TOPIC, UNBAN, VOICE, Transport
 from .watcher import FEEDS, Watcher, parse_slug
+from .welcome import Welcome
 
 log = logging.getLogger(__name__)
 
@@ -153,6 +154,7 @@ class Handler:
         self.tool_server = None  # set at startup when the tool socket is enabled
         self._wake_cache: dict[str, list[str]] = {}
         self.rhythm = Rhythm(store)
+        self.welcome = Welcome(store)
         self._writes: set[asyncio.Task] = set()
         self.transports: dict[str, Transport] = {}
         self._asks: dict[str, deque[float]] = defaultdict(deque)
@@ -264,8 +266,20 @@ class Handler:
             await cmd_ask(self, ctx, following=True)
 
     async def _handle_presence(self, event: Event) -> None:
-        """Somebody came or went. Nothing is said yet; the greeting rules land next."""
-        note(outcome="noted", who=event.sender, account=event.account or "-")
+        """Somebody came or went. Regulars get a hello, once a day; everyone
+        else gets the quiet they arrived in."""
+        note(who=event.sender, account=event.account or "-")
+        if event.kind is Kind.DEPARTURE:
+            note(outcome="noted")
+            return
+        tr = event.transport
+        hello = self.welcome.on_arrival(tr.realm, event.room, event.sender)
+        if not hello:
+            note(outcome="quiet")
+            return
+        note(outcome="greeted")
+        tr.say(event.room, hello)
+        self.remember_own(tr, event.room, hello)
 
     async def _handle_change(self, event: Event) -> None:
         """A room's modes changed. Channel state is already updated by the
@@ -288,10 +302,15 @@ class Handler:
         if env.is_group:
             # Anything aimed at the bot is an invocation, not room chat, so it
             # stays out of search and out of the scrollback handed to the model.
+            # Asked before the line is logged, or they have always just spoken.
+            hello = self.welcome.on_speech(tr.realm, env.room, env.sender)
             kind = "command" if body is not None else "privmsg"
             await self.store.log_line(tr.realm, env.room, env.sender, env.account, env.text, kind)
             # Learning the room's hours is a side effect of watching it.
             self.store.note_presence(tr.realm, env.room)
+            if hello:
+                tr.say(env.room, hello)
+                self.remember_own(tr, env.room, hello)
 
         if body is None:
             # Not addressed. If this room is mid-conversation with us, hold the

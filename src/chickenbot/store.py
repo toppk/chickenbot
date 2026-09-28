@@ -118,6 +118,16 @@ CREATE TABLE IF NOT EXISTS presence (
     PRIMARY KEY (realm, room, dow, hour)
 );
 
+-- The last day we said hello to somebody in a room, so a greeting is a
+-- once-a-day thing however many times they reconnect.
+CREATE TABLE IF NOT EXISTS greeting (
+    realm TEXT NOT NULL,
+    room  TEXT NOT NULL,
+    nick_key TEXT NOT NULL,
+    day   TEXT NOT NULL,      -- YYYY-MM-DD, local
+    PRIMARY KEY (realm, room, nick_key)
+);
+
 CREATE TABLE IF NOT EXISTS job (
     id         INTEGER PRIMARY KEY,
     due_at     INTEGER NOT NULL,
@@ -471,6 +481,31 @@ class Store:
                 args.append(room)
         sql += " GROUP BY dow, hour"
         return {(r["dow"], r["hour"]): int(r["n"]) for r in self._db.execute(sql, args)}
+
+    def greeted_on(self, realm: str, room: str, nick: str) -> str:
+        row = self._db.execute(
+            "SELECT day FROM greeting WHERE realm = ? AND room = ? AND nick_key = ?",
+            (realm, self.fold(realm, room), self.fold(realm, nick)),
+        ).fetchone()
+        return row["day"] if row else ""
+
+    def note_greeting(self, realm: str, room: str, nick: str, day: str) -> None:
+        self._db.execute(
+            "INSERT INTO greeting (realm, room, nick_key, day) VALUES (?, ?, ?, ?)"
+            " ON CONFLICT(realm, room, nick_key) DO UPDATE SET day = excluded.day",
+            (realm, self.fold(realm, room), self.fold(realm, nick), day),
+        )
+        self._db.commit()
+
+    def last_spoke(self, realm: str, room: str, nick: str) -> int:
+        """When this person last said something here, 0 if never. A regular is
+        somebody we have actually heard from, not anybody who wandered in."""
+        row = self._db.execute(
+            "SELECT MAX(ts) AS ts FROM chatlog WHERE realm = ? AND channel = ? AND nick_key = ?"
+            " AND kind IN ('privmsg', 'command')",
+            (realm, self.fold(realm, room), self.fold(realm, nick)),
+        ).fetchone()
+        return int(row["ts"] or 0) if row else 0
 
     # -- soul and people ---------------------------------------------------
 
