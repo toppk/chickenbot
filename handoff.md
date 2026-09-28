@@ -43,6 +43,11 @@ src/chickenbot/
   config.py     toml -> dataclasses
   __main__.py   wiring, signals, shutdown
   tools.py      tool registry + ToolBox: what the model may propose, and the gate
+  rhythm.py     when a room is awake, counted per hour of the week
+  rooms.py      what a room is like, and how much standing the bot has in it
+  welcome.py    greeting the regulars: rules, not a model call
+  barfly.py     speaking up unprompted when a lively room goes quiet
+  vibe.py       the daily read of a room, writing the bot's own notes about it
   brain/        __init__ (protocol + clean_for_irc), claude.py, openai_compat.py
 tests/          conftest.py + one file per module; test_connect.py is end-to-end
 ```
@@ -445,6 +450,29 @@ same notes, and the `<known_people>` heading shows every name.
 
 The bot itself is stored the same way — its nick on a network is an alias like
 any other — which is why a name given in chat survives a restart.
+
+## Being a regular
+
+Four pieces, all decided by arithmetic over what the bot has watched, with a
+model asked only for wording:
+
+- `rhythm.py` counts lines per (weekday, hour). An hour is lively at 25% of the
+  busiest hour's traffic, once a room has 5 lines in any hour.
+- `welcome.py` greets someone it has actually heard from in the last 30 days,
+  once per room per day, with a 10-minute room cooldown so a netsplit is not a
+  chorus. JOIN/PART arrive as `Kind.ARRIVAL` / `Kind.DEPARTURE`.
+- `rooms.py` gives each channel a dossier and the bot a standing in it: guest,
+  then member at 3 days *or* 200 lines, then fixture at 14 days or 2000. A
+  guest makes no unprompted remarks and cannot change the topic through a tool
+  (`#lobby`'s printer topic is the joke, not stale news). `.vibe` shows it;
+  an owner sets the trusted half.
+- `barfly.py` ticks every 5 minutes: lively hour, 45 minutes quiet, somebody
+  around in the last 8 hours, nothing unprompted said for 4 hours. Then one
+  model call, which may answer `<silent>`.
+- `vibe.py` reads each room once a day and writes what it noticed. Stored in
+  `room.observed`, apart from the owners' `room.notes`, and presented to the
+  model as impressions — it is distilled from the log, so it is still other
+  people's words.
 
 ## Attention
 
