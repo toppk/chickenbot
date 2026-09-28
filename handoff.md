@@ -59,7 +59,12 @@ come from the run directory's `.env`, which `init` writes:
 
 A command-line argument still wins over the environment. `CB_INSTANCE` only
 names the process, so `ps` reads `chickenbot[eaccel-main]` and
-`chickenbot[eaccel-github]` rather than two identical `uv run` lines. The chonkbase bot runs as `eaccel`; its config,
+`chickenbot[eaccel-github]`.
+
+`ExecStart` runs `.venv/bin/` directly rather than `uv run`, which spawns and
+waits rather than exec'ing and so leaves a second process per instance in the
+table. The cost is that a dependency change needs `uv sync` by hand -- fine for
+a service, which should not be mutating its own venv on restart anyway. The chonkbase bot runs as `eaccel`; its config,
 secrets and databases live in `~/server/chickenbot/eaccel/` and nothing
 runtime is left in the checkout. The starter config refuses to load with no owners, so an
 instance nobody is in charge of cannot start by accident.
