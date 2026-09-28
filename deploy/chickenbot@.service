@@ -1,18 +1,20 @@
-# systemd --user unit. Install:
+# One instance per domain: chickenbot@hobby, chickenbot@work. %i names both the
+# run directory and the unit, so nothing is configured twice. Install:
+#   chickenbot init ~/chickenbot/hobby
 #   mkdir -p ~/.config/systemd/user
 #   cp deploy/*.service ~/.config/systemd/user/
 #   systemctl --user daemon-reload
-#   systemctl --user enable --now chickenbot github-tool
+#   systemctl --user enable --now chickenbot@hobby chickenbot-github@hobby
 #   loginctl enable-linger $USER      # so it survives logout
 [Unit]
-Description=chickenbot
+Description=chickenbot (%i)
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
 WorkingDirectory=%h/workspace/chickenbot
-ExecStart=%h/.local/bin/uv run chickenbot -c chickenbot.toml
+ExecStart=%h/.local/bin/uv run chickenbot -c %h/chickenbot/%i/chickenbot.toml
 Restart=always
 RestartSec=5
 # Secrets come from the .env beside the config, which the bot reads itself.

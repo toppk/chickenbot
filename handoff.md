@@ -31,6 +31,29 @@ Current size: ~2800 lines of source, ~1660 of tests, 135 tests, vs eggbot's
 note; it is still a fifth of eggbot. If a change starts growing a subsystem,
 push back.
 
+## Instances
+
+Several bots run side by side -- a hobby domain, a personal one, a work one --
+and each owns everything it touches. Paths in the toml resolve against the
+toml, so a run directory is self-contained:
+
+```bash
+chickenbot init ~/chickenbot/hobby            # config, .env (0600), db, soul
+chickenbot init ~/chickenbot/work --soul my-soul.md
+chickenbot -c ~/chickenbot/work/chickenbot.toml --check-config
+systemctl --user enable --now chickenbot@hobby chickenbot-github@hobby
+```
+
+`deploy/chickenbot@.service` and `deploy/chickenbot-github@.service` are
+templates: `%i` is both the unit instance and the run directory under
+`~/chickenbot/`. The starter config refuses to load with no owners, so an
+instance nobody is in charge of cannot start by accident.
+
+**One github tool per instance, not one shared.** It is a mirror keyed by
+GitHub handle, and one process serving every domain would put work handles in
+the hobby database and make a restart in one domain a restart in all of them.
+The duplicated fetching is a handful of API calls against a six-hour cache.
+
 ## Layout
 
 ```

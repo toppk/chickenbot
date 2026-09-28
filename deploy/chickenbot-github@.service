@@ -1,18 +1,22 @@
 # The tool is independent of the bot: it starts, stops and restarts on its own,
 # and reconnects to the socket whenever chickenbot happens to be there. No
 # ordering dependency is declared on purpose.
+#
+# One per instance, not one shared. Each keeps its own mirror and its own
+# socket, so a work handle is never fetched into the hobby database and a
+# restart in one domain cannot disturb another.
 [Unit]
-Description=chickenbot github tool
+Description=chickenbot github tool (%i)
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
 WorkingDirectory=%h/workspace/chickenbot
-EnvironmentFile=-%h/workspace/chickenbot/.env
+EnvironmentFile=-%h/chickenbot/%i/.env
 ExecStart=%h/.local/bin/uv run python -m external.github \
-    --socket %h/workspace/chickenbot/chickenbot-tools.sock \
-    --db %h/workspace/chickenbot/github-tool.db \
+    --socket %h/chickenbot/%i/chickenbot-tools.sock \
+    --db %h/chickenbot/%i/github-tool.db \
     --interval 900
 Restart=always
 RestartSec=10

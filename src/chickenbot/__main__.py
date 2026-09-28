@@ -427,6 +427,60 @@ def _read_text(value: str) -> str:
     return value
 
 
+ENV_TEMPLATE = """# Secrets for this instance. Never commit this file.
+OPENROUTER_API_KEY=
+GITHUB_TOKEN=
+CHICKENBOT_SASL_PASSWORD=
+"""
+
+
+def instantiate(args: argparse.Namespace) -> int:
+    """Lay out one instance's run directory. Everything an instance owns lives
+    in it, because two instances sharing a database or a socket is two domains
+    sharing an identity namespace."""
+    from .soul import TEMPLATE as SOUL_TEMPLATE
+
+    run = Path(args.into).expanduser()
+    run.mkdir(parents=True, exist_ok=True)
+    toml = run / "chickenbot.toml"
+    if toml.exists() and not args.force:
+        print(f"{toml} exists already; --force overwrites it", file=sys.stderr)
+        return 1
+    starter = Path(__file__).resolve().parent.parent.parent / "docs" / "templates" / "chickenbot.toml"
+    if not starter.is_file():
+        print(f"missing {starter}", file=sys.stderr)
+        return 1
+    toml.write_text(starter.read_text(encoding="utf-8"), encoding="utf-8")
+
+    env = run / ".env"
+    if not env.exists():
+        env.write_text(ENV_TEMPLATE, encoding="utf-8")
+        env.chmod(0o600)
+
+    # The soul is seeded now rather than on first run, so it can be edited
+    # before the bot ever speaks.
+    source = Path(args.soul).expanduser() if args.soul else SOUL_TEMPLATE
+    if not source.is_file():
+        print(f"missing {source}", file=sys.stderr)
+        return 1
+    store = Store(str(run / "chickenbot.db"))
+    try:
+        if store.soul() and not args.force:
+            print("soul already set; leaving it alone")
+        else:
+            store.set_soul(source.read_text(encoding="utf-8"), author="init")
+    finally:
+        store.close()
+
+    name = run.name
+    print(f"instance {name!r} laid out in {run}")
+    print(f"  1. put the secrets in {env}")
+    print(f"  2. set host, nick, channels and owners in {toml}")
+    print(f"  3. chickenbot -c {toml} --check-config")
+    print(f"  4. systemctl --user enable --now chickenbot@{name} chickenbot-github@{name}")
+    return 0
+
+
 def log_handlers(path: str) -> list[logging.Handler] | None:
     """None leaves logging on stdout, which is where a service manager wants it.
     A path is for running by hand, where the terminal scrolls away."""
@@ -493,9 +547,19 @@ def main(argv: list[str] | None = None) -> int:
     pr.add_argument("--nick", default="toppk", help="who is asking")
     pr.add_argument("--following", action="store_true", help="as a followed conversation")
 
+    init_cmd = sub.add_parser("init", help="lay out a new instance's run directory")
+    init_cmd.add_argument("into", help="the run directory, e.g. ~/chickenbot/hobby")
+    init_cmd.add_argument("--soul", help="a SOUL.md to start from; omit for the shipped one")
+    init_cmd.add_argument("--force", action="store_true", help="overwrite an existing config and soul")
+
     export_cmd = sub.add_parser("export", help="explode the log into files")
     export_cmd.add_argument("into", help="directory to write under")
     args = parser.parse_args(argv)
+
+    if args.what == "init":
+        # No config to load: this is the command that writes one.
+        logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(message)s")
+        return instantiate(args)
 
     try:
         cfg = config.load(args.config)
