@@ -108,7 +108,9 @@ async def run(cfg: config.Config) -> int:
     tasks.append(asyncio.create_task(prune_daily(store, cfg.chatlog_days), name="prune"))
     tasks.append(asyncio.create_task(scheduler.run(), name="scheduler"))
     if cfg.tools.enabled:
-        tasks.append(asyncio.create_task(ToolServer(cfg.tools, transports, handler.dispatch).run(), name="toolsock"))
+        tool_server = ToolServer(cfg.tools, transports, handler.dispatch, subjects=store.handles)
+        handler.tool_server = tool_server
+        tasks.append(asyncio.create_task(tool_server.run(), name="toolsock"))
     if watcher is not None:
         tasks.append(asyncio.create_task(watcher.run(), name="watcher"))
 

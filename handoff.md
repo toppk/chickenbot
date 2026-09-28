@@ -173,8 +173,26 @@ chickenbot who iconidentify                     # search every realm
 chickenbot who irc:host chrisk --alias github/iconidentify
 ```
 
-`facts` exists so the decision engine can read structured values without
-parsing prose; `notes` stays prose for the model. Revisions key on the person
+**The core holds identity, not domain facts.** Aliases and prose, nothing that
+a tool already owns: GitHub account details, repo stats and activity live in
+the github tool's own database and are asked for on demand. Two copies with
+different ages would mean the stale one sometimes wins. `facts` exists for
+participant-level things no tool has an opinion about — timezone, how someone
+likes to be addressed — and nothing writes it yet.
+
+**Tools are told who to watch.** A tool names a realm in its handshake
+(`subjects: "github"`); the `welcome` carries every handle chickenbot knows
+there, and a `configure` message follows whenever that changes. So the github
+tool ships with an empty user list: a list in two places is a list that
+disagrees with itself, and the core is the side that knows which handles belong
+to people it actually talks to.
+
+**`who_link` lets someone claim their own handle in chat**, and has no target
+argument on purpose. Channel text is attacker-controlled; a tool that could
+file "chrisk's github is evil-user" would turn one sentence into a durable,
+tool-visible lie that then steers what the bot watches. Claiming your own is
+safe because the network authenticated the account, and `alias.source` records
+who said so. Revisions key on the person
 id, not a handle, so linking a new alias does not orphan their history.
 
 **sqlite has FTS5** (checked: 3.53.4 here), so full-text search over people or

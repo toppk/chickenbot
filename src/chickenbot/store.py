@@ -65,6 +65,8 @@ CREATE TABLE IF NOT EXISTS alias (
     realm     TEXT NOT NULL,
     handle    TEXT NOT NULL,
     person_id INTEGER NOT NULL REFERENCES person(id) ON DELETE CASCADE,
+    source    TEXT NOT NULL DEFAULT 'cli',  -- who said so: cli, or an account
+    added_at  INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (realm, handle)
 );
 CREATE INDEX IF NOT EXISTS alias_handle ON alias (handle COLLATE NOCASE);
@@ -206,6 +208,11 @@ class Store:
         if watch_cols and "transport" in watch_cols:
             self._db.execute("ALTER TABLE watch RENAME COLUMN transport TO realm")
             watch_cols = {r["name"] for r in self._db.execute("PRAGMA table_info(watch)")}
+        alias_cols = {r["name"] for r in self._db.execute("PRAGMA table_info(alias)")}
+        if alias_cols and "source" not in alias_cols:
+            self._db.execute("ALTER TABLE alias ADD COLUMN source TEXT NOT NULL DEFAULT 'cli'")
+            self._db.execute("ALTER TABLE alias ADD COLUMN added_at INTEGER NOT NULL DEFAULT 0")
+
         person_cols = {r["name"] for r in self._db.execute("PRAGMA table_info(person)")}
         if person_cols and "id" not in person_cols:
             # person(realm, account, notes) becomes person(id, notes) + alias.
@@ -471,6 +478,20 @@ class Store:
         ).fetchall()
         return [(r["realm"], r["handle"]) for r in rows]
 
+    def handles(self, realm: str) -> list[str]:
+        """Every handle known in a realm. This is what tells an external tool
+        who to watch, instead of the tool carrying its own list."""
+        rows = self._db.execute(
+            "SELECT DISTINCT handle FROM alias WHERE realm = ? ORDER BY handle", (realm,)
+        ).fetchall()
+        return [r["handle"] for r in rows]
+
+    def alias_source(self, realm: str, handle: str) -> tuple[str, int]:
+        row = self._db.execute(
+            "SELECT source, added_at FROM alias WHERE realm = ? AND handle = ? COLLATE NOCASE", (realm, handle)
+        ).fetchone()
+        return (row["source"], row["added_at"]) if row else ("", 0)
+
     def whois(self, handle: str) -> list[int]:
         """Everyone answering to this handle, in any realm. This is what makes
         "who is iconidentify" find the notes filed under chrisk."""
@@ -502,10 +523,11 @@ class Store:
         self._keep_revision("person", str(pid), notes, author)
         return pid
 
-    def add_alias(self, person_id: int, realm: str, handle: str) -> bool:
+    def add_alias(self, person_id: int, realm: str, handle: str, source: str = "cli") -> bool:
         try:
             self._db.execute(
-                "INSERT INTO alias (realm, handle, person_id) VALUES (?, ?, ?)", (realm, handle, person_id)
+                "INSERT INTO alias (realm, handle, person_id, source, added_at) VALUES (?, ?, ?, ?, ?)",
+                (realm, handle, person_id, source, int(time.time())),
             )
         except sqlite3.IntegrityError:
             return False

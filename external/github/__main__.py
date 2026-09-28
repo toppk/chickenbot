@@ -24,7 +24,11 @@ from .store import Store
 log = logging.getLogger("github-tool")
 
 PROTOCOL = 1
-USERS = ["agent2x0r", "toppk", "iconidentify", "a2f0"]
+SUBJECTS = "github"  # the realm whose handles chickenbot should send us
+# Only a starting point, and only when running detached. Once connected, who to
+# watch comes from chickenbot, which knows which GitHub handles belong to people
+# it actually talks to. A list in two places is a list that disagrees with itself.
+USERS: list[str] = []
 SEARCH_PACE = 2.0  # seconds between searches; the endpoint dislikes bursts
 RANGES = {"hour": 3600, "day": 86400, "week": 604800, "month": 2592000, "all": 0}
 
@@ -140,7 +144,16 @@ class Tool:
     def __init__(self, store: Store, api: GitHub, users: list[str]) -> None:
         self.store = store
         self.api = api
-        self.users = users
+        self.users = list(users)
+
+    def watch(self, users: list[str]) -> bool:
+        """Replace who we follow. Returns whether it actually changed."""
+        fresh = sorted({u.strip() for u in users if u and u.strip()})
+        if fresh == sorted(self.users):
+            return False
+        log.info("watching %s", ", ".join(fresh) or "nobody")
+        self.users = fresh
+        return True
 
     # -- polling ---------------------------------------------------------
 
@@ -300,7 +313,7 @@ async def serve(tool: Tool, socket_path: str) -> None:
         writer.write(json.dumps(message).encode() + b"\n")
         await writer.drain()
 
-    await send({"type": "hello", "v": PROTOCOL, "process": "github", "tools": TOOLS})
+    await send({"type": "hello", "v": PROTOCOL, "process": "github", "subjects": SUBJECTS, "tools": TOOLS})
     log.info("declared %d tool(s) on %s", len(TOOLS), socket_path)
     try:
         await _pump(tool, reader, send)
@@ -311,6 +324,11 @@ async def serve(tool: Tool, socket_path: str) -> None:
 
 
 async def _pump(tool: Tool, reader: asyncio.StreamReader, send) -> None:
+    async def refresh() -> None:
+        """A changed list is worth polling for at once, not in fifteen minutes."""
+        with contextlib.suppress(Exception):
+            await tool.poll_once()
+
     while line := await reader.readline():
         try:
             message = json.loads(line)
@@ -320,6 +338,12 @@ async def _pump(tool: Tool, reader: asyncio.StreamReader, send) -> None:
             log.info("accepted: %s", ", ".join(message.get("accepted", [])) or "none")
             for bad in message.get("rejected", []):
                 log.warning("rejected %s: %s", bad.get("name"), bad.get("reason"))
+            if tool.watch(message.get("subjects") or []):
+                await refresh()
+        elif message.get("type") == "configure":
+            # Somebody linked a new GitHub handle to a person we talk to.
+            if tool.watch(message.get("subjects") or []):
+                await refresh()
         elif message.get("type") == "error":
             log.warning("chickenbot refused: %s", message.get("reason"))
         elif message.get("type") == "call":
@@ -357,7 +381,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--socket", default="", help="chickenbot tool socket; omit to poll only")
     parser.add_argument("--db", default="github-tool.db")
     parser.add_argument("--env", default=".env", help="file to read GITHUB_TOKEN from")
-    parser.add_argument("--users", nargs="*", default=USERS)
+    parser.add_argument(
+        "--users", nargs="*", default=USERS, help="only for running detached; chickenbot supplies these"
+    )
     parser.add_argument("--interval", type=int, default=900)
     parser.add_argument("--once", action="store_true", help="poll once, print a summary, exit")
     parser.add_argument("-l", "--log-level", default="info")

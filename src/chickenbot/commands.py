@@ -148,6 +148,7 @@ class Handler:
             on_ready=self._follow_up,
         )
         self._rooms: dict[str, tuple[Transport, str]] = {}
+        self.tool_server = None  # set at startup when the tool socket is enabled
         self._writes: set[asyncio.Task] = set()
         self.transports: dict[str, Transport] = {}
         self._asks: dict[str, deque[float]] = defaultdict(deque)
@@ -189,6 +190,14 @@ class Handler:
     def remember_own(self, tr: Transport, room: str, text: str, kind: str = "self") -> None:
         """Fire and forget: the reply has already gone out, logging must not block it."""
         task = asyncio.create_task(self.store.log_line(tr.realm, room, tr.me, "", text, kind))
+        self._writes.add(task)
+        task.add_done_callback(self._writes.discard)
+
+    def aliases_changed(self, realm: str) -> None:
+        """Somebody learned a new handle. Tools watching that realm want to know."""
+        if self.tool_server is None:
+            return
+        task = asyncio.create_task(self.tool_server.announce_subjects(realm))
         self._writes.add(task)
         task.add_done_callback(self._writes.discard)
 

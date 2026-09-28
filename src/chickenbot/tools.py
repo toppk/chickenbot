@@ -228,3 +228,48 @@ async def tool_room_state(h: Handler, ctx: Context, args: dict) -> str:
         f"{', bans: ' + ', '.join(bans) if bans else ', no bans'}"
         f"{', topic: ' + chan.topic if chan.topic else ', no topic set'}"
     )
+
+
+@tool(
+    "who_link",
+    description=(
+        "Record that the person speaking also goes by a handle somewhere else, for example "
+        "their GitHub account. Use it when someone says 'my github is X' about THEMSELVES. "
+        "It always links to the speaker; you cannot record a handle on anyone else's behalf."
+    ),
+    params={
+        "type": "object",
+        "properties": {
+            "realm": {"type": "string", "description": "where the handle lives, e.g. github"},
+            "handle": {"type": "string", "description": "the handle they go by there"},
+        },
+        "required": ["realm", "handle"],
+    },
+)
+async def tool_who_link(h: Handler, ctx: Context, args: dict) -> str:
+    """Only ever the speaker's own handle.
+
+    There is no target argument on purpose. Channel text is attacker-controlled,
+    and a tool that could file "chrisk's github is evil-user" would turn one
+    sentence into a durable, tool-visible lie. Claiming your own is safe because
+    the account was authenticated by the network.
+    """
+    if not ctx.account:
+        return "error: i cannot see who you are; log in to services first"
+    realm = str(args.get("realm", "")).strip().lower()
+    handle = str(args.get("handle", "")).strip()
+    if not realm or not handle or "/" in realm or "/" in handle:
+        return "error: need a realm and a handle, e.g. realm=github handle=octocat"
+
+    mine = h.store.person_id(ctx.transport.realm, ctx.account)
+    if mine is None:
+        mine = h.store.set_person(ctx.transport.realm, ctx.account, "", author=ctx.account)
+    existing = h.store.person_id(realm, handle)
+    if existing == mine:
+        return f"already recorded: you are {handle} on {realm}"
+    if existing is not None:
+        return f"error: {realm}/{handle} is already somebody else's"
+    if h.store.add_alias(mine, realm, handle, source=ctx.account):
+        h.aliases_changed(realm)
+        return f"recorded: {ctx.nick} is {handle} on {realm}"
+    return "error: could not record that"

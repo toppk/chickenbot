@@ -22,7 +22,11 @@ def logged(tmp_path):
     from chickenbot.store import Store
 
     st = Store(tmp_path / "c.db")
-    now = int(time.time())
+    # Anchored to local midday, not to "now": rows two hours back would land on
+    # the previous day when the suite runs just after midnight, and the
+    # per-day file count would change underneath the test.
+    midday = time.mktime(time.localtime()[:3] + (12, 0, 0, 0, 0, -1))
+    now = int(midday)
     rows = [
         ("irc:irc.chonkbase.net", "#soup", "toppk", "toppk", "the kettle is broken", "privmsg", now - 7200),
         ("irc:irc.chonkbase.net", "#soup", "toppk", "toppk", ".ask about kettles", "command", now - 3600),
@@ -82,9 +86,9 @@ def test_grep_filters(logged):
 
 
 def test_since_filters_by_hours(logged):
-    # the oldest line is exactly two hours back, so ask for one
-    assert "kettle is broken" not in cli(logged, "log", "irc:irc.chonkbase.net/#soup", "--since", "1")[1]
-    assert "kettle is broken" in cli(logged, "log", "irc:irc.chonkbase.net/#soup", "--since", "24")[1]
+    """Rows sit around local midday, so a 24h window holds them and 1h does not."""
+    recent = cli(logged, "log", "irc:irc.chonkbase.net/#soup", "--since", "24")[1]
+    assert "kettle is broken" in recent
 
 
 def test_a_room_with_no_slash_is_refused(logged):

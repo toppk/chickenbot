@@ -39,6 +39,7 @@ class Connection:
         self.server = server
         self.writer = writer
         self.process = "?"
+        self.subjects = ""  # realm whose handles this process wants, e.g. "github"
         self.names: list[str] = []
         self.pending: dict[str, asyncio.Future[str]] = {}
         self._seq = 0
@@ -120,11 +121,26 @@ class ToolServer:
         cfg: ToolsConfig,
         transports: dict[str, Transport],
         dispatch: Callable[[Event], Awaitable[None]],
+        subjects: Callable[[str], list[str]] | None = None,
     ) -> None:
         self.cfg = cfg
         self.transports = transports
         self.dispatch = dispatch
+        self._subjects = subjects or (lambda realm: [])
+        self._live: set[Connection] = set()
         self._server: asyncio.AbstractServer | None = None
+
+    def subjects(self, realm: str) -> list[str]:
+        return self._subjects(realm)
+
+    async def announce_subjects(self, realm: str) -> None:
+        """Tell every tool following this realm that the list changed."""
+        for conn in tuple(self._live):
+            if conn.subjects != realm:
+                continue
+            with contextlib.suppress(Exception):
+                await conn.send({"type": "configure", "subjects": self.subjects(realm)})
+                log.info("told %s about the new %s list", conn.process, realm)
 
     async def run(self) -> None:
         path = Path(self.cfg.socket)
@@ -139,6 +155,7 @@ class ToolServer:
 
     async def _serve(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         conn = Connection(self, writer)
+        self._live.add(conn)
         try:
             while line := await reader.readline():
                 try:
@@ -150,6 +167,7 @@ class ToolServer:
         except (ConnectionError, asyncio.IncompleteReadError):
             pass
         finally:
+            self._live.discard(conn)
             conn.close()
             writer.close()
             with contextlib.suppress(Exception):
@@ -162,9 +180,20 @@ class ToolServer:
                     await conn.send({"type": "error", "reason": f"protocol {PROTOCOL} only"})
                     return
                 conn.process = str(message.get("process", "?"))[:40]
+                conn.subjects = str(message.get("subjects", ""))[:40]
                 accepted, rejected = conn.register(message.get("tools"))
                 log.info("tool process %s declared %s", conn.process, ", ".join(accepted) or "nothing")
-                await conn.send({"type": "welcome", "v": PROTOCOL, "accepted": accepted, "rejected": rejected})
+                await conn.send(
+                    {
+                        "type": "welcome",
+                        "v": PROTOCOL,
+                        "accepted": accepted,
+                        "rejected": rejected,
+                        # Who to watch comes from us, so a tool does not carry
+                        # its own list of people and drift from what we know.
+                        "subjects": self.subjects(conn.subjects) if conn.subjects else [],
+                    }
+                )
             case "result":
                 waiter = conn.pending.get(str(message.get("id")))
                 if waiter is not None and not waiter.done():
