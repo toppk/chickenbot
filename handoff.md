@@ -38,15 +38,17 @@ and each owns everything it touches. Paths in the toml resolve against the
 toml, so a run directory is self-contained:
 
 ```bash
-chickenbot init ~/chickenbot/hobby            # config, .env (0600), db, soul
-chickenbot init ~/chickenbot/work --soul my-soul.md
-chickenbot -c ~/chickenbot/work/chickenbot.toml --check-config
+chickenbot init ~/server/chickenbot/hobby     # config, .env (0600), db, soul
+chickenbot init ~/server/chickenbot/work --soul my-soul.md
+chickenbot -c ~/server/chickenbot/work/chickenbot.toml --check-config
 systemctl --user enable --now chickenbot@hobby chickenbot-github@hobby
 ```
 
 `deploy/chickenbot@.service` and `deploy/chickenbot-github@.service` are
 templates: `%i` is both the unit instance and the run directory under
-`~/chickenbot/`. The starter config refuses to load with no owners, so an
+`~/server/chickenbot/`. The chonkbase bot runs as `eaccel`; its config,
+secrets and databases live in `~/server/chickenbot/eaccel/` and nothing
+runtime is left in the checkout. The starter config refuses to load with no owners, so an
 instance nobody is in charge of cannot start by accident.
 
 **One github tool per instance, not one shared.** It is a mirror keyed by

@@ -32,18 +32,18 @@ uv sync --extra signal --extra discord --extra telegram   # the networks you use
 
 ## Configure
 
-```bash
-cp chickenbot.example.toml chickenbot.toml
-```
-
-Edit at least `server.host`, `owners`, and `channels`. Paths in the file are
-relative to the file.
-
-Secrets go in the environment, never in the toml:
+An instance lives in its own run directory -- config, secrets, database, tool
+socket -- so several bots can run side by side without sharing any of them:
 
 ```bash
-cp .env.example .env && chmod 600 .env
+uv run chickenbot init ~/server/chickenbot/hobby
 ```
+
+Edit at least `irc.host`, `irc.owners` and `irc.channels` in the config it
+writes. Paths in the file are relative to the file.
+
+Secrets go in the `.env` beside it, never in the toml. `init` writes an empty
+one at mode 600; `.env.example` lists what goes in it.
 
 | Variable | For |
 |---|---|
