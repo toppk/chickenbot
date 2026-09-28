@@ -74,10 +74,16 @@ CREATE INDEX IF NOT EXISTS alias_handle ON alias (handle COLLATE NOCASE);
 -- What a room is like. A channel has a character of its own -- how formal it
 -- is, what the running jokes are, what not to touch -- and that shapes how the
 -- bot behaves there quite apart from who is in it.
+-- `notes` is written by owners and trusted like a person's dossier; `observed`
+-- is the bot's own reading of the room and is not. Keeping them apart matters:
+-- anything in the log could end up in `observed`, including someone declaring
+-- a rule about how the bot should behave.
 CREATE TABLE IF NOT EXISTS room (
     realm      TEXT NOT NULL,
     name       TEXT NOT NULL,
     notes      TEXT NOT NULL DEFAULT '',
+    observed   TEXT NOT NULL DEFAULT '',
+    checked_at INTEGER NOT NULL DEFAULT 0,
     updated_at INTEGER NOT NULL,
     PRIMARY KEY (realm, name)
 );
@@ -246,6 +252,10 @@ class Store:
             self._db.execute("ALTER TABLE alias ADD COLUMN source TEXT NOT NULL DEFAULT 'cli'")
             self._db.execute("ALTER TABLE alias ADD COLUMN added_at INTEGER NOT NULL DEFAULT 0")
 
+        room_cols = {r["name"] for r in self._db.execute("PRAGMA table_info(room)")}
+        if room_cols and "observed" not in room_cols:
+            self._db.execute("ALTER TABLE room ADD COLUMN observed TEXT NOT NULL DEFAULT ''")
+            self._db.execute("ALTER TABLE room ADD COLUMN checked_at INTEGER NOT NULL DEFAULT 0")
         person_cols = {r["name"] for r in self._db.execute("PRAGMA table_info(person)")}
         if person_cols and "id" not in person_cols:
             # person(realm, account, notes) becomes person(id, notes) + alias.
@@ -557,12 +567,39 @@ class Store:
         )
         self._keep_revision("room", f"{realm}/{name}", notes, author)
 
-    def room_checked(self, realm: str, room: str) -> int:
-        """When the room's notes were last written, 0 if never."""
+    def room_observed(self, realm: str, room: str) -> str:
         row = self._db.execute(
-            "SELECT updated_at FROM room WHERE realm = ? AND name = ?", (realm, self.fold(realm, room))
+            "SELECT observed FROM room WHERE realm = ? AND name = ?", (realm, self.fold(realm, room))
         ).fetchone()
-        return int(row["updated_at"]) if row else 0
+        return row["observed"] if row else ""
+
+    def set_room_observed(self, realm: str, room: str, text: str, when: float | None = None) -> None:
+        """The bot's own reading of the room. Kept apart from the owners' notes,
+        and stamped even when it says the same thing, so a check is not repeated."""
+        name = self.fold(realm, room)
+        now = int(when or time.time())
+        self._db.execute(
+            "INSERT INTO room (realm, name, observed, checked_at, updated_at) VALUES (?, ?, ?, ?, ?)"
+            " ON CONFLICT(realm, name) DO UPDATE SET observed = excluded.observed,"
+            " checked_at = excluded.checked_at",
+            (realm, name, text, now, now),
+        )
+        self._keep_revision("room-observed", f"{realm}/{name}", text, "vibe-check")
+
+    def room_checked(self, realm: str, room: str) -> int:
+        """When the bot last read the room to see what it is like, 0 if never."""
+        row = self._db.execute(
+            "SELECT checked_at FROM room WHERE realm = ? AND name = ?", (realm, self.fold(realm, room))
+        ).fetchone()
+        return int(row["checked_at"]) if row else 0
+
+    def lines_since(self, realm: str, room: str, ts: int) -> int:
+        row = self._db.execute(
+            "SELECT COUNT(*) AS n FROM chatlog WHERE realm = ? AND channel = ? AND ts > ?"
+            " AND kind IN ('privmsg', 'command')",
+            (realm, self.fold(realm, room), ts),
+        ).fetchone()
+        return int(row["n"] or 0) if row else 0
 
     def described_rooms(self) -> list[tuple[str, str, int]]:
         """(realm, room, updated_at) for every room with notes."""

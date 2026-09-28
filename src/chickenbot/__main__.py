@@ -23,6 +23,7 @@ from .store import Store
 from .toolsocket import ToolServer
 from .transport import Transport
 from .transports import build
+from .vibe import VibeCheck
 from .watcher import Watcher
 
 log = logging.getLogger("chickenbot")
@@ -118,6 +119,7 @@ async def run(cfg: config.Config) -> int:
         # No configuration: it stays quiet until it has watched a room enough
         # to know when that room is awake.
         tasks.append(asyncio.create_task(Barfly(handler).run(), name="barfly"))
+        tasks.append(asyncio.create_task(VibeCheck(handler).run(), name="vibe"))
 
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()

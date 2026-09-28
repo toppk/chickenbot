@@ -623,8 +623,12 @@ async def cmd_vibe(h: Handler, ctx: Context) -> None:
     realm = ctx.transport.realm
     if not ctx.args:
         ctx.say(f"{ctx.channel}: {h.rooms.describe(realm, ctx.channel)}")
-        for line in h.rooms.notes(realm, ctx.channel).splitlines()[:MAX_DUMP_LINES]:
-            ctx.say(f"  {line}")
+        for label, body in (
+            ("noted", h.rooms.notes(realm, ctx.channel)),
+            ("seen", h.rooms.observed(realm, ctx.channel)),
+        ):
+            for line in body.splitlines()[:MAX_DUMP_LINES]:
+                ctx.say(f"  {label}: {line}")
         return
     if not ctx.is_owner:
         ctx.say(f"{ctx.nick}: reading is open, writing is not")
