@@ -265,7 +265,7 @@ class _Preview:
 
 def show_prompt(cfg: config.Config, args: argparse.Namespace) -> int:
     """Print exactly what the model would be sent. No call is made."""
-    from .commands import Context, Handler, compose, render_scrollback
+    from .commands import Context, Handler, compose
 
     store = Store(cfg.db_path)
     try:
@@ -286,13 +286,8 @@ def show_prompt(cfg: config.Config, args: argparse.Namespace) -> int:
             is_owner=False,
             in_channel=True,
         )
-        recent = store.conversation(realm, room, limit=cfg.llm.history_lines)
-        lines = [
-            type("L", (), {"ts": ts, "nick": nick, "text": text})
-            for ts, nick, _acct, kind, text in recent
-            if kind in ("privmsg", "command", "self")
-        ]
-        system, user = compose(handler, ctx, render_scrollback(lines), following=args.following)
+        # The same scrollback the bot would use, so the preview is honest.
+        system, user = compose(handler, ctx, asyncio.run(handler.scrollback(ctx)), following=args.following)
 
         print("=" * 72)
         print("SYSTEM")

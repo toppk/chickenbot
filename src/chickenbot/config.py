@@ -137,7 +137,8 @@ class LLMConfig:
     # OpenRouter keeps a conversation on one model/provider when it is given a
     # stable id. Harmless elsewhere, but off is one less unknown field.
     session_stickiness: bool = True
-    history_lines: int = 20
+    history_lines: int = 20  # the most scrollback to hand over
+    history_minutes: int = 180  # ...and how far back of it still counts as the conversation
     per_user_per_min: int = 4
     # Merged into every openai-compatible request body: OpenRouter's `provider`
     # routing policy lives here.

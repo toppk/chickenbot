@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -212,6 +213,54 @@ async def tool_chan_topic(h: Handler, ctx: Context, args: dict) -> str:
     result = await ctx.transport.moderate(TOPIC, ctx.channel, str(wanted))
     ctx.remember_action(f"topic {wanted}", result)
     return result
+
+
+HISTORY_MAX_HOURS = 30 * 24
+HISTORY_MAX_LINES = 60
+
+
+@tool(
+    "chan_history",
+    description=(
+        "Read further back in THIS room's log than the scrollback you were given. "
+        "Use it when a question is about the room rather than the conversation -- "
+        "'what's been happening', 'what did we decide', 'has anyone mentioned X' -- "
+        "and not to re-open something already in front of you. `contains` searches "
+        "for a word; without it you get the tail of the window."
+    ),
+    params={
+        "type": "object",
+        "properties": {
+            "hours": {"type": "integer", "description": f"how far back, 1-{HISTORY_MAX_HOURS} (default 24)"},
+            "contains": {"type": "string", "description": "only lines with this word in them"},
+            "limit": {"type": "integer", "description": f"at most {HISTORY_MAX_LINES} lines (default 20)"},
+        },
+        "required": [],
+    },
+)
+async def tool_chan_history(h: Handler, ctx: Context, args: dict) -> str:
+    """This room only. Carrying one channel's talk into another is the thing
+    the soul forbids, and a tool that took a room name would do exactly that."""
+    if not ctx.in_channel:
+        return "error: that only works in a group"
+    try:
+        hours = max(1, min(int(args.get("hours") or 24), HISTORY_MAX_HOURS))
+        limit = max(1, min(int(args.get("limit") or 20), HISTORY_MAX_LINES))
+    except (TypeError, ValueError):
+        return "error: hours and limit must be numbers"
+    since = int(time.time()) - hours * 3600
+    realm, room = ctx.transport.realm, ctx.channel
+    if contains := str(args.get("contains", "")).strip():
+        lines = await h.store.search(realm, room, contains, limit=limit, since=since)
+        lines = list(reversed(lines))
+    else:
+        lines = await h.store.recent(realm, room, limit=limit, since=since)
+    if not lines:
+        window = f"the last {hours}h"
+        return f"nothing matching {contains!r} in {window}" if contains else f"nothing said in {room} in {window}"
+    from .commands import render_scrollback
+
+    return render_scrollback(lines)
 
 
 @tool(

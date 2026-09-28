@@ -340,7 +340,11 @@ class Store:
 
         return await self._run(go)
 
-    async def recent(self, realm: str, channel: str, limit: int = 40) -> list[Line]:
+    async def recent(self, realm: str, channel: str, limit: int = 40, since: int = 0, least: int = 0) -> list[Line]:
+        """The tail of the room. `since` bounds it in time, because twenty lines
+        in a quiet channel can reach back a day and a conversation does not.
+        `least` keeps that from returning nothing at all when the room is cold."""
+
         def go() -> list[Line]:
             rows = self._db.execute(
                 "SELECT ts, channel, nick, text FROM chatlog"
@@ -349,6 +353,9 @@ class Store:
                 " ORDER BY id DESC LIMIT ?",
                 (realm, self.fold(realm, channel), limit),
             ).fetchall()
+            if since:
+                fresh = [r for r in rows if r["ts"] >= since]
+                rows = fresh if len(fresh) >= least else rows[:least]
             return [Line(r["ts"], r["channel"], r["nick"], r["text"]) for r in reversed(rows)]
 
         return await self._run(go)

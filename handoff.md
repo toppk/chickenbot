@@ -478,6 +478,20 @@ model asked only for wording:
   model as impressions — it is distilled from the log, so it is still other
   people's words.
 
+## Two kinds of context
+
+The conversation and the room are not the same thing, and conflating them is
+how a bot ends up answering something from yesterday evening.
+
+- **The conversation** is handed over unasked: `history_lines` (20) bounded by
+  `history_minutes` (180), with a floor of `HISTORY_FLOOR` lines so a cold room
+  is not answered from nothing. Every line is stamped with its age, and the
+  soul says to read the stamps. `Handler.scrollback` is the single source, used
+  by `ask`, the barfly and `chickenbot prompt` alike.
+- **The room** is fetched on purpose, with the `chan_history` tool: hours,
+  `contains`, limit, capped at 30 days and 60 lines. This room only -- a tool
+  that took a room name would carry one channel's talk into another.
+
 ## Attention
 
 Being addressed opens an engagement for that room (`attention.py`). While it is

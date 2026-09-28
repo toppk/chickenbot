@@ -70,14 +70,13 @@ class Barfly:
         return now - self._spoke.get(f"{realm}/{room}", 0.0) >= SPELL
 
     async def remark(self, tr, room: str, now: float) -> None:
-        from .commands import Context, compose, render_scrollback
+        from .commands import Context, compose
 
         if self.h.provider is None:
             return
         # Claimed before the call, so a slow model cannot be asked twice.
         self._spoke[f"{tr.realm}/{room}"] = now
         with activity(kind="barfly", realm=tr.realm, room=room, nick=tr.me, account="-"):
-            recent = await self.h.store.recent(tr.realm, room, self.h.cfg.llm.history_lines)
             ctx = Context(
                 handler=self.h,
                 transport=tr,
@@ -88,7 +87,7 @@ class Barfly:
                 is_owner=False,
                 in_channel=True,
             )
-            system, prompt = compose(self.h, ctx, render_scrollback(recent))
+            system, prompt = compose(self.h, ctx, await self.h.scrollback(ctx))
             note(llm=self.h.provider.name)
             try:
                 said = await self.h.provider.reply(
