@@ -25,7 +25,7 @@ log = logging.getLogger(__name__)
 
 TICK = 3600.0
 EVERY = 20 * 3600  # a day, loosely: better to drift earlier than to skip one
-LOOK_BACK = 7 * 86400  # a week, so a quiet channel still has something to read
+LOOK_BACK = 30 * 86400  # a month, so even a trickle eventually adds up to something to read
 MIN_LINES = 10  # below this there is nothing to characterise
 MAX_LINES = 400
 

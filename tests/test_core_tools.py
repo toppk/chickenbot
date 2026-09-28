@@ -15,10 +15,11 @@ def handler(cfg, store) -> Handler:
     return Handler(cfg, store, None, None)
 
 
-def settle_in(store, realm="fake", room="#chan", days=5) -> None:
-    """Enough days in the room that the bot is no longer a guest in it."""
+def settle_in(store, realm="fake", room="#chan", days=5, lines=250) -> None:
+    """Enough chat heard in the room that the bot is no longer a guest in it."""
     now = time.time()
-    for day in range(1, days + 1):
+    for line in range(lines):
+        day = line % days
         store._db.execute(
             "INSERT INTO chatlog (ts, realm, channel, nick, nick_key, account, kind, text)"
             " VALUES (?, ?, ?, 'nate', 'nate', '', 'privmsg', 'hi')",

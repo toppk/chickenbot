@@ -8,10 +8,10 @@ from chickenbot.rooms import FIXTURE, GUEST, MEMBER, Rooms
 from .conftest import FakeTransport
 
 
-def sat_in(store, *, realm="fake", room="#soup", days=0, lines=0) -> None:
+def sat_in(store, *, realm="fake", room="#soup", days=1, lines=0) -> None:
+    """`lines` lines of chat spread evenly over the last `days` days."""
     now = time.time()
-    rows = [(now - d * 86400, f"day {d}") for d in range(days)]
-    rows += [(now - 60, f"line {i}") for i in range(lines)]
+    rows = [(now - (i % days) * 86400 - 60, f"line {i}") for i in range(lines)]
     for ts, text in rows:
         store._db.execute(
             "INSERT INTO chatlog (ts, realm, channel, nick, nick_key, account, kind, text)"
@@ -35,25 +35,30 @@ def test_a_room_never_sat_in_makes_the_bot_a_guest(store):
     assert Rooms(store).may_act_out("fake", "#soup") is False
 
 
-def test_a_quiet_room_still_promotes_on_time_alone(store):
-    """Four lines over four days. A low-volume channel would otherwise leave
-    the bot a guest forever."""
-    sat_in(store, days=4)
+def test_a_busy_day_is_enough_to_be_a_member(store):
+    sat_in(store, days=1, lines=250)
     assert Rooms(store).standing("fake", "#soup") == MEMBER
 
 
-def test_one_torrential_afternoon_also_counts(store):
-    sat_in(store, lines=250)
+def test_a_nearly_dead_room_keeps_the_bot_a_guest_for_as_long_as_it_takes(store):
+    """Thirty lines over thirty days. Time served is not the same as having
+    heard the place, and a channel this quiet takes weeks."""
+    sat_in(store, days=30, lines=30)
+    assert Rooms(store).standing("fake", "#soup") == GUEST
+
+
+def test_a_torrential_afternoon_is_not_long_service(store):
+    sat_in(store, days=1, lines=3000)
     assert Rooms(store).standing("fake", "#soup") == MEMBER
 
 
 def test_long_service_makes_it_a_fixture(store):
-    sat_in(store, days=20)
+    sat_in(store, days=20, lines=1600)
     assert Rooms(store).standing("fake", "#soup") == FIXTURE
 
 
 def test_standing_is_per_room(store):
-    sat_in(store, days=20, room="#soup")
+    sat_in(store, days=20, lines=1600, room="#soup")
     rooms = Rooms(store)
     assert rooms.standing("fake", "#soup") == FIXTURE
     assert rooms.standing("fake", "#other") == GUEST
@@ -72,7 +77,7 @@ def test_notes_follow_the_room_case_insensitively(store):
 
 
 def test_the_block_tells_the_model_where_it_stands(store):
-    sat_in(store, days=1)
+    sat_in(store, days=1, lines=3)
     store.set_room_notes("fake", "#soup", "the topic is a running joke")
     block = Rooms(store).block("fake", "#soup")
     assert "<room>" in block and "#soup" in block
@@ -80,12 +85,12 @@ def test_the_block_tells_the_model_where_it_stands(store):
 
 
 def test_the_manner_changes_with_standing(store):
-    sat_in(store, days=20)
+    sat_in(store, days=20, lines=1600)
     assert "furniture" in Rooms(store).block("fake", "#soup")
 
 
 async def test_the_room_reaches_the_prompt(cfg, store):
-    sat_in(store, days=20)
+    sat_in(store, days=20, lines=1600)
     store.set_room_notes("fake", "#soup", "cyan printer: do not explain the joke")
     h = Handler(cfg, store, None, None)
     _system, prompt = compose(h, ctx(h), scrollback="")
@@ -101,7 +106,7 @@ async def test_a_direct_message_has_no_room_block(cfg, store):
 
 
 async def test_vibe_shows_what_is_known(cfg, store):
-    sat_in(store, days=20)
+    sat_in(store, days=20, lines=1600)
     store.set_room_notes("fake", "#soup", "the printer is never fixed")
     h = Handler(cfg, store, None, None)
     c = ctx(h)

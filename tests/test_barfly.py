@@ -37,9 +37,9 @@ def setup(cfg, store, provider=None, *, realm="fake", room="#soup"):
     now = at(time.localtime().tm_wday, 12)
     dow = time.localtime(now).tm_wday
     fill(store, realm, room, {(dow, hour): 30 for hour in range(24)})
-    # Enough days in the room to be a member rather than a guest.
-    for day in range(1, 5):
-        spoke(store, "nate", now - day * 86400, realm=realm, room=room)
+    # Enough chat heard in the room to be a member rather than a guest.
+    for line in range(250):
+        spoke(store, "nate", now - (line % 4 + 1) * 86400, realm=realm, room=room)
     return h, tr, now
 
 
@@ -65,7 +65,8 @@ async def test_it_does_not_talk_into_an_empty_room(cfg, store):
 
 
 async def test_a_guest_does_not_hold_forth(cfg, store):
-    """One day in the room is not standing enough to speak unbidden."""
+    """A room it has barely heard is not one to speak up in, however lively
+    the hour and however long it has been sitting there."""
     tr = FakeTransport()
     tr.rooms = ["#soup"]
     h = Handler(cfg, store, FakeProvider(), None)

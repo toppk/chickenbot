@@ -4,9 +4,11 @@ A channel has a character of its own: how formal it is, what the running
 jokes are, what is not to be touched. #lobby's topic being the printer out of
 cyan again is not stale information to be corrected, it is the joke.
 
-So the bot arrives as a guest and earns its way up. New in a room it answers
-what it is asked and leaves the furniture alone; once it has sat there long
-enough to have heard the place, it is allowed to join in.
+So the bot arrives as a guest and earns its way up, on how much it has
+actually heard rather than how long it has been logged in. A busy channel can
+promote it in a day; a nearly dead one takes as long as it takes. Reading the
+room daily (see vibe.py) is how it understands a quiet place meanwhile --
+understanding should not have to wait, but licence to act on it should.
 """
 
 from __future__ import annotations
@@ -20,10 +22,11 @@ log = logging.getLogger(__name__)
 MAX_CHARS = 1200
 
 GUEST, MEMBER, FIXTURE = "guest", "member", "fixture"
-# (standing, days seen, lines heard). Either will do: a quiet channel would
-# otherwise never promote the bot past guest however long it sat there, and a
-# torrent of chat in one afternoon does teach it the place.
-TIERS = ((FIXTURE, 14, 2000), (MEMBER, 3, 200), (GUEST, 0, 0))
+# (standing, days seen, lines heard). Both, and chatter is the binding one: a
+# busy channel can make the bot a member in a day, a nearly dead one takes as
+# long as it takes -- weeks, if weeks is how long it takes to hear the place.
+# The days are only there so one torrential afternoon is not mistaken for it.
+TIERS = ((FIXTURE, 7, 1500), (MEMBER, 1, 200), (GUEST, 0, 0))
 
 MANNER = {
     GUEST: (
@@ -51,7 +54,7 @@ class Rooms:
     def standing(self, realm: str, room: str) -> str:
         days, lines = self.store.tenure(realm, room)
         for tier, need_days, need_lines in TIERS:
-            if days >= need_days or lines >= need_lines:
+            if days >= need_days and lines >= need_lines:
                 return tier
         return GUEST
 
