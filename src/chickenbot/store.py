@@ -17,7 +17,7 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS chatlog (
     id        INTEGER PRIMARY KEY,
     ts        INTEGER NOT NULL,
-    transport TEXT NOT NULL DEFAULT 'irc',
+    realm     TEXT NOT NULL DEFAULT 'irc',
     channel   TEXT NOT NULL,
     nick      TEXT NOT NULL,
     nick_key  TEXT NOT NULL DEFAULT '',
@@ -25,19 +25,19 @@ CREATE TABLE IF NOT EXISTS chatlog (
     kind      TEXT NOT NULL DEFAULT 'privmsg',
     text      TEXT NOT NULL
 );
-CREATE INDEX IF NOT EXISTS chatlog_room_id ON chatlog (transport, channel, id DESC);
-CREATE INDEX IF NOT EXISTS chatlog_who_id  ON chatlog (transport, nick_key, id DESC);
+CREATE INDEX IF NOT EXISTS chatlog_room_id ON chatlog (realm, channel, id DESC);
+CREATE INDEX IF NOT EXISTS chatlog_who_id  ON chatlog (realm, nick_key, id DESC);
 
 CREATE TABLE IF NOT EXISTS watch (
     id        INTEGER PRIMARY KEY,
-    transport TEXT NOT NULL DEFAULT 'irc',
+    realm     TEXT NOT NULL DEFAULT 'irc',
     owner     TEXT NOT NULL,
     repo      TEXT NOT NULL,
     channel   TEXT NOT NULL,
     feeds     TEXT NOT NULL DEFAULT 'releases',
     added_by  TEXT NOT NULL DEFAULT '',
     added_at  INTEGER NOT NULL,
-    UNIQUE (transport, owner, repo, channel)
+    UNIQUE (realm, owner, repo, channel)
 );
 
 -- One row. The bot's voice, edited with `chickenbot soul edit`.
@@ -73,7 +73,7 @@ CREATE INDEX IF NOT EXISTS revision_key ON revision (kind, key, id DESC);
 CREATE TABLE IF NOT EXISTS job (
     id         INTEGER PRIMARY KEY,
     due_at     INTEGER NOT NULL,
-    transport  TEXT NOT NULL,
+    realm  TEXT NOT NULL,
     room       TEXT NOT NULL,
     nick       TEXT NOT NULL,
     account    TEXT NOT NULL,
@@ -105,7 +105,7 @@ class Line:
 class Job:
     id: int
     due_at: int
-    transport: str
+    realm: str
     room: str
     nick: str
     account: str
@@ -116,7 +116,7 @@ class Job:
 @dataclass(frozen=True, slots=True)
 class Watch:
     id: int
-    transport: str
+    realm: str
     owner: str
     repo: str
     channel: str
@@ -134,7 +134,7 @@ class Store:
         # SQLite's NOCASE collation is ASCII-only and cannot express rfc1459, and
         # each network folds differently, so values are folded in Python on the
         # way in and stored folded.
-        self.fold = fold or (lambda transport, text: irccase.fold(text))
+        self.fold = fold or (lambda realm, text: irccase.fold(text))
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._db = sqlite3.connect(self.path, check_same_thread=False)
@@ -155,19 +155,33 @@ class Store:
                 self._db.execute(
                     "UPDATE chatlog SET nick_key = ? WHERE nick = ?", (self.fold("irc", row["nick"]), row["nick"])
                 )
-        if cols and "transport" not in cols:
-            self._db.execute("ALTER TABLE chatlog ADD COLUMN transport TEXT NOT NULL DEFAULT 'irc'")
+        if cols and "realm" not in cols:
+            if "transport" in cols:
+                # Rooms are keyed by network now, not by kind of transport:
+                # #soup on two IRC servers are different rooms. Startup rewrites
+                # the bare values once the config says what the realms are.
+                self._db.execute("ALTER TABLE chatlog RENAME COLUMN transport TO realm")
+            else:
+                self._db.execute("ALTER TABLE chatlog ADD COLUMN realm TEXT NOT NULL DEFAULT 'irc'")
             self._db.execute("DROP INDEX IF EXISTS chatlog_channel_id")
             self._db.execute("DROP INDEX IF EXISTS chatlog_nick_id")
+            self._db.execute("DROP INDEX IF EXISTS chatlog_room_id")
+            self._db.execute("DROP INDEX IF EXISTS chatlog_who_id")
 
         watch_cols = {r["name"] for r in self._db.execute("PRAGMA table_info(watch)")}
-        if watch_cols and "transport" not in watch_cols:
+        if watch_cols and "transport" in watch_cols:
+            self._db.execute("ALTER TABLE watch RENAME COLUMN transport TO realm")
+            watch_cols = {r["name"] for r in self._db.execute("PRAGMA table_info(watch)")}
+        job_cols = {r["name"] for r in self._db.execute("PRAGMA table_info(job)")}
+        if job_cols and "transport" in job_cols:
+            self._db.execute("ALTER TABLE job RENAME COLUMN transport TO realm")
+        if watch_cols and "realm" not in watch_cols:
             # The UNIQUE key gains a column, which sqlite cannot alter in place.
             self._db.execute("PRAGMA foreign_keys=OFF")
             self._db.execute("ALTER TABLE watch RENAME TO watch_old")
             self._db.executescript(SCHEMA)
             self._db.execute(
-                "INSERT INTO watch (id, transport, owner, repo, channel, feeds, added_by, added_at)"
+                "INSERT INTO watch (id, realm, owner, repo, channel, feeds, added_by, added_at)"
                 " SELECT id, 'irc', owner, repo, channel, feeds, added_by, added_at FROM watch_old"
             )
             self._db.execute("DROP TABLE watch_old")
@@ -183,18 +197,18 @@ class Store:
     # -- chat log --------------------------------------------------------
 
     async def log_line(
-        self, transport: str, channel: str, nick: str, account: str, text: str, kind: str = "privmsg"
+        self, realm: str, channel: str, nick: str, account: str, text: str, kind: str = "privmsg"
     ) -> None:
         def go() -> None:
             self._db.execute(
-                "INSERT INTO chatlog (ts, transport, channel, nick, nick_key, account, kind, text)"
+                "INSERT INTO chatlog (ts, realm, channel, nick, nick_key, account, kind, text)"
                 " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     int(time.time()),
-                    transport,
-                    self.fold(transport, channel),
+                    realm,
+                    self.fold(realm, channel),
                     nick,
-                    self.fold(transport, nick),
+                    self.fold(realm, nick),
                     account,
                     kind,
                     text[:900],
@@ -204,37 +218,36 @@ class Store:
 
         await self._run(go)
 
-    async def last_seen(self, transport: str, nick: str) -> Line | None:
+    async def last_seen(self, realm: str, nick: str) -> Line | None:
         def go() -> Line | None:
             row = self._db.execute(
-                "SELECT ts, channel, nick, text FROM chatlog"
-                " WHERE transport = ? AND nick_key = ? ORDER BY id DESC LIMIT 1",
-                (transport, self.fold(transport, nick)),
+                "SELECT ts, channel, nick, text FROM chatlog WHERE realm = ? AND nick_key = ? ORDER BY id DESC LIMIT 1",
+                (realm, self.fold(realm, nick)),
             ).fetchone()
             return Line(row["ts"], row["channel"], row["nick"], row["text"]) if row else None
 
         return await self._run(go)
 
-    async def search(self, transport: str, channel: str, terms: str, limit: int = 5, since: int = 0) -> list[Line]:
+    async def search(self, realm: str, channel: str, terms: str, limit: int = 5, since: int = 0) -> list[Line]:
         def go() -> list[Line]:
             rows = self._db.execute(
                 "SELECT ts, channel, nick, text FROM chatlog"
-                " WHERE transport = ? AND channel = ? AND ts >= ? AND kind = 'privmsg' AND text LIKE ?"
+                " WHERE realm = ? AND channel = ? AND ts >= ? AND kind = 'privmsg' AND text LIKE ?"
                 " ORDER BY id DESC LIMIT ?",
-                (transport, self.fold(transport, channel), since, f"%{terms}%", limit),
+                (realm, self.fold(realm, channel), since, f"%{terms}%", limit),
             ).fetchall()
             return [Line(r["ts"], r["channel"], r["nick"], r["text"]) for r in rows]
 
         return await self._run(go)
 
-    async def recent(self, transport: str, channel: str, limit: int = 40) -> list[Line]:
+    async def recent(self, realm: str, channel: str, limit: int = 40) -> list[Line]:
         def go() -> list[Line]:
             rows = self._db.execute(
                 "SELECT ts, channel, nick, text FROM chatlog"
-                " WHERE transport = ? AND channel = ?"
+                " WHERE realm = ? AND channel = ?"
                 " AND kind IN ('privmsg', 'command', 'self')"  # what was said, to and by the bot
                 " ORDER BY id DESC LIMIT ?",
-                (transport, self.fold(transport, channel), limit),
+                (realm, self.fold(realm, channel), limit),
             ).fetchall()
             return [Line(r["ts"], r["channel"], r["nick"], r["text"]) for r in reversed(rows)]
 
@@ -245,14 +258,24 @@ class Store:
 
         def go() -> list[tuple[str, str, str, int]]:
             rows = self._db.execute(
-                "SELECT transport, account, nick, MAX(ts) AS seen FROM chatlog"
-                " WHERE account != '' GROUP BY transport, account"
+                "SELECT realm, account, nick, MAX(ts) AS seen FROM chatlog"
+                " WHERE account != '' GROUP BY realm, account"
                 " ORDER BY seen DESC LIMIT ?",
                 (limit,),
             ).fetchall()
-            return [(r["transport"], r["account"], r["nick"], r["seen"]) for r in rows]
+            return [(r["realm"], r["account"], r["nick"], r["seen"]) for r in rows]
 
         return await self._run(go)
+
+    def rekey_realm(self, was: str, now: str) -> int:
+        """One-time fixup: rows written when a realm was just "irc" become the
+        network they actually belong to. Harmless to run every startup."""
+        changed = 0
+        for table in ("chatlog", "watch", "job"):
+            cur = self._db.execute(f"UPDATE {table} SET realm = ? WHERE realm = ?", (now, was))
+            changed += cur.rowcount
+        self._db.commit()
+        return changed
 
     # -- browsing ----------------------------------------------------------
     #
@@ -260,25 +283,25 @@ class Store:
     # bot running. The async wrappers above are for the bot's own hot path.
 
     def rooms(self) -> list[tuple[str, str, int, int]]:
-        """(transport, channel, lines, last_ts), busiest last seen first."""
+        """(realm, channel, lines, last_ts), busiest last seen first."""
         rows = self._db.execute(
-            "SELECT transport, channel, COUNT(*) AS n, MAX(ts) AS last FROM chatlog"
-            " GROUP BY transport, channel ORDER BY last DESC"
+            "SELECT realm, channel, COUNT(*) AS n, MAX(ts) AS last FROM chatlog"
+            " GROUP BY realm, channel ORDER BY last DESC"
         ).fetchall()
-        return [(r["transport"], r["channel"], r["n"], r["last"]) for r in rows]
+        return [(r["realm"], r["channel"], r["n"], r["last"]) for r in rows]
 
-    def days(self, transport: str, channel: str) -> list[tuple[str, int]]:
+    def days(self, realm: str, channel: str) -> list[tuple[str, int]]:
         """(YYYY-MM-DD, lines) for one room, oldest first, in local time."""
         rows = self._db.execute(
             "SELECT date(ts, 'unixepoch', 'localtime') AS day, COUNT(*) AS n FROM chatlog"
-            " WHERE transport = ? AND channel = ? GROUP BY day ORDER BY day",
-            (transport, self.fold(transport, channel)),
+            " WHERE realm = ? AND channel = ? GROUP BY day ORDER BY day",
+            (realm, self.fold(realm, channel)),
         ).fetchall()
         return [(r["day"], r["n"]) for r in rows]
 
     def conversation(
         self,
-        transport: str,
+        realm: str,
         channel: str,
         *,
         day: str = "",
@@ -288,8 +311,8 @@ class Store:
     ) -> list[tuple[int, str, str, str, str]]:
         """(ts, nick, account, kind, text) oldest first: everything said, including
         the bot's own lines and other bots', unlike the model's scrollback."""
-        sql = "SELECT ts, nick, account, kind, text FROM chatlog WHERE transport = ? AND channel = ?"
-        args: list = [transport, self.fold(transport, channel)]
+        sql = "SELECT ts, nick, account, kind, text FROM chatlog WHERE realm = ? AND channel = ?"
+        args: list = [realm, self.fold(realm, channel)]
         if day:
             sql += " AND date(ts, 'unixepoch', 'localtime') = ?"
             args.append(day)
@@ -396,16 +419,16 @@ class Store:
     # -- scheduled jobs ----------------------------------------------------
 
     async def add_job(
-        self, *, due_at: int, transport: str, room: str, nick: str, account: str, is_group: bool, command: str
+        self, *, due_at: int, realm: str, room: str, nick: str, account: str, is_group: bool, command: str
     ) -> int:
         def go() -> int:
             cur = self._db.execute(
-                "INSERT INTO job (due_at, transport, room, nick, account, is_group, command, created_at)"
+                "INSERT INTO job (due_at, realm, room, nick, account, is_group, command, created_at)"
                 " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     due_at,
-                    transport,
-                    self.fold(transport, room),
+                    realm,
+                    self.fold(realm, room),
                     nick,
                     account,
                     int(is_group),
@@ -424,7 +447,7 @@ class Store:
 
         def go() -> list[Job]:
             rows = self._db.execute(
-                "SELECT id, due_at, transport, room, nick, account, is_group, command"
+                "SELECT id, due_at, realm, room, nick, account, is_group, command"
                 " FROM job WHERE due_at <= ? ORDER BY due_at",
                 (now,),
             ).fetchall()
@@ -435,7 +458,7 @@ class Store:
                 Job(
                     r["id"],
                     r["due_at"],
-                    r["transport"],
+                    r["realm"],
                     r["room"],
                     r["nick"],
                     r["account"],
@@ -447,19 +470,19 @@ class Store:
 
         return await self._run(go)
 
-    async def jobs(self, transport: str = "", room: str = "") -> list[Job]:
+    async def jobs(self, realm: str = "", room: str = "") -> list[Job]:
         def go() -> list[Job]:
-            sql = "SELECT id, due_at, transport, room, nick, account, is_group, command FROM job"
+            sql = "SELECT id, due_at, realm, room, nick, account, is_group, command FROM job"
             args: tuple = ()
-            if transport and room:
-                sql += " WHERE transport = ? AND room = ?"
-                args = (transport, self.fold(transport, room))
+            if realm and room:
+                sql += " WHERE realm = ? AND room = ?"
+                args = (realm, self.fold(realm, room))
             rows = self._db.execute(f"{sql} ORDER BY due_at", args).fetchall()
             return [
                 Job(
                     r["id"],
                     r["due_at"],
-                    r["transport"],
+                    r["realm"],
                     r["room"],
                     r["nick"],
                     r["account"],
@@ -484,18 +507,18 @@ class Store:
     # -- watches ---------------------------------------------------------
 
     async def add_watch(
-        self, transport: str, owner: str, repo: str, channel: str, feeds: Iterable[str], added_by: str
+        self, realm: str, owner: str, repo: str, channel: str, feeds: Iterable[str], added_by: str
     ) -> bool:
         def go() -> bool:
             try:
                 self._db.execute(
-                    "INSERT INTO watch (transport, owner, repo, channel, feeds, added_by, added_at)"
+                    "INSERT INTO watch (realm, owner, repo, channel, feeds, added_by, added_at)"
                     " VALUES (?, ?, ?, ?, ?, ?, ?)",
                     (
-                        transport,
+                        realm,
                         owner,
                         repo,
-                        self.fold(transport, channel),
+                        self.fold(realm, channel),
                         ",".join(feeds),
                         added_by,
                         int(time.time()),
@@ -508,33 +531,33 @@ class Store:
 
         return await self._run(go)
 
-    async def remove_watch(self, transport: str, owner: str, repo: str, channel: str) -> bool:
+    async def remove_watch(self, realm: str, owner: str, repo: str, channel: str) -> bool:
         def go() -> bool:
             # GitHub slugs are ASCII and case-insensitive, so NOCASE is right here.
             cur = self._db.execute(
-                "DELETE FROM watch WHERE transport = ?"
+                "DELETE FROM watch WHERE realm = ?"
                 " AND owner = ? COLLATE NOCASE AND repo = ? COLLATE NOCASE AND channel = ?",
-                (transport, owner, repo, self.fold(transport, channel)),
+                (realm, owner, repo, self.fold(realm, channel)),
             )
             self._db.commit()
             return cur.rowcount > 0
 
         return await self._run(go)
 
-    async def watches(self, transport: str = "", channel: str = "") -> list[Watch]:
+    async def watches(self, realm: str = "", channel: str = "") -> list[Watch]:
         def go() -> list[Watch]:
-            sql = "SELECT id, transport, owner, repo, channel, feeds FROM watch"
-            if transport and channel:
+            sql = "SELECT id, realm, owner, repo, channel, feeds FROM watch"
+            if realm and channel:
                 rows = self._db.execute(
-                    f"{sql} WHERE transport = ? AND channel = ? ORDER BY owner, repo",
-                    (transport, self.fold(transport, channel)),
+                    f"{sql} WHERE realm = ? AND channel = ? ORDER BY owner, repo",
+                    (realm, self.fold(realm, channel)),
                 ).fetchall()
             else:
-                rows = self._db.execute(f"{sql} ORDER BY transport, owner, repo").fetchall()
+                rows = self._db.execute(f"{sql} ORDER BY realm, owner, repo").fetchall()
             return [
                 Watch(
                     r["id"],
-                    r["transport"],
+                    r["realm"],
                     r["owner"],
                     r["repo"],
                     r["channel"],

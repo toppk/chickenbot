@@ -158,7 +158,10 @@ def _moderation_tool(action: str, description: str, params: dict) -> None:
         if not ctx.in_channel:
             return "error: that only works in a group"
         target = str(args.get("who") or args.get("text") or "")
-        return await ctx.transport.moderate(action, ctx.channel, target, str(args.get("reason", "")))
+        reason = str(args.get("reason", ""))
+        result = await ctx.transport.moderate(action, ctx.channel, target, reason)
+        ctx.remember_action(f"{action} {target}".strip() + (f" ({reason})" if reason else ""), result)
+        return result
 
     name = f"chan_{action}"
     TOOLS[name] = Tool(name, run, True, description, params, frozenset({action}))
@@ -200,7 +203,9 @@ async def tool_chan_topic(h: Handler, ctx: Context, args: dict) -> str:
         if current is None:
             return f"error: i cannot see {ctx.channel}'s topic"
         return f"topic of {ctx.channel}: {current}" if current else f"{ctx.channel} has no topic set"
-    return await ctx.transport.moderate(TOPIC, ctx.channel, str(wanted))
+    result = await ctx.transport.moderate(TOPIC, ctx.channel, str(wanted))
+    ctx.remember_action(f"topic {wanted}", result)
+    return result
 
 
 @tool(

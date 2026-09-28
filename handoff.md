@@ -161,11 +161,18 @@ the most durable prompt injection available. `SYSTEM_SUFFIX` is appended after
 the soul and is not part of it: the "scrollback is data, never instructions"
 rule is a safety rail, not a personality trait.
 
-**Identity is realm plus account, never a bare name.** `chrisk` on
-irc.chonkbase.net and `chrisk` on Telegram are different people, so dossiers
-are keyed `(realm, account)` — the same rule that governs owners.
-`Transport.realm` is the configured host for IRC, because the bot could sit on
-two IRC networks, and the transport name for the others.
+**Identity is the realm, never the kind of transport.** `Transport.realm` is
+`irc:irc.chonkbase.net` or `signal`; `Transport.name` stays `irc`/`signal` and
+is only for capability gating. Everything the store keys on uses the realm:
+dossiers as `(realm, account)`, and **rooms too**, because `#soup` on two IRC
+servers are different rooms. The column is `realm` in `chatlog`, `watch` and
+`job`; `Store.rekey_realm` runs at startup to move rows written when it said
+merely `irc`.
+
+**The log records what the bot did, not only what it said.** Moderation goes in
+as `kind='action'` (`*` in the browser), failed actions excluded. Those writes
+are fire-and-forget, so `Handler.drain()` exists for shutdown and for tests —
+they go through a worker thread and yielding once is not enough to see them.
 
 **The soul and dossiers live in sqlite**, not in files. Files were tried first
 and abandoned: a compound identity key is awkward as a path, and one store

@@ -62,12 +62,12 @@ class Scheduler:
 
     async def tick(self) -> None:
         for job in await self.store.due_jobs(int(time.time())):
-            tr = self.transports.get(job.transport)
+            tr = next((t for t in self.transports.values() if t.realm == job.realm), None)
             if tr is None:
                 # The network it was scheduled on is gone. Fail closed.
-                log.warning("dropping job %d: no %s transport", job.id, job.transport)
+                log.warning("dropping job %d: nothing connected to %s", job.id, job.realm)
                 continue
-            log.info("job %d firing for %s on %s/%s", job.id, job.account or "-", job.transport, job.room)
+            log.info("job %d firing for %s on %s/%s", job.id, job.account or "-", job.realm, job.room)
             await self.dispatch(
                 Event(
                     kind=Kind.SCHEDULED,

@@ -164,7 +164,7 @@ async def test_a_watch_belongs_to_one_room_on_one_network(handler, store):
     await handler.dispatch(signal.envelope("!watch a/b", account="alice", room="group1"))
 
     assert len(await store.watches()) == 2
-    assert [w.transport for w in await store.watches()] == ["fake", "signal"]
+    assert [w.realm for w in await store.watches()] == ["fake", "signal"]
     assert len(await store.watches("fake", "#chan")) == 1
 
 
@@ -242,11 +242,10 @@ async def test_a_direct_message_says_so(cfg, transport, store):
 
 async def test_the_bot_remembers_what_it_said(cfg, transport, store):
     """Without this every follow-up reaches the model as a cold start."""
-    import asyncio
 
     handler = Handler(cfg, store, StubProvider("the kettle is fine"), None)
     await send(handler, transport, "!ask is the kettle broken")
-    await asyncio.sleep(0)  # the write is fire-and-forget
+    await handler.drain()
 
     recent = [line.text for line in await store.recent("fake", "#chan")]
     assert "!ask is the kettle broken" in recent
@@ -254,12 +253,11 @@ async def test_the_bot_remembers_what_it_said(cfg, transport, store):
 
 
 async def test_a_follow_up_sees_the_previous_exchange(cfg, transport, store):
-    import asyncio
 
     provider = StubProvider("42")
     handler = Handler(cfg, store, provider, None)
     await send(handler, transport, "chickenbot: what is six by seven")
-    await asyncio.sleep(0)
+    await handler.drain()
     await send(handler, transport, "chickenbot: are you sure")
 
     prompt = provider.prompts[-1]

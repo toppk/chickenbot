@@ -91,6 +91,10 @@ async def run(cfg: config.Config) -> int:
         log.error("no transport could be started")
         return 1
     log.info("transports: %s", ", ".join(sorted(transports)))
+    for name, tr in transports.items():
+        # Rows written before rooms were keyed by network say just "irc".
+        if moved := store.rekey_realm(name, tr.realm):
+            log.info("re-keyed %d row(s) from %s to %s", moved, name, tr.realm)
 
     watcher = None
     if cfg.github.enabled:
@@ -116,6 +120,7 @@ async def run(cfg: config.Config) -> int:
     await stop.wait()
     log.info("shutting down")
 
+    await handler.drain()  # let the last few log writes land
     for tr in transports.values():
         with contextlib.suppress(Exception):  # going away regardless
             await tr.close("chickenbot signing off")
@@ -164,7 +169,7 @@ def manage(cfg: config.Config, args: argparse.Namespace) -> int:
 
 # How each kind of line is marked when reading the log back. The bot's own
 # words and other bots' need to be distinguishable at a glance from human chat.
-MARKS = {"privmsg": " ", "command": ">", "self": "<", "bot": "~"}
+MARKS = {"privmsg": " ", "command": ">", "self": "<", "bot": "~", "action": "*"}
 
 
 def browse(cfg: config.Config, args: argparse.Namespace) -> int:

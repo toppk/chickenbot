@@ -40,7 +40,7 @@ class IRCTransport:
 
     @property
     def realm(self) -> str:
-        return self.cfg.host  # one bot could sit on two IRC networks
+        return f"irc:{self.cfg.host}"  # one bot could sit on two IRC networks
 
     @property
     def me(self) -> str:

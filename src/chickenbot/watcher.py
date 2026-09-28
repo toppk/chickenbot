@@ -131,9 +131,9 @@ class Watcher:
 
         extra = len(fresh) - self.cfg.max_per_poll
         for item in reversed(fresh[: self.cfg.max_per_poll]):
-            await self.announce(watch.transport, watch.channel, await self._format(watch, feed, item))
+            await self.announce(watch.realm, watch.channel, await self._format(watch, feed, item))
         if extra > 0:
-            await self.announce(watch.transport, watch.channel, f"[{watch.slug}] and {extra} more {feed}")
+            await self.announce(watch.realm, watch.channel, f"[{watch.slug}] and {extra} more {feed}")
 
     async def _format(self, watch: Watch, feed: str, item: Item) -> str:
         line = f"[{watch.slug}] {item.headline}"

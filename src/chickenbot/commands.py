@@ -52,6 +52,11 @@ class Context:
     def can(self, action: str) -> bool:
         return action in self.transport.caps
 
+    def remember_action(self, what: str, result: str) -> None:
+        """A moderation action is part of the record, even though nobody said it."""
+        if self.handler is not None and not result.startswith("error:"):
+            self.handler.remember_own(self.transport, self.channel, what, kind="action")
+
 
 Runner = Callable[["Handler", Context], Awaitable[None]]
 
@@ -140,11 +145,17 @@ class Handler:
             return
         await self._invoke(cmd, ctx)
 
-    def remember_own(self, tr: Transport, room: str, text: str) -> None:
+    def remember_own(self, tr: Transport, room: str, text: str, kind: str = "self") -> None:
         """Fire and forget: the reply has already gone out, logging must not block it."""
-        task = asyncio.create_task(self.store.log_line(tr.name, room, tr.me, "", text, "self"))
+        task = asyncio.create_task(self.store.log_line(tr.realm, room, tr.me, "", text, kind))
         self._writes.add(task)
         task.add_done_callback(self._writes.discard)
+
+    async def drain(self) -> None:
+        """Wait for fire-and-forget log writes. For shutdown and for tests:
+        those writes go through a worker thread, so yielding once is not enough."""
+        while self._writes:
+            await asyncio.gather(*tuple(self._writes), return_exceptions=True)
 
     def _context(self, event: Event, args: str) -> Context:
         tr = event.transport
@@ -186,7 +197,7 @@ class Handler:
             # Another bot. Log what it says, but never act on it.
             note(outcome="bot-ignored")
             if env.is_group and env.text:
-                await self.store.log_line(tr.name, env.room, env.sender, env.account, env.text, "bot")
+                await self.store.log_line(tr.realm, env.room, env.sender, env.account, env.text, "bot")
             return
 
         body = self._extract(tr, env.text, env.is_group)
@@ -195,7 +206,7 @@ class Handler:
             # Anything aimed at the bot is an invocation, not room chat, so it
             # stays out of search and out of the scrollback handed to the model.
             kind = "command" if body is not None else "privmsg"
-            await self.store.log_line(tr.name, env.room, env.sender, env.account, env.text, kind)
+            await self.store.log_line(tr.realm, env.room, env.sender, env.account, env.text, kind)
 
         if body is None:
             note(outcome="chat")
@@ -233,10 +244,10 @@ class Handler:
             return f"{ctx.nick}: that is owner-only and i cannot see your account - log in to services"
         return f"{ctx.nick}: that is owner-only"
 
-    async def announce(self, transport: str, room: str, text: str) -> None:
-        tr = self.transports.get(transport)
+    async def announce(self, realm: str, room: str, text: str) -> None:
+        tr = next((t for t in self.transports.values() if t.realm == realm), None)
         if tr is None:
-            log.warning("no transport %s for an announcement to %s", transport, room)
+            log.warning("nothing connected to %s for an announcement to %s", realm, room)
             return
         tr.say(room, text)
 
@@ -255,13 +266,17 @@ class Handler:
 
 
 async def moderate(ctx: Context, action: str, target: str, reason: str = "") -> None:
+    """Perform it, say what happened, and record that it happened: reading the
+    log back should show what the bot *did*, not only what it said."""
     if not ctx.in_channel:
         ctx.say("that only works in a group")
         return
     if not ctx.can(action):
         ctx.say(f"{ctx.transport.name} cannot {action}")
         return
-    ctx.say(await ctx.transport.moderate(action, ctx.channel, target, reason))
+    result = await ctx.transport.moderate(action, ctx.channel, target, reason)
+    ctx.remember_action(f"{action} {target}".strip() + (f" ({reason})" if reason else ""), result)
+    ctx.say(result)
 
 
 # -- open commands -------------------------------------------------------
@@ -291,7 +306,7 @@ async def cmd_seen(h: Handler, ctx: Context) -> None:
     if ctx.transport.fold(who) == ctx.transport.fold(ctx.transport.me):
         ctx.say("i am right here")
         return
-    line = await h.store.last_seen(ctx.transport.name, who)
+    line = await h.store.last_seen(ctx.transport.realm, who)
     if line is None:
         ctx.say(f"i have not seen {who}")
         return
@@ -303,7 +318,7 @@ async def cmd_history(h: Handler, ctx: Context) -> None:
     if not ctx.args:
         ctx.say(f"usage: {h.cfg.prefix}history <words>")
         return
-    lines = await h.store.search(ctx.transport.name, ctx.channel, ctx.args, limit=3)
+    lines = await h.store.search(ctx.transport.realm, ctx.channel, ctx.args, limit=3)
     if not lines:
         ctx.say(f"nothing matching {ctx.args!r}")
         return
@@ -325,7 +340,7 @@ async def cmd_ask(h: Handler, ctx: Context) -> None:
 
     scrollback = ""
     if ctx.in_channel and h.cfg.llm.history_lines > 0:
-        recent = await h.store.recent(ctx.transport.name, ctx.channel, h.cfg.llm.history_lines)
+        recent = await h.store.recent(ctx.transport.realm, ctx.channel, h.cfg.llm.history_lines)
         scrollback = "\n".join(f"<{line.nick}> {line.text}" for line in recent)
 
     # Volatile context goes in the user turn, not the system prompt, so the
@@ -364,7 +379,7 @@ async def cmd_ask(h: Handler, ctx: Context) -> None:
 
 @command("watching", blurb="repos watched here")
 async def cmd_watching(h: Handler, ctx: Context) -> None:
-    watches = await h.store.watches(ctx.transport.name, ctx.channel)
+    watches = await h.store.watches(ctx.transport.realm, ctx.channel)
     if not watches:
         ctx.say("nothing watched here")
         return
@@ -387,7 +402,7 @@ async def cmd_watch(h: Handler, ctx: Context) -> None:
         ctx.say(f"unknown feeds: {', '.join(bad)} (have: {', '.join(FEEDS)})")
         return
     owner, repo = slug
-    if await h.store.add_watch(ctx.transport.name, owner, repo, ctx.channel, feeds, ctx.account):
+    if await h.store.add_watch(ctx.transport.realm, owner, repo, ctx.channel, feeds, ctx.account):
         ctx.say(f"watching {owner}/{repo} ({'+'.join(feeds)}) - announcing changes from now on")
     else:
         ctx.say(f"{owner}/{repo} is already watched here")
@@ -400,7 +415,7 @@ async def cmd_unwatch(h: Handler, ctx: Context) -> None:
         ctx.say(f"usage: {h.cfg.prefix}unwatch <owner/repo>")
         return
     owner, repo = slug
-    ok = await h.store.remove_watch(ctx.transport.name, owner, repo, ctx.channel)
+    ok = await h.store.remove_watch(ctx.transport.realm, owner, repo, ctx.channel)
     ctx.say(f"dropped {owner}/{repo}" if ok else f"{owner}/{repo} was not watched here")
 
 
@@ -490,7 +505,7 @@ async def cmd_in(h: Handler, ctx: Context) -> None:
         return
     job_id = await h.store.add_job(
         due_at=int(time.time()) + delay,
-        transport=ctx.transport.name,
+        realm=ctx.transport.realm,
         room=ctx.channel,
         nick=ctx.nick,
         account=ctx.account,
@@ -502,7 +517,7 @@ async def cmd_in(h: Handler, ctx: Context) -> None:
 
 @command("jobs", blurb="what is scheduled here")
 async def cmd_jobs(h: Handler, ctx: Context) -> None:
-    jobs = await h.store.jobs(ctx.transport.name, ctx.channel)
+    jobs = await h.store.jobs(ctx.transport.realm, ctx.channel)
     if not jobs:
         ctx.say("nothing scheduled here")
         return

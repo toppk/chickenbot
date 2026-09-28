@@ -92,7 +92,7 @@ async def scheduler_for(handler, transport, store) -> Scheduler:
 async def test_a_due_job_runs_and_is_consumed(handler, transport, store):
     await store.add_job(
         due_at=int(time.time()) - 1,
-        transport="fake",
+        realm="fake",
         room="#chan",
         nick="alice",
         account="alice",
@@ -111,7 +111,7 @@ async def test_a_due_job_runs_and_is_consumed(handler, transport, store):
 async def test_a_job_not_yet_due_is_left_alone(handler, transport, store):
     await store.add_job(
         due_at=int(time.time()) + 3600,
-        transport="fake",
+        realm="fake",
         room="#chan",
         nick="alice",
         account="alice",
@@ -128,7 +128,7 @@ async def test_authority_is_rechecked_when_the_job_fires(handler, transport, sto
     """alice scheduled it while an owner; by firing time she is not one."""
     await store.add_job(
         due_at=int(time.time()) - 1,
-        transport="fake",
+        realm="fake",
         room="#chan",
         nick="alice",
         account="alice",
@@ -147,7 +147,7 @@ async def test_authority_is_rechecked_when_the_job_fires(handler, transport, sto
 async def test_authority_still_works_for_an_owner(handler, transport, store):
     await store.add_job(
         due_at=int(time.time()) - 1,
-        transport="fake",
+        realm="fake",
         room="#chan",
         nick="alice",
         account="alice",
@@ -162,7 +162,7 @@ async def test_authority_still_works_for_an_owner(handler, transport, store):
 async def test_a_job_for_a_vanished_transport_is_dropped(handler, store):
     await store.add_job(
         due_at=int(time.time()) - 1,
-        transport="signal",
+        realm="signal",
         room="g1",
         nick="alice",
         account="alice",
@@ -177,7 +177,7 @@ async def test_a_job_for_a_vanished_transport_is_dropped(handler, store):
 async def test_an_unknown_command_in_a_job_is_logged_not_run(handler, transport, store):
     await store.add_job(
         due_at=int(time.time()) - 1,
-        transport="fake",
+        realm="fake",
         room="#chan",
         nick="alice",
         account="alice",

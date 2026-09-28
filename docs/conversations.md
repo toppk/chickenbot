@@ -16,6 +16,10 @@ model includes `privmsg`, `command` and `self` lines. Before this it saw only
 other people's ordinary chat: not the question it was asked, and not its own
 answer.
 
+What the bot *does* is recorded too, as `kind='action'` — setting a topic or
+kicking someone is not something anyone said, but reading the log back without
+it would be misleading. Failed actions are not recorded as done.
+
 `search` still filters to `privmsg` alone, deliberately — `.history kettle`
 must not match the `.history kettle` that asked for it.
 
@@ -32,9 +36,15 @@ a different person from `chrisk` on irc.chonkbase.net. Identity is
 and a compound key is awkward as a path and natural as a primary key. One store
 also means one backup and one migration story.
 
-`Transport.realm` supplies it: the configured host for IRC, since the bot could
-sit on two IRC networks, and the transport name for Signal, Discord and
-Telegram, which are each a single network.
+`Transport.realm` supplies it — `irc:irc.chonkbase.net` for IRC, since the bot
+could sit on two IRC networks, and `signal`/`discord`/`telegram` for the
+others, each being a single network. **Rooms are keyed the same way**, not by
+the kind of transport: `#soup` on two IRC servers are two different rooms. The
+store column is `realm` throughout, and startup re-keys any rows left over from
+when it said merely `irc`.
+
+`Transport.name` still exists and still means the kind of transport. It is what
+capability gating and tool availability use; identity uses `realm`.
 
 Editing is `chickenbot soul` and `chickenbot who`, which read and write the
 database without a running bot. Both are **versioned**: every change appends to

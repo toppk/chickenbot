@@ -62,8 +62,12 @@ class Transport(Protocol):
 
     @property
     def realm(self) -> str:
-        """Which network this is. `chrisk` on chonkbase and `chrisk` on Telegram
-        are different people, so identity is keyed on realm plus account."""
+        """Which network this is, e.g. `irc:irc.chonkbase.net` or `signal`.
+
+        Everything the store keys on uses this rather than `name`: `#soup` on
+        two IRC networks are different rooms, and `chrisk` on chonkbase is a
+        different person from `chrisk` on Telegram. `name` remains the kind of
+        transport, for capability gating."""
         ...
 
     def topic(self, room: str) -> str | None:

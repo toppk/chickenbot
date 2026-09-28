@@ -24,15 +24,15 @@ def logged(tmp_path):
     st = Store(tmp_path / "c.db")
     now = int(time.time())
     rows = [
-        ("irc", "#soup", "toppk", "toppk", "the kettle is broken", "privmsg", now - 7200),
-        ("irc", "#soup", "toppk", "toppk", ".ask about kettles", "command", now - 3600),
-        ("irc", "#soup", "chickenbot", "", "toppk: kettles boil water", "self", now - 3500),
-        ("irc", "#soup", "otherbot", "", "beep", "bot", now - 3400),
+        ("irc:irc.chonkbase.net", "#soup", "toppk", "toppk", "the kettle is broken", "privmsg", now - 7200),
+        ("irc:irc.chonkbase.net", "#soup", "toppk", "toppk", ".ask about kettles", "command", now - 3600),
+        ("irc:irc.chonkbase.net", "#soup", "chickenbot", "", "toppk: kettles boil water", "self", now - 3500),
+        ("irc:irc.chonkbase.net", "#soup", "otherbot", "", "beep", "bot", now - 3400),
         ("signal", "g1", "Nate", "uuid", "hello there", "privmsg", now - 60),
     ]
     for transport, room, nick, account, text, kind, ts in rows:
         st._db.execute(
-            "INSERT INTO chatlog (ts, transport, channel, nick, nick_key, account, kind, text)"
+            "INSERT INTO chatlog (ts, realm, channel, nick, nick_key, account, kind, text)"
             " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (ts, transport, room, nick, nick.casefold(), account, kind, text),
         )
@@ -44,7 +44,7 @@ def logged(tmp_path):
 def test_listing_rooms_spans_transports(logged):
     code, out = cli(logged, "log")
     assert code == 0
-    assert "irc/#soup" in out and "signal/g1" in out
+    assert "irc:irc.chonkbase.net/#soup" in out and "signal/g1" in out
     assert "4 lines" in out or "4" in out
 
 
@@ -53,7 +53,7 @@ def test_an_empty_database_says_so(tmp_path):
 
 
 def test_reading_a_room_shows_every_kind(logged):
-    out = cli(logged, "log", "irc/#soup")[1]
+    out = cli(logged, "log", "irc:irc.chonkbase.net/#soup")[1]
     assert "the kettle is broken" in out
     assert ".ask about kettles" in out  # commands are part of the record
     assert "kettles boil water" in out  # so is the bot's own reply
@@ -61,30 +61,30 @@ def test_reading_a_room_shows_every_kind(logged):
 
 
 def test_kinds_are_marked_distinctly(logged):
-    out = cli(logged, "log", "irc/#soup")[1]
+    out = cli(logged, "log", "irc:irc.chonkbase.net/#soup")[1]
     lines = {line.split()[2][0] if len(line.split()) > 2 else "" for line in out.splitlines() if line.strip()}
     assert {">", "<", "~"} <= lines  # command, self, bot
 
 
 def test_it_reads_oldest_first(logged):
-    out = cli(logged, "log", "irc/#soup")[1]
+    out = cli(logged, "log", "irc:irc.chonkbase.net/#soup")[1]
     assert out.index("kettle is broken") < out.index("kettles boil water")
 
 
 def test_days_lists_traffic_per_day(logged):
-    out = cli(logged, "log", "irc/#soup", "--days")[1]
+    out = cli(logged, "log", "irc:irc.chonkbase.net/#soup", "--days")[1]
     assert time.strftime("%Y-%m-%d") in out
 
 
 def test_grep_filters(logged):
-    out = cli(logged, "log", "irc/#soup", "--grep", "kettle")[1]
+    out = cli(logged, "log", "irc:irc.chonkbase.net/#soup", "--grep", "kettle")[1]
     assert "kettle" in out and "beep" not in out
 
 
 def test_since_filters_by_hours(logged):
     # the oldest line is exactly two hours back, so ask for one
-    assert "kettle is broken" not in cli(logged, "log", "irc/#soup", "--since", "1")[1]
-    assert "kettle is broken" in cli(logged, "log", "irc/#soup", "--since", "24")[1]
+    assert "kettle is broken" not in cli(logged, "log", "irc:irc.chonkbase.net/#soup", "--since", "1")[1]
+    assert "kettle is broken" in cli(logged, "log", "irc:irc.chonkbase.net/#soup", "--since", "24")[1]
 
 
 def test_a_room_with_no_slash_is_refused(logged):
@@ -92,7 +92,7 @@ def test_a_room_with_no_slash_is_refused(logged):
 
 
 def test_an_unknown_room_says_nothing_matching(logged):
-    assert "nothing matching" in cli(logged, "log", "irc/#nowhere")[1]
+    assert "nothing matching" in cli(logged, "log", "irc:irc.chonkbase.net/#nowhere")[1]
 
 
 # -- export --------------------------------------------------------------
@@ -105,7 +105,7 @@ def test_export_writes_one_file_per_room_per_day(logged, tmp_path):
 
     files = sorted(p.relative_to(target).as_posix() for p in target.rglob("*.jsonl"))
     assert len(files) == 2
-    assert any(f.startswith("irc/soup/") for f in files)
+    assert any("soup/" in f for f in files)
     assert any(f.startswith("signal/g1/") for f in files)
 
 
@@ -129,3 +129,55 @@ def test_export_is_a_snapshot_not_a_mirror(logged, tmp_path):
     path.write_text("tampered\n")
     cli(logged, "export", str(target))
     assert path.read_text() == before
+
+
+def test_what_the_bot_did_is_in_the_record(cfg, store, tmp_path):
+    """Setting a topic is not something anyone said, but it belongs in the log."""
+    import asyncio
+
+    from chickenbot.commands import Handler
+    from chickenbot.transport import TOPIC
+
+    from .conftest import FakeTransport
+
+    async def go():
+        tr = FakeTransport()
+        handler = Handler(cfg, store, None, None)
+        await handler.dispatch(tr.envelope("!topic soup o'clock", account="alice"))
+        await handler.drain()
+        assert tr.actions == [(TOPIC, "#chan", "soup o'clock", "")]
+        rows = store.conversation(tr.realm, "#chan", limit=10)
+        kinds = {kind: text for _ts, _nick, _acct, kind, text in rows}
+        assert kinds["action"] == "topic soup o'clock"
+        assert kinds["command"] == "!topic soup o'clock"
+
+    asyncio.run(go())
+
+
+def test_a_failed_action_is_not_recorded_as_done(cfg, store):
+    import asyncio
+
+    from chickenbot.commands import Handler
+
+    from .conftest import FakeTransport
+
+    async def go():
+        tr = FakeTransport(caps=frozenset())  # cannot moderate at all
+        handler = Handler(cfg, store, None, None)
+        await handler.dispatch(tr.envelope("!kick nate", account="alice"))
+        await handler.drain()
+        rows = store.conversation(tr.realm, "#chan", limit=10)
+        assert "action" not in {kind for _ts, _n, _a, kind, _t in rows}
+
+    asyncio.run(go())
+
+
+def test_rekeying_moves_old_rows_to_their_network(store):
+    store._db.execute(
+        "INSERT INTO chatlog (ts, realm, channel, nick, nick_key, account, kind, text)"
+        " VALUES (1, 'irc', '#soup', 'toppk', 'toppk', 'toppk', 'privmsg', 'old')"
+    )
+    store._db.commit()
+    assert store.rekey_realm("irc", "irc:irc.chonkbase.net") == 1
+    assert store.conversation("irc:irc.chonkbase.net", "#soup", limit=5)[0][4] == "old"
+    assert store.rekey_realm("irc", "irc:irc.chonkbase.net") == 0  # idempotent
