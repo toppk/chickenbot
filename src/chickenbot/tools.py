@@ -317,3 +317,49 @@ async def tool_who_link_other(h: Handler, ctx: Context, args: dict) -> str:
         h.aliases_changed(realm)
         return f"recorded: {person} is {handle} on {realm}"
     return "error: could not record that"
+
+
+NICKNAME_MIN = 2
+NICKNAME_MAX = 24
+MAX_NICKNAMES = 8
+
+
+@tool(
+    "who_call_me",
+    owner=True,
+    description=(
+        "Record another name to answer to, when someone says something like "
+        "'I'm going to call you chick'. Afterwards that name wakes the bot exactly "
+        "like its own nick does. Owner-only, since it changes what the bot responds to."
+    ),
+    params={
+        "type": "object",
+        "properties": {"name": {"type": "string", "description": "the new name"}},
+        "required": ["name"],
+    },
+)
+async def tool_who_call_me(h: Handler, ctx: Context, args: dict) -> str:
+    """Owner-gated because a wake word is a shared resource.
+
+    Anyone being able to add one invites both nuisance (a hundred names) and
+    noise (a name so common the bot wakes on every line), and it is not a
+    claim about themselves the way `who_link` is.
+    """
+    name = str(args.get("name", "")).strip()
+    tr = ctx.transport
+    if not (NICKNAME_MIN <= len(name) <= NICKNAME_MAX) or not name.replace("_", "").replace("-", "").isalnum():
+        return f"error: a name should be {NICKNAME_MIN}-{NICKNAME_MAX} letters or digits"
+    if tr.fold(name) in {tr.fold(w) for w in h.wake_words(tr)}:
+        return f"already answering to {name}"
+
+    me = h.store.person_id(tr.realm, tr.me)
+    if me is None:
+        me = h.store.set_person(tr.realm, tr.me, "", author=ctx.account or "bot")
+    if len(h.store.nicknames(tr.realm, tr.me)) >= MAX_NICKNAMES:
+        return f"error: already answering to {MAX_NICKNAMES} names, drop one first"
+    if h.store.person_id("nick", name) is not None:
+        return f"error: {name} is already somebody's name"
+    if not h.store.add_alias(me, "nick", name, source=ctx.account or "chat"):
+        return "error: could not record that"
+    h.forget_wake_words(tr.realm)
+    return f"noted, i answer to {name} now"

@@ -424,6 +424,28 @@ Deliberately not asked for, because chickenbot uses none of them: `WHOX`,
 `chathistory`, `echo-message`, `labeled-response`, `batch`, `multiline`, `setname`,
 `MONITOR`, `standard-replies`. Keep it that way — asks should track real need.
 
+## Names
+
+**The bot answers to several.** `Handler.wake_words` is its nick on that
+network, plus `nicknames` from the config, plus any recorded at runtime —
+longest first, so a nickname that prefixes the real nick cannot shadow it. The
+list is cached per realm and invalidated on change, since it runs on every
+message.
+
+`who_call_me` records one from conversation ("i'm going to call you chick") and
+is **owner-only**: a wake word is a shared resource, and anyone being able to
+add one invites both nuisance and a name common enough to wake the bot on every
+line. Names are 2-24 alphanumerics, capped at `MAX_NICKNAMES`, and one that
+somebody else already goes by is refused.
+
+**People have nicknames too, and they need no new machinery**: a nickname is an
+alias in the `nick` realm, exactly as a GitHub handle is one in `github`. So
+`who irc:host chrisk --alias nick/chris` makes "what is chris up to" find the
+same notes, and the `<known_people>` heading shows every name.
+
+The bot itself is stored the same way — its nick on a network is an alias like
+any other — which is why a name given in chat survives a restart.
+
 ## Attention
 
 Being addressed opens an engagement for that room (`attention.py`). While it is

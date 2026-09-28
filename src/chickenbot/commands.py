@@ -102,7 +102,8 @@ def compose(h: Handler, ctx: Context, scrollback: str, *, following: bool = Fals
     where = "group" if ctx.in_channel else "direct message"
     now = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime())
     situation = (
-        f"<context>network={ctx.transport.name} room={ctx.channel} kind={where} asking={ctx.nick} now={now}</context>"
+        f"<context>network={ctx.transport.name} room={ctx.channel} kind={where}"
+        f" asking={ctx.nick} you={'/'.join(h.wake_words(ctx.transport))} now={now}</context>"
     )
     # Owner-written notes about whoever is here. Trusted, unlike scrollback.
     people = h.dossiers.block(realm=ctx.transport.realm, account=ctx.account, text=f"{ctx.args} {scrollback}")
@@ -149,6 +150,7 @@ class Handler:
         )
         self._rooms: dict[str, tuple[Transport, str]] = {}
         self.tool_server = None  # set at startup when the tool socket is enabled
+        self._wake_cache: dict[str, list[str]] = {}
         self._writes: set[asyncio.Task] = set()
         self.transports: dict[str, Transport] = {}
         self._asks: dict[str, deque[float]] = defaultdict(deque)
@@ -310,15 +312,34 @@ class Handler:
             return
         await self._invoke(cmd, ctx)
 
+    def wake_words(self, tr: Transport) -> list[str]:
+        """What counts as being spoken to: the nick it holds on this network,
+        the nicknames in config, and any it was given at runtime.
+
+        Longest first, so `chickenbot` is not shadowed by a nickname that
+        happens to prefix it. Cached because this runs on every message, and
+        invalidated whenever a name is added rather than timed out.
+        """
+        cached = self._wake_cache.get(tr.realm)
+        if cached is None:
+            words = [tr.me, *self.cfg.nicknames, *self.store.nicknames(tr.realm, tr.me)]
+            cached = sorted({w for w in words if w}, key=len, reverse=True)
+            self._wake_cache[tr.realm] = cached
+        return cached
+
+    def forget_wake_words(self, realm: str = "") -> None:
+        self._wake_cache.pop(realm, None) if realm else self._wake_cache.clear()
+
     def _extract(self, tr: Transport, text: str, in_group: bool) -> str | None:
         """Return the command body, or None when the bot was not being spoken to."""
         if text.startswith(self.cfg.prefix) and len(text) > len(self.cfg.prefix):
             return text[len(self.cfg.prefix) :].strip()
-        me = tr.fold(tr.me)
         lowered = tr.fold(text)
-        for sep in (":", ",", " "):
-            if lowered.startswith(me + sep):
-                return text[len(me) + len(sep) :].strip()
+        for word in self.wake_words(tr):
+            folded = tr.fold(word)
+            for sep in (":", ",", " "):
+                if lowered.startswith(folded + sep):
+                    return text[len(folded) + len(sep) :].strip()
         return text if not in_group else None
 
     def _denial(self, ctx: Context) -> str:

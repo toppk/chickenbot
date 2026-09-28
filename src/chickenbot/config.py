@@ -187,6 +187,9 @@ class GitHubConfig:
 @dataclass(slots=True)
 class Config:
     prefix: str = "!"
+    # Other names the bot answers to, alongside its nick on each network.
+    # "cb: what's up" should work as well as "chickenbot: what's up".
+    nicknames: list[str] = field(default_factory=list)
     # Everything the bot writes about itself and the people it talks to. Its own
     # soul instance, participant dossiers, exported conversations. Gitignored.
     data_dir: str = "data"

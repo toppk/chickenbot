@@ -492,6 +492,17 @@ class Store:
         ).fetchone()
         return (row["source"], row["added_at"]) if row else ("", 0)
 
+    def nicknames(self, realm: str, handle: str) -> list[str]:
+        """Informal names for whoever holds this handle. Used for people, and
+        for the bot itself: its nick on a network is just another alias."""
+        pid = self.person_id(realm, handle)
+        if pid is None:
+            return []
+        rows = self._db.execute(
+            "SELECT handle FROM alias WHERE person_id = ? AND realm = 'nick' ORDER BY handle", (pid,)
+        ).fetchall()
+        return [r["handle"] for r in rows]
+
     def whois(self, handle: str) -> list[int]:
         """Everyone answering to this handle, in any realm. This is what makes
         "who is iconidentify" find the notes filed under chrisk."""
