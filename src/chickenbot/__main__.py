@@ -15,7 +15,7 @@ from pathlib import Path
 
 from . import brain, config
 from .commands import Handler
-from .observe import TRACE
+from .observe import TRACE, set_sink
 from .scheduler import Scheduler
 from .soul import seed as seed_soul
 from .store import Store
@@ -76,6 +76,7 @@ async def run(cfg: config.Config) -> int:
         return tr.fold(text) if tr else text.casefold()
 
     store = Store(cfg.db_path, fold)
+    set_sink(store.record_activity)
     seed_soul(store)
     handler = Handler(cfg, store, provider, None)
     handler.transports = transports
@@ -211,6 +212,35 @@ def browse(cfg: config.Config, args: argparse.Namespace) -> int:
         store.close()
 
 
+def show_activity(cfg: config.Config, args: argparse.Namespace) -> int:
+    """What the bot decided, spent and called. The channel shows what was said;
+    this shows what happened."""
+    store = Store(cfg.db_path)
+    try:
+        since = int(time.time()) - args.since * 3600 if args.since else 0
+        if args.cost:
+            count, spent = store.activity_cost(since)
+            window = f"the last {args.since}h" if args.since else "all time"
+            print(f"{count} model call(s) over {window}: ${spent:.4f}")
+            return 0
+        rows = store.activity(since=since, outcome=args.outcome or "", command=args.command or "", limit=args.limit)
+        for row in reversed(rows):
+            when = time.strftime("%m-%d %H:%M", time.localtime(row["ts"]))
+            bits = [f"{when} {row['kind']:8} {row['room'] or '-':<12} {row['nick'] or '-':>12}"]
+            for field in ("command", "outcome", "llm", "served", "tools", "error"):
+                if row[field]:
+                    bits.append(f"{field}={row[field]}")
+            if row["cost"]:
+                bits.append(f"cost={row['cost']:.6f}")
+            bits.append(f"{row['ms']}ms")
+            print(" ".join(bits))
+        if not rows:
+            print("(nothing recorded; the bot writes these as it runs)")
+        return 0
+    finally:
+        store.close()
+
+
 def export(cfg: config.Config, args: argparse.Namespace) -> int:
     """Explode the log into files. A snapshot taken on request, never a mirror
     kept in step -- two copies of the truth is one copy too many."""
@@ -331,6 +361,13 @@ def main(argv: list[str] | None = None) -> int:
     log_cmd.add_argument("--grep", help="only lines containing this")
     log_cmd.add_argument("--limit", type=int, default=200)
 
+    act = sub.add_parser("activity", help="what the bot decided, spent and called")
+    act.add_argument("--since", type=int, metavar="HOURS")
+    act.add_argument("--outcome", help="e.g. answered, denied, llm-error, tool-loop")
+    act.add_argument("--command", help="e.g. ask, topic")
+    act.add_argument("--cost", action="store_true", help="just the model spend")
+    act.add_argument("--limit", type=int, default=40)
+
     export_cmd = sub.add_parser("export", help="explode the log into files")
     export_cmd.add_argument("into", help="directory to write under")
     args = parser.parse_args(argv)
@@ -348,6 +385,8 @@ def main(argv: list[str] | None = None) -> int:
         logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(message)s")
         if args.what == "log":
             return browse(cfg, args)
+        if args.what == "activity":
+            return show_activity(cfg, args)
         if args.what == "export":
             return export(cfg, args)
         return manage(cfg, args)

@@ -397,6 +397,23 @@ socket through a full bot restart to pin that.
 
 ## Reading the record back
 
+Two different questions, two different commands. `log` is what was *said*;
+`activity` is what the bot *decided*, spent and called:
+
+```bash
+chickenbot activity                       # recent events, oldest first
+chickenbot activity --since 24            # last day
+chickenbot activity --outcome llm-error   # only the failures
+chickenbot activity --command ask
+chickenbot activity --cost                # total model spend
+```
+
+Every dispatched event writes a row: realm, room, who, command, outcome, model,
+serving provider, tools called, cost and duration. `observe.set_sink` wires
+`Activity` to the store at startup, so the field set is exactly what the log
+line shows and nothing has to be kept in step by hand.
+
+
 `chickenbot log` browses the chat log without a running bot: no argument lists
 rooms across every transport, `transport/#room` reads one, with `--days`,
 `--date`, `--since HOURS`, `--grep` and `--limit`. `chickenbot export <dir>`

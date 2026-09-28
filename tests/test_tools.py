@@ -165,13 +165,16 @@ async def test_malformed_arguments_do_not_reach_the_tool(handler, monkeypatch):
     assert "not valid json" in seen[1]["messages"][-1]["content"]
 
 
-async def test_an_endless_tool_loop_gives_up(handler, monkeypatch):
+async def test_a_model_that_only_ever_calls_tools_still_gets_an_answer(handler, monkeypatch):
+    """No content, ever. The last attempt withholds tools; if that is still
+    empty the caller hears about it rather than getting silence."""
+
     async def again(h, c, a):
         return "ok"
 
     fn, _ = transport({"role": "assistant", "content": None, "tool_calls": [call("again", {})]})
     p = provider(monkeypatch, fn)
-    with pytest.raises(ProviderError, match="too many tool rounds"):
+    with pytest.raises(ProviderError, match="empty response"):
         await p.reply(
             system="s", history=[], prompt="p", search=False, toolbox=box(handler, again=make("again", again))
         )
@@ -200,3 +203,39 @@ async def test_a_tool_a_network_cannot_support_is_hidden_and_refused(handler):
 
     irc = FakeTransport(caps=frozenset({KICK}))
     assert await box(handler, transport=irc, **spec).run("kick", {}) == "kicked"
+
+
+async def test_a_long_tool_loop_still_answers(handler, monkeypatch):
+    """The tools already ran, so their effects are real; reporting a failure
+    over work that happened is the worst outcome."""
+    from chickenbot.brain import openai_compat
+
+    monkeypatch.setattr(openai_compat, "MAX_TOOL_TURNS", 2)
+    calls: list[dict] = []
+
+    async def busy(h, c, a):
+        return "ok"
+
+    def handler_fn(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        calls.append(body)
+        if body.get("tools"):  # still offered tools: keep asking for them
+            return httpx.Response(
+                200,
+                json={
+                    "choices": [{"message": {"role": "assistant", "content": None, "tool_calls": [call("busy", {})]}}]
+                },
+            )
+        return httpx.Response(200, json={"choices": [{"message": {"content": "here is what I found"}}]})
+
+    p = provider(monkeypatch, handler_fn)
+    result = await p.reply(
+        system="s",
+        history=[],
+        prompt="p",
+        search=False,
+        toolbox=box(handler, busy=make("busy", busy)),
+    )
+    await p.aclose()
+    assert result == "here is what I found"
+    assert calls[-1]["tools"] == []  # the last attempt withheld them

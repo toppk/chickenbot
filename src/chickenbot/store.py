@@ -70,6 +70,28 @@ CREATE TABLE IF NOT EXISTS revision (
 );
 CREATE INDEX IF NOT EXISTS revision_key ON revision (kind, key, id DESC);
 
+-- One row per handled event: what the bot decided, what it spent, what it
+-- called. The channel shows what was said; this shows what happened.
+CREATE TABLE IF NOT EXISTS activity (
+    id      INTEGER PRIMARY KEY,
+    ts      INTEGER NOT NULL,
+    kind    TEXT NOT NULL DEFAULT '',
+    realm   TEXT NOT NULL DEFAULT '',
+    room    TEXT NOT NULL DEFAULT '',
+    nick    TEXT NOT NULL DEFAULT '',
+    account TEXT NOT NULL DEFAULT '',
+    command TEXT NOT NULL DEFAULT '',
+    outcome TEXT NOT NULL DEFAULT '',
+    llm     TEXT NOT NULL DEFAULT '',
+    model   TEXT NOT NULL DEFAULT '',
+    served  TEXT NOT NULL DEFAULT '',
+    tools   TEXT NOT NULL DEFAULT '',
+    error   TEXT NOT NULL DEFAULT '',
+    cost    REAL NOT NULL DEFAULT 0,
+    ms      INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS activity_ts ON activity (ts DESC);
+
 CREATE TABLE IF NOT EXISTS job (
     id         INTEGER PRIMARY KEY,
     due_at     INTEGER NOT NULL,
@@ -276,6 +298,49 @@ class Store:
             changed += cur.rowcount
         self._db.commit()
         return changed
+
+    def record_activity(self, fields: dict) -> None:
+        columns = (
+            "kind",
+            "realm",
+            "room",
+            "nick",
+            "account",
+            "command",
+            "outcome",
+            "llm",
+            "model",
+            "served",
+            "tools",
+            "error",
+        )
+        values = [str(fields.get(c, "") or "") for c in columns]
+        self._db.execute(
+            f"INSERT INTO activity (ts, {', '.join(columns)}, cost, ms)"
+            f" VALUES (?, {', '.join('?' * len(columns))}, ?, ?)",
+            (int(time.time()), *values, float(fields.get("cost") or 0), int(fields.get("ms") or 0)),
+        )
+        self._db.commit()
+
+    def activity(self, *, since: int = 0, outcome: str = "", command: str = "", limit: int = 50) -> list[dict]:
+        sql = "SELECT * FROM activity WHERE ts >= ?"
+        args: list = [since]
+        if outcome:
+            sql += " AND outcome = ?"
+            args.append(outcome)
+        if command:
+            sql += " AND command = ?"
+            args.append(command)
+        sql += " ORDER BY id DESC LIMIT ?"
+        args.append(limit)
+        return [dict(r) for r in self._db.execute(sql, args).fetchall()]
+
+    def activity_cost(self, since: int = 0) -> tuple[int, float]:
+        row = self._db.execute(
+            "SELECT COUNT(*) AS n, COALESCE(SUM(cost), 0) AS spent FROM activity WHERE ts >= ? AND cost > 0",
+            (since,),
+        ).fetchone()
+        return int(row["n"]), float(row["spent"])
 
     # -- browsing ----------------------------------------------------------
     #

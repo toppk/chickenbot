@@ -157,6 +157,17 @@ useless if half of it is invisible.
 it again rewrites the tree from the database, which is the only way to be sure
 the files say what the record says.
 
+## 6. Tool loops — built
+
+A model that looks before it acts burns turns: read the room, act, check, then
+answer. `MAX_TOOL_TURNS` was four, which was too few — a real session set a
+topic successfully and then reported "gave up after too many tool rounds",
+which is the worst combination, because the work had already happened.
+
+It is eight now, and running out is no longer an error: the loop asks once more
+with the tools withheld, so the model has to answer with what it has. The
+activity row records `outcome=tool-loop` so the cases are still visible.
+
 ## Principles carried over
 
 - The model proposes; deterministic code decides. Authority checks run after

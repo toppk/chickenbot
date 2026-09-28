@@ -25,7 +25,10 @@ DEFAULTS = {
 }
 
 
-MAX_TOOL_TURNS = 4
+# A model that looks before it acts burns turns quickly: read the room, act,
+# check, then answer. Four was too few and produced "gave up" after the work
+# had already been done.
+MAX_TOOL_TURNS = 8
 
 
 class OpenAICompatProvider:
@@ -67,16 +70,23 @@ class OpenAICompatProvider:
         if toolbox is not None and toolbox.schemas:
             body["tools"] = toolbox.schemas
 
+        exhausted = True
         for _ in range(MAX_TOOL_TURNS):
             message = await self._post(body)
             calls = message.get("tool_calls") or []
             if not calls or toolbox is None:
+                exhausted = False
                 break
             messages.append(message)
             for call in calls:
                 messages.append(await self._run_call(toolbox, call))
-        else:
-            raise ProviderError("gave up after too many tool rounds")
+
+        if exhausted:
+            # The tools already ran, so their effects are real. Ask once more
+            # with tools withheld rather than reporting a failure over work
+            # that actually happened.
+            note(outcome="tool-loop")
+            message = await self._post({**body, "messages": messages, "tools": []})
 
         text = (message.get("content") or "").strip()
         if not text:

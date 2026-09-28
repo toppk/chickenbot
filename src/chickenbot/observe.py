@@ -12,6 +12,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import time
+from collections.abc import Callable
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 
@@ -21,6 +22,15 @@ logging.addLevelName(TRACE, "TRACE")
 log = logging.getLogger("chickenbot.activity")
 
 _current: ContextVar[Activity | None] = ContextVar("activity", default=None)
+
+# Set once at startup. Keeps `observe` free of a store dependency, and keeps
+# the activity line working in tests and CLI paths where there is no database.
+_sink: Callable[[dict], None] | None = None
+
+
+def set_sink(sink: Callable[[dict], None] | None) -> None:
+    global _sink
+    _sink = sink
 
 
 def _fmt(value: object) -> str:
@@ -43,8 +53,11 @@ class Activity:
         existing = self.fields.get(key)
         self.fields[key] = f"{existing},{value}" if existing else value
 
+    def elapsed_ms(self) -> int:
+        return int((time.monotonic() - self.started) * 1000)
+
     def render(self) -> str:
-        ms = int((time.monotonic() - self.started) * 1000)
+        ms = self.elapsed_ms()
         parts = [f"{k}={_fmt(v)}" for k, v in self.fields.items() if v not in ("", None)]
         parts.append(f"ms={ms}")
         return " ".join(parts)
@@ -86,3 +99,8 @@ def activity(**initial: object):
     finally:
         _current.reset(token)
         log.info("%s", record.render())
+        if _sink is not None:
+            try:
+                _sink({**record.fields, "ms": record.elapsed_ms()})
+            except Exception:
+                log.exception("could not record activity")
