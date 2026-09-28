@@ -31,6 +31,36 @@ Current size: ~2800 lines of source, ~1660 of tests, 135 tests, vs eggbot's
 note; it is still a fifth of eggbot. If a change starts growing a subsystem,
 push back.
 
+## What belongs in the config file
+
+The toml says **how to reach things and who is in charge**: hosts, ports, TLS,
+SASL, which rooms to join, owners, the tool socket and its grants, and where
+the database lives. Everything else is behaviour, and behaviour is changed
+where it was noticed:
+
+```
+.tune                          what is overridden, and what can be
+.tune llm.history_minutes 45   from the channel, owner only
+chickenbot tune llm.effort high
+chickenbot tune llm.effort --unset
+```
+
+`settings.py` holds the allowlist. A row in `setting` overrides the file and is
+laid over the loaded config at startup, so every existing `cfg.llm.x` read
+keeps working and a change takes effect on the next message, not the next
+restart. `--unset` drops the row; the running value stays until a restart,
+because reverting under a live conversation is worse than being explicit.
+
+**Owners, grants, hosts and credentials are deliberately not settable.** A
+runtime command that could grant authority would be an escalation through the
+very channel that authority gates. The same reasoning puts the soul, dossiers,
+room notes, nicknames and known bots in the database rather than the file:
+they are what the bot learns, not how it connects.
+
+The chat command is `.tune`, not `.set`, because an addressed line beginning
+with a common verb is somebody talking -- "chickenbot: set the topic" must not
+become a command.
+
 ## Instances
 
 Several bots run side by side -- a hobby domain, a personal one, a work one --

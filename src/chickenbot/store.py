@@ -99,6 +99,16 @@ CREATE TABLE IF NOT EXISTS bot (
     PRIMARY KEY (realm, handle)
 );
 
+-- Behaviour, set at runtime. The toml is the default; a row here overrides it.
+-- Connection details and authority are not in here on purpose -- see
+-- settings.SETTABLE.
+CREATE TABLE IF NOT EXISTS setting (
+    key        TEXT PRIMARY KEY,
+    value      TEXT NOT NULL,
+    author     TEXT NOT NULL DEFAULT 'cli',
+    updated_at INTEGER NOT NULL
+);
+
 -- Every change to a soul or a dossier, append-only. These are mutable state
 -- that someone will want to undo, and without this the previous wording is
 -- simply gone. Not git: a table is enough for documents this small.
@@ -584,6 +594,23 @@ class Store:
             (text, int(time.time())),
         )
         self._keep_revision("soul", "", text, author)
+
+    def settings(self) -> dict[str, str]:
+        return {r["key"]: r["value"] for r in self._db.execute("SELECT key, value FROM setting ORDER BY key")}
+
+    def set_setting(self, key: str, value: str, author: str = "cli") -> None:
+        self._db.execute(
+            "INSERT INTO setting (key, value, author, updated_at) VALUES (?, ?, ?, ?)"
+            " ON CONFLICT(key) DO UPDATE SET value = excluded.value, author = excluded.author,"
+            " updated_at = excluded.updated_at",
+            (key, value, author, int(time.time())),
+        )
+        self._db.commit()
+
+    def forget_setting(self, key: str) -> bool:
+        cur = self._db.execute("DELETE FROM setting WHERE key = ?", (key,))
+        self._db.commit()
+        return cur.rowcount > 0
 
     def mark_bot(self, realm: str, handle: str, author: str = "cli") -> bool:
         """True if this is news. Folded, so a nick that changes case still matches."""

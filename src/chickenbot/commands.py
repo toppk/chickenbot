@@ -21,6 +21,7 @@ from .rhythm import Rhythm
 from .rooms import MAX_CHARS as ROOM_NOTES_MAX
 from .rooms import Rooms
 from .scheduler import MAX_DELAY, describe, parse_delay
+from .settings import SETTABLE, Settings, Unsettable
 from .soul import Soul
 from .store import Store
 from .tools import ToolBox
@@ -164,6 +165,7 @@ class Handler:
         self.rhythm = Rhythm(store)
         self.welcome = Welcome(store)
         self.rooms = Rooms(store)
+        self.settings = Settings(store, cfg)
         self._writes: set[asyncio.Task] = set()
         self.transports: dict[str, Transport] = {}
         self._asks: dict[str, deque[float]] = defaultdict(deque)
@@ -657,6 +659,28 @@ async def cmd_vibe(h: Handler, ctx: Context) -> None:
         return
     h.store.set_room_notes(realm, ctx.channel, ctx.args[:ROOM_NOTES_MAX], author=ctx.account or ctx.nick)
     ctx.say(f"noted, that is what {ctx.channel} is like")
+
+
+@command("tune", owner=True, usage="tune [key] [value]", blurb="change behaviour, no restart")
+async def cmd_tune(h: Handler, ctx: Context) -> None:
+    """Not `set`: an addressed line starting with a common verb is somebody
+    talking, and "chickenbot: set the topic" must not become a command."""
+    key, _, value = ctx.args.partition(" ")
+    if not key:
+        overridden = h.settings.overridden()
+        changed = ", ".join(f"{k}={v}" for k, v in overridden.items())
+        ctx.say(f"tuned: {changed}" if changed else "nothing tuned; all from the config file")
+        ctx.say(f"settable: {', '.join(SETTABLE)}")
+        return
+    try:
+        if not value.strip():
+            ctx.say(f"{ctx.nick}: {key} = {h.settings.get(key)}")
+            return
+        ctx.say(f"{ctx.nick}: {key} = {h.settings.set(key, value, author=ctx.account or ctx.nick)}")
+    except Unsettable:
+        ctx.say(f"{ctx.nick}: {key} is not mine to change; settable: {', '.join(SETTABLE)}")
+    except ValueError as exc:
+        ctx.say(f"{ctx.nick}: bad value ({exc})")
 
 
 @command("say", owner=True, usage="say <text>", blurb="speak")

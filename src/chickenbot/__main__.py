@@ -20,6 +20,7 @@ from .barfly import Barfly
 from .commands import Handler
 from .observe import TRACE, set_sink
 from .scheduler import Scheduler
+from .settings import SETTABLE, Settings, Unsettable
 from .soul import seed as seed_soul
 from .store import Store
 from .toolsocket import ToolServer
@@ -85,6 +86,8 @@ async def run(cfg: config.Config) -> int:
     store = Store(cfg.db_path, fold)
     set_sink(store.record_activity)
     seed_soul(store)
+    if applied := Settings(store, cfg).apply_stored():
+        log.info("applied %d stored setting(s) over the config file", applied)
     handler = Handler(cfg, store, provider, None)
     handler.transports = transports
 
@@ -151,6 +154,34 @@ async def run(cfg: config.Config) -> int:
     return 0
 
 
+def manage_settings(settings: Settings, args: argparse.Namespace) -> int:
+    """The config file is the default; these are the overrides on top of it."""
+    settings.apply_stored()  # so a read shows what the bot is actually using
+    stored = settings.overridden()
+    if not args.key:
+        for key in SETTABLE:
+            mark = "*" if key in stored else " "
+            print(f"{mark} {key} = {settings.get(key)}")
+        print("\n* overridden here; the rest come from the config file")
+        return 0
+    try:
+        if args.unset:
+            gone = settings.unset(args.key)
+            print("back to the config file at next start" if gone else "was not overridden")
+            return 0
+        if args.value is None:
+            print(f"{args.key} = {settings.get(args.key)}")
+            return 0
+        print(f"{args.key} = {settings.set(args.key, args.value)}")
+        return 0
+    except Unsettable as exc:
+        print(f"{exc}. settable: {', '.join(SETTABLE)}", file=sys.stderr)
+        return 1
+    except ValueError as exc:
+        print(f"bad value: {exc}", file=sys.stderr)
+        return 1
+
+
 def manage_bots(store: Store, args: argparse.Namespace) -> int:
     """Who else in the room is a bot. IRCv3 bot mode and the platform flags
     cover the well-behaved ones; this is for the rest."""
@@ -178,6 +209,9 @@ def manage(cfg: config.Config, args: argparse.Namespace) -> int:
     try:
         if args.what == "bot":
             return manage_bots(store, args)
+
+        if args.what == "tune":
+            return manage_settings(Settings(store, cfg), args)
 
         if args.what == "soul":
             seed_soul(store)
@@ -293,6 +327,7 @@ def show_prompt(cfg: config.Config, args: argparse.Namespace) -> int:
     from .commands import Context, Handler, compose
 
     store = Store(cfg.db_path)
+    Settings(store, cfg).apply_stored()  # the preview should match the real thing
     try:
         realm, _, room = (args.room or "").partition("/")
         if not room:
@@ -581,6 +616,11 @@ def main(argv: list[str] | None = None) -> int:
     bot_cmd.add_argument("realm", nargs="?", help="e.g. irc:irc.chonkbase.net; omit to list")
     bot_cmd.add_argument("handle", nargs="?", help="nick or services account")
     bot_cmd.add_argument("--forget", action="store_true", help="it was never a bot, or is not one now")
+
+    set_cmd = sub.add_parser("tune", help="change behaviour without editing the config")
+    set_cmd.add_argument("key", nargs="?", help=f"one of: {', '.join(SETTABLE)}")
+    set_cmd.add_argument("value", nargs="?", help="omit to read it back")
+    set_cmd.add_argument("--unset", action="store_true", help="fall back to the config file")
 
     log_cmd = sub.add_parser("log", help="browse what was said")
     log_cmd.add_argument("room", nargs="?", help="transport/#channel; omit to list rooms")
