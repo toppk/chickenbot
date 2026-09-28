@@ -187,12 +187,21 @@ tool ships with an empty user list: a list in two places is a list that
 disagrees with itself, and the core is the side that knows which handles belong
 to people it actually talks to.
 
-**`who_link` lets someone claim their own handle in chat**, and has no target
-argument on purpose. Channel text is attacker-controlled; a tool that could
-file "chrisk's github is evil-user" would turn one sentence into a durable,
-tool-visible lie that then steers what the bot watches. Claiming your own is
-safe because the network authenticated the account, and `alias.source` records
-who said so. Revisions key on the person
+**Handles get linked from chat, gated like everything else.** `who_link` is
+open and only ever claims the speaker's own handle — the network vouched for
+that account. `who_link_other` asserts somebody else's and is owner-only, so a
+non-owner is never even offered it.
+
+That split is the usual rule, not a special case: the model may propose either
+from anything said in the room, and whether it happens is decided by the asking
+user's account. An owner saying "chrisk is iconidentify" is exactly as
+trustworthy as an owner saying "kick nate". `alias.source` records who
+authorised it, and revisions make a wrong one recoverable.
+
+Worth knowing why this needs no stronger rule: linking confers **no privilege**.
+Owners are `[irc] owners` by account, so an alias never makes anyone one. The
+harm is misattribution — the bot citing the wrong account — which is bad but
+reversible, not escalation. Revisions key on the person
 id, not a handle, so linking a new alias does not orphan their history.
 
 **sqlite has FTS5** (checked: 3.53.4 here), so full-text search over people or

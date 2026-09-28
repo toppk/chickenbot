@@ -141,6 +141,10 @@ Open questions:
   themselves, and about other people. An extracted dossier must record *who
   claimed what*, not launder claims into facts — and it must not be able to
   overwrite an owner-written line.
+- The alias tools show the shape this should take: self-claims are open because
+  the network authenticated the speaker, third-party claims are owner-gated,
+  and `source` is recorded either way. Extraction should follow the same rule
+  rather than inventing a new one.
 - When is extraction triggered? End of an engagement seems natural.
 
 ## 5. Exploring the record — built

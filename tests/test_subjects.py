@@ -187,3 +187,70 @@ def test_the_hello_asks_for_that_realm():
 
     source = inspect.getsource(gh.serve)
     assert '"subjects": SUBJECTS' in source
+
+
+# -- third-party claims --------------------------------------------------
+
+
+async def test_an_owner_can_link_somebody_else(cfg, store, transport):
+    """The model may propose it from anything said; the gate is the asker."""
+    handler = Handler(cfg, store, None, None)
+    store.set_person(transport.realm, "chrisk", "runs the server")
+
+    result = await box(handler, transport, account="alice", is_owner=True).run(
+        "who_link_other", {"person": "chrisk", "realm": "github", "handle": "iconidentify"}
+    )
+    assert "recorded" in result
+    assert store.person_id("github", "iconidentify") == store.person_id(transport.realm, "chrisk")
+    assert store.alias_source("github", "iconidentify")[0] == "alice"
+
+
+async def test_a_non_owner_cannot(cfg, store, transport):
+    handler = Handler(cfg, store, None, None)
+    store.set_person(transport.realm, "chrisk", "runs the server")
+    result = await box(handler, transport, account="nate", is_owner=False).run(
+        "who_link_other", {"person": "chrisk", "realm": "github", "handle": "evil-user"}
+    )
+    assert "owner-only" in result
+    assert store.person_id("github", "evil-user") is None
+
+
+async def test_it_is_not_even_offered_to_a_non_owner(cfg, store, transport):
+    handler = Handler(cfg, store, None, None)
+    names = {s["function"]["name"] for s in box(handler, transport, is_owner=False).schemas}
+    assert "who_link" in names and "who_link_other" not in names
+
+
+async def test_linking_an_unknown_person_is_refused(cfg, store, transport):
+    handler = Handler(cfg, store, None, None)
+    result = await box(handler, transport, account="alice", is_owner=True).run(
+        "who_link_other", {"person": "nobody", "realm": "github", "handle": "x"}
+    )
+    assert "do not know anyone called nobody" in result
+
+
+async def test_an_ambiguous_person_is_refused_rather_than_guessed(cfg, store, transport):
+    handler = Handler(cfg, store, None, None)
+    store.set_person("irc:one", "chrisk", "one chrisk")
+    store.set_person("irc:two", "chrisk", "another chrisk")
+    result = await box(handler, transport, account="alice", is_owner=True).run(
+        "who_link_other", {"person": "chrisk", "realm": "github", "handle": "x"}
+    )
+    assert "ambiguous" in result
+    assert store.person_id("github", "x") is None
+
+
+async def test_a_third_party_link_also_tells_the_tools(wired):
+    handler, transport, sock, store = wired
+    store.set_person(transport.realm, "chrisk", "")
+    peer = await connect(sock)
+    await peer.send(v=1, type="hello", process="gh", subjects="github", tools=[{"name": "q"}])
+    await peer.recv()
+
+    await box(handler, transport, account="alice", is_owner=True).run(
+        "who_link_other", {"person": "chrisk", "realm": "github", "handle": "iconidentify"}
+    )
+    await handler.drain()
+    pushed = await peer.recv()
+    assert pushed["subjects"] == ["iconidentify"]
+    await peer.close()

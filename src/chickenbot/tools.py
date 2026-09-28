@@ -247,13 +247,8 @@ async def tool_room_state(h: Handler, ctx: Context, args: dict) -> str:
     },
 )
 async def tool_who_link(h: Handler, ctx: Context, args: dict) -> str:
-    """Only ever the speaker's own handle.
-
-    There is no target argument on purpose. Channel text is attacker-controlled,
-    and a tool that could file "chrisk's github is evil-user" would turn one
-    sentence into a durable, tool-visible lie. Claiming your own is safe because
-    the account was authenticated by the network.
-    """
+    """The speaker's own handle. Open to anyone authenticated, because the
+    network vouched for who they are; `who_link_other` covers everybody else."""
     if not ctx.account:
         return "error: i cannot see who you are; log in to services first"
     realm = str(args.get("realm", "")).strip().lower()
@@ -272,4 +267,53 @@ async def tool_who_link(h: Handler, ctx: Context, args: dict) -> str:
     if h.store.add_alias(mine, realm, handle, source=ctx.account):
         h.aliases_changed(realm)
         return f"recorded: {ctx.nick} is {handle} on {realm}"
+    return "error: could not record that"
+
+
+@tool(
+    "who_link_other",
+    owner=True,
+    description=(
+        "Record that somebody else also goes by a handle elsewhere, for example 'chrisk is "
+        "iconidentify on github'. Owner-only, because it is an assertion about a third party. "
+        "Anyone can record their own with who_link."
+    ),
+    params={
+        "type": "object",
+        "properties": {
+            "person": {"type": "string", "description": "a handle they are already known by"},
+            "realm": {"type": "string", "description": "where the new handle lives, e.g. github"},
+            "handle": {"type": "string"},
+        },
+        "required": ["person", "realm", "handle"],
+    },
+)
+async def tool_who_link_other(h: Handler, ctx: Context, args: dict) -> str:
+    """Third-party claims, gated like every other owner action.
+
+    The model may propose this from anything said in the room; whether it
+    happens is decided by the asking user's account, not by the model's opinion
+    of the claim. `alias.source` records who authorised it either way.
+    """
+    person = str(args.get("person", "")).strip()
+    realm = str(args.get("realm", "")).strip().lower()
+    handle = str(args.get("handle", "")).strip()
+    if not person or not realm or not handle or "/" in realm or "/" in handle:
+        return "error: need person, realm and handle, e.g. person=chrisk realm=github handle=iconidentify"
+
+    found = h.store.whois(person)
+    if not found:
+        return f"error: i do not know anyone called {person}"
+    if len(found) > 1:
+        return f"error: {person} is ambiguous; {len(found)} people answer to it"
+    target = found[0]
+
+    existing = h.store.person_id(realm, handle)
+    if existing == target:
+        return f"already recorded: {person} is {handle} on {realm}"
+    if existing is not None:
+        return f"error: {realm}/{handle} already belongs to somebody else"
+    if h.store.add_alias(target, realm, handle, source=ctx.account):
+        h.aliases_changed(realm)
+        return f"recorded: {person} is {handle} on {realm}"
     return "error: could not record that"
