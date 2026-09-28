@@ -82,6 +82,39 @@ def command(name: str, *, owner: bool = False, usage: str = "", blurb: str = "")
     return register
 
 
+def render_scrollback(recent: list) -> str:
+    """Every line carries its age. Without it the model reads a remark from
+    half an hour ago as though it had just been made."""
+    return "\n".join(f"[{ago(line.ts)} ago] <{line.nick}> {line.text}" for line in recent)
+
+
+def compose(h: Handler, ctx: Context, scrollback: str, *, following: bool = False) -> tuple[str, str]:
+    """Assemble exactly what the model is sent: (system, user turn).
+
+    Kept in one place, and separate from sending it, so `chickenbot prompt`
+    can show the real thing rather than an approximation of it.
+    """
+    # The suffix is a safety rail, not personality: the soul may not edit it.
+    system = h.soul.text() + SYSTEM_SUFFIX + (FOLLOW_NOTE if following else "")
+
+    # Volatile context goes in the user turn, not the system prompt, so the
+    # stable prefix stays cacheable.
+    where = "group" if ctx.in_channel else "direct message"
+    now = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime())
+    situation = (
+        f"<context>network={ctx.transport.name} room={ctx.channel} kind={where} asking={ctx.nick} now={now}</context>"
+    )
+    # Owner-written notes about whoever is here. Trusted, unlike scrollback.
+    people = h.dossiers.block(realm=ctx.transport.realm, account=ctx.account, text=f"{ctx.args} {scrollback}")
+    head = "\n".join(part for part in (situation, people) if part)
+    if scrollback:
+        return (
+            system,
+            f"{head}\n<channel_scrollback>\n{scrollback}\n</channel_scrollback>\n\n{ctx.nick} asks: {ctx.args}",
+        )
+    return system, f"{head}\n\n{ctx.args}"
+
+
 def ago(ts: int) -> str:
     seconds = max(0, int(time.time()) - ts)
     if seconds < 60:
@@ -381,18 +414,9 @@ async def cmd_ask(h: Handler, ctx: Context, *, following: bool = False) -> None:
     scrollback = ""
     if ctx.in_channel and h.cfg.llm.history_lines > 0:
         recent = await h.store.recent(ctx.transport.realm, ctx.channel, h.cfg.llm.history_lines)
-        scrollback = "\n".join(f"<{line.nick}> {line.text}" for line in recent)
+        scrollback = render_scrollback(recent)
 
-    # Volatile context goes in the user turn, not the system prompt, so the
-    # stable prefix stays cacheable.
-    where = "group" if ctx.in_channel else "direct message"
-    situation = f"<context>network={ctx.transport.name} room={ctx.channel} kind={where} asking={ctx.nick}</context>"
-    # Owner-written notes about whoever is here. Trusted, unlike scrollback.
-    people = h.dossiers.block(realm=ctx.transport.realm, account=ctx.account, text=f"{ctx.args} {scrollback}")
-    head = "\n".join(part for part in (situation, people) if part)
-    prompt = f"{head}\n\n{ctx.args}"
-    if scrollback:
-        prompt = f"{head}\n<channel_scrollback>\n{scrollback}\n</channel_scrollback>\n\n{ctx.nick} asks: {ctx.args}"
+    system, prompt = compose(h, ctx, scrollback, following=following)
 
     toolbox = None
     if h.cfg.llm.tools and getattr(h.provider, "supports_tools", False):
@@ -401,8 +425,7 @@ async def cmd_ask(h: Handler, ctx: Context, *, following: bool = False) -> None:
     note(llm=h.provider.name)
     try:
         answer = await h.provider.reply(
-            # The suffix is a safety rail, not personality: the soul may not edit it.
-            system=h.soul.text() + SYSTEM_SUFFIX + (FOLLOW_NOTE if following else ""),
+            system=system,
             history=[],
             prompt=prompt,
             search=True,

@@ -230,7 +230,9 @@ async def test_the_prompt_says_which_network_and_room_it_is_in(cfg, transport, s
     provider = StubProvider()
     handler = Handler(cfg, store, provider, None)
     await send(handler, transport, "!ask what is this")
-    assert "<context>network=fake room=#chan kind=group asking=nate</context>" in provider.prompts[-1]
+    head = provider.prompts[-1]
+    assert "network=fake room=#chan kind=group asking=nate" in head
+    assert "now=" in head  # so "30 minutes ago" can be reasoned about
 
 
 async def test_a_direct_message_says_so(cfg, transport, store):
@@ -275,3 +277,18 @@ async def test_bare_topic_reports_rather_than_clearing(handler, transport):
     transport.sent.clear()
     await send(handler, transport, "!topic soup", account="alice")
     assert transport.actions == [(TOPIC, "#chan", "soup", "")]
+
+
+async def test_scrollback_lines_carry_their_age(cfg, transport, store):
+    """A remark from half an hour ago must not read as though it just happened."""
+    import time
+
+    provider = StubProvider()
+    handler = Handler(cfg, store, provider, None)
+    await store.log_line(transport.realm, "#chan", "toppk", "toppk", "make it so")
+    store._db.execute("UPDATE chatlog SET ts = ? WHERE text = 'make it so'", (int(time.time()) - 1800,))
+    store._db.commit()
+
+    await send(handler, transport, "!ask what did i mean")
+    scrollback = provider.prompts[-1]
+    assert "[30m ago] <toppk> make it so" in scrollback

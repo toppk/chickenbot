@@ -213,6 +213,67 @@ def browse(cfg: config.Config, args: argparse.Namespace) -> int:
         store.close()
 
 
+class _Preview:
+    """Just enough transport for `compose` to work outside a running bot."""
+
+    name = "irc"
+    caps = frozenset()
+
+    def __init__(self, realm: str, me: str = "chickenbot") -> None:
+        self.realm = realm
+        self.me = me
+
+    def is_owner(self, account: str) -> bool:
+        return False
+
+
+def show_prompt(cfg: config.Config, args: argparse.Namespace) -> int:
+    """Print exactly what the model would be sent. No call is made."""
+    from .commands import Context, Handler, compose, render_scrollback
+
+    store = Store(cfg.db_path)
+    try:
+        realm, _, room = (args.room or "").partition("/")
+        if not room:
+            rooms = store.rooms()
+            print("give a room, e.g. " + (f"{rooms[0][0]}/{rooms[0][1]}" if rooms else "irc:host/#channel"))
+            return 1
+        handler = Handler(cfg, store, None, None)
+        transport = _Preview(realm)
+        ctx = Context(
+            handler=handler,
+            transport=transport,
+            nick=args.nick,
+            account=args.nick,
+            channel=room,
+            args=args.question,
+            is_owner=False,
+            in_channel=True,
+        )
+        recent = store.conversation(realm, room, limit=cfg.llm.history_lines)
+        lines = [
+            type("L", (), {"ts": ts, "nick": nick, "text": text})
+            for ts, nick, _acct, kind, text in recent
+            if kind in ("privmsg", "command", "self")
+        ]
+        system, user = compose(handler, ctx, render_scrollback(lines), following=args.following)
+
+        print("=" * 72)
+        print("SYSTEM")
+        print("=" * 72)
+        print(system)
+        print()
+        print("=" * 72)
+        print("USER")
+        print("=" * 72)
+        print(user)
+        print()
+        print(f"({len(system) + len(user)} characters, roughly {(len(system) + len(user)) // 4} tokens)")
+        return 0
+    finally:
+        store.close()
+
+
 def show_activity(cfg: config.Config, args: argparse.Namespace) -> int:
     """What the bot decided, spent and called. The channel shows what was said;
     this shows what happened."""
@@ -369,6 +430,12 @@ def main(argv: list[str] | None = None) -> int:
     act.add_argument("--cost", action="store_true", help="just the model spend")
     act.add_argument("--limit", type=int, default=40)
 
+    pr = sub.add_parser("prompt", help="show exactly what the model would be sent")
+    pr.add_argument("room", nargs="?", help="realm/#room, as `log` lists them")
+    pr.add_argument("question", nargs="?", default="what is going on?")
+    pr.add_argument("--nick", default="toppk", help="who is asking")
+    pr.add_argument("--following", action="store_true", help="as a followed conversation")
+
     export_cmd = sub.add_parser("export", help="explode the log into files")
     export_cmd.add_argument("into", help="directory to write under")
     args = parser.parse_args(argv)
@@ -388,6 +455,8 @@ def main(argv: list[str] | None = None) -> int:
             return browse(cfg, args)
         if args.what == "activity":
             return show_activity(cfg, args)
+        if args.what == "prompt":
+            return show_prompt(cfg, args)
         if args.what == "export":
             return export(cfg, args)
         return manage(cfg, args)

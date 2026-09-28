@@ -201,6 +201,28 @@ question — what did this say last week, and put it back.
 anyone the conversation names *in that realm*, into a `<known_people>` block.
 Extraction by the model is designed but not built — see `docs/conversations.md`.
 
+**What the model is actually sent**, assembled by `commands.compose` and
+viewable without making a call:
+
+```bash
+chickenbot prompt irc:irc.chonkbase.net/#soup "what did i mean"
+chickenbot prompt irc:host/#soup --following      # with the silence rule
+```
+
+- **system**: the soul, then `SYSTEM_SUFFIX` (the untrusted-input rail, which
+  the soul may not edit), then `FOLLOW_NOTE` when following a conversation.
+- **user**: `<context>` with network, room, who is asking and **`now=`**, then
+  `<known_people>` if any dossier applies, then `<channel_scrollback>`, then
+  the question.
+
+**Every scrollback line carries its age** — `[30m ago] <toppk> make it so`.
+Without it the model read a half-hour-old remark as though it had just been
+made, and answered as if the conversation were still live. `now=` is in the
+context block for the same reason, so absolute reasoning is possible too.
+
+Assembly is separate from sending precisely so `chickenbot prompt` shows the
+real thing rather than an approximation that drifts.
+
 **The model is told where it is.** `cmd_ask` prefixes the user turn with
 `<context>network=… room=… kind=… asking=…</context>`. It goes in the user turn
 rather than the system prompt so the stable prefix stays cacheable, and it
