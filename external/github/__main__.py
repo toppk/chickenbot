@@ -15,6 +15,7 @@ import contextlib
 import json
 import logging
 import os
+import signal
 import sys
 import time
 from logging.handlers import RotatingFileHandler
@@ -421,17 +422,48 @@ async def run(args: argparse.Namespace) -> int:
         if not tasks:
             log.error("nothing to do: give --socket, --poll or --once")
             return 1
-        await asyncio.gather(*tasks)
+        # A service manager stops us with SIGTERM. Dying of it is an exit code
+        # 143 and a unit marked failed for doing what it was told.
+        stop = asyncio.Event()
+        loop = asyncio.get_running_loop()
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            with contextlib.suppress(NotImplementedError):
+                loop.add_signal_handler(sig, stop.set)
+        await asyncio.wait([*tasks, asyncio.create_task(stop.wait())], return_when=asyncio.FIRST_COMPLETED)
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
     finally:
         await api.aclose()
         store.close()
     return 0
 
 
-def main(argv: list[str] | None = None) -> int:
+def name_process(role: str) -> str:
+    """Make `ps` legible when several instances run side by side.
+
+    CB_INSTANCE names the domain; systemd sets it from %i. Best effort: a
+    missing setproctitle is not worth failing a start over.
+    """
+    instance = os.environ.get("CB_INSTANCE", "").strip()
+    title = f"chickenbot[{instance}-{role}]" if instance else f"chickenbot[{role}]"
+    try:
+        from setproctitle import setproctitle
+    except ImportError:
+        return title
+    setproctitle(title)
+    return title
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Separate from main so the defaults can be read back in tests."""
     parser = argparse.ArgumentParser(prog="github-tool")
-    parser.add_argument("--socket", default="", help="chickenbot tool socket; omit to poll only")
-    parser.add_argument("--db", default="github-tool.db")
+    parser.add_argument(
+        "--socket",
+        default=os.environ.get("CB_SOCKET_PATH", ""),
+        help="chickenbot tool socket; defaults to $CB_SOCKET_PATH, omit to poll only",
+    )
+    parser.add_argument("--db", default=os.environ.get("CB_GITHUB_DB_PATH", "github-tool.db"))
     parser.add_argument("--env", default=".env", help="file to read GITHUB_TOKEN from")
     parser.add_argument(
         "--users", nargs="*", default=USERS, help="only for running detached; chickenbot supplies these"
@@ -439,7 +471,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--interval",
         type=int,
-        default=DEFAULT_INTERVAL,
+        default=int(os.environ.get("CB_INTERVAL") or DEFAULT_INTERVAL),
         help="how stale the mirror may get before a question refreshes it behind itself",
     )
     parser.add_argument(
@@ -451,6 +483,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--once", action="store_true", help="poll once, print a summary, exit")
     parser.add_argument("-l", "--log-level", default="info")
     parser.add_argument("--log-file", default="", metavar="PATH", help="log here instead of stdout, rotating")
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
     args = parser.parse_args(argv)
     handlers = None
     if args.log_file:
@@ -464,6 +501,7 @@ def main(argv: list[str] | None = None) -> int:
         handlers=handlers,
     )
     load_env(Path(args.env))
+    log.info("starting as %s", name_process("github"))
     if not os.environ.get("GITHUB_TOKEN"):
         log.warning("no GITHUB_TOKEN: unauthenticated GitHub allows 60 requests an hour")
     try:

@@ -13,11 +13,10 @@ Wants=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=%h/workspace/chickenbot
-EnvironmentFile=-%h/server/chickenbot/%i/.env
-ExecStart=%h/.local/bin/uv run python -m external.github \
-    --socket %h/server/chickenbot/%i/chickenbot-tools.sock \
-    --db %h/server/chickenbot/%i/github-tool.db \
-    --interval 900
+# CB_SOCKET_PATH, CB_GITHUB_DB_PATH, CB_INTERVAL and GITHUB_TOKEN, all from one file.
+EnvironmentFile=%h/server/chickenbot/%i/.env
+Environment=CB_INSTANCE=%i
+ExecStart=%h/.local/bin/uv run python -m external.github
 Restart=always
 RestartSec=10
 

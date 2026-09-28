@@ -46,7 +46,20 @@ systemctl --user enable --now chickenbot@hobby chickenbot-github@hobby
 
 `deploy/chickenbot@.service` and `deploy/chickenbot-github@.service` are
 templates: `%i` is both the unit instance and the run directory under
-`~/server/chickenbot/`. The chonkbase bot runs as `eaccel`; its config,
+`~/server/chickenbot/`. Neither `ExecStart` carries an argument -- the paths
+come from the run directory's `.env`, which `init` writes:
+
+| Variable | Read by | Instead of |
+|---|---|---|
+| `CB_CONFIG_PATH` | chickenbot | `-c` |
+| `CB_SOCKET_PATH` | github tool | `--socket` |
+| `CB_GITHUB_DB_PATH` | github tool | `--db` |
+| `CB_INTERVAL` | github tool | `--interval` |
+| `CB_INSTANCE` | both | (set by the unit from `%i`) |
+
+A command-line argument still wins over the environment. `CB_INSTANCE` only
+names the process, so `ps` reads `chickenbot[eaccel-main]` and
+`chickenbot[eaccel-github]` rather than two identical `uv run` lines. The chonkbase bot runs as `eaccel`; its config,
 secrets and databases live in `~/server/chickenbot/eaccel/` and nothing
 runtime is left in the checkout. The starter config refuses to load with no owners, so an
 instance nobody is in charge of cannot start by accident.

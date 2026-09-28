@@ -110,3 +110,13 @@ def test_the_config_it_writes_is_valid_once_filled_in(tmp_path):
     assert cfg.db_path.startswith(str(run))
     assert cfg.tools.socket.startswith(str(run))
     assert cfg.data_dir.startswith(str(run))
+
+
+def test_the_env_it_writes_points_at_this_instance(tmp_path):
+    """So the systemd unit carries nothing but the program name."""
+    run = tmp_path / "hobby"
+    init(str(run))
+    env = (run / ".env").read_text()
+    assert f"CB_CONFIG_PATH={run}/chickenbot.toml" in env
+    assert f"CB_SOCKET_PATH={run}/chickenbot-tools.sock" in env
+    assert f"CB_GITHUB_DB_PATH={run}/github-tool.db" in env

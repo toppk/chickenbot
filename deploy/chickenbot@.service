@@ -1,5 +1,6 @@
 # One instance per domain: chickenbot@hobby, chickenbot@work. %i names both the
-# run directory and the unit, so nothing is configured twice. Install:
+# unit and the run directory, and everything else comes from the .env in it, so
+# the command line carries nothing. Install:
 #   chickenbot init ~/server/chickenbot/hobby
 #   mkdir -p ~/.config/systemd/user
 #   cp deploy/*.service ~/.config/systemd/user/
@@ -14,10 +15,12 @@ Wants=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=%h/workspace/chickenbot
-ExecStart=%h/.local/bin/uv run chickenbot -c %h/server/chickenbot/%i/chickenbot.toml
+# CB_CONFIG_PATH and the secrets both live here; `chickenbot init` writes it.
+EnvironmentFile=%h/server/chickenbot/%i/.env
+Environment=CB_INSTANCE=%i
+ExecStart=%h/.local/bin/uv run chickenbot
 Restart=always
 RestartSec=5
-# Secrets come from the .env beside the config, which the bot reads itself.
 
 [Install]
 WantedBy=default.target

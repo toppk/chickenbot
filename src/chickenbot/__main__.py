@@ -7,6 +7,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import os
 import random
 import signal
 import sys
@@ -431,6 +432,13 @@ ENV_TEMPLATE = """# Secrets for this instance. Never commit this file.
 OPENROUTER_API_KEY=
 GITHUB_TOKEN=
 CHICKENBOT_SASL_PASSWORD=
+
+# Where this instance keeps its things. The systemd units read this file, so
+# the command lines carry nothing but the program name.
+CB_CONFIG_PATH={run}/chickenbot.toml
+CB_SOCKET_PATH={run}/chickenbot-tools.sock
+CB_GITHUB_DB_PATH={run}/github-tool.db
+CB_INTERVAL=900
 """
 
 
@@ -454,7 +462,7 @@ def instantiate(args: argparse.Namespace) -> int:
 
     env = run / ".env"
     if not env.exists():
-        env.write_text(ENV_TEMPLATE, encoding="utf-8")
+        env.write_text(ENV_TEMPLATE.format(run=run), encoding="utf-8")
         env.chmod(0o600)
 
     # The soul is seeded now rather than on first run, so it can be edited
@@ -481,6 +489,22 @@ def instantiate(args: argparse.Namespace) -> int:
     return 0
 
 
+def name_process(role: str) -> str:
+    """Make `ps` legible when several instances run side by side.
+
+    CB_INSTANCE names the domain; systemd sets it from %i. Best effort: a
+    missing setproctitle is not worth failing a start over.
+    """
+    instance = os.environ.get("CB_INSTANCE", "").strip()
+    title = f"chickenbot[{instance}-{role}]" if instance else f"chickenbot[{role}]"
+    try:
+        from setproctitle import setproctitle
+    except ImportError:
+        return title
+    setproctitle(title)
+    return title
+
+
 def log_handlers(path: str) -> list[logging.Handler] | None:
     """None leaves logging on stdout, which is where a service manager wants it.
     A path is for running by hand, where the terminal scrolls away."""
@@ -494,7 +518,12 @@ def log_handlers(path: str) -> list[logging.Handler] | None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="chickenbot")
-    parser.add_argument("-c", "--config", default="chickenbot.toml", help="config file")
+    parser.add_argument(
+        "-c",
+        "--config",
+        default=os.environ.get("CB_CONFIG_PATH", "chickenbot.toml"),
+        help="config file; defaults to $CB_CONFIG_PATH",
+    )
     parser.add_argument("--check-config", action="store_true", help="validate the config and exit")
     parser.add_argument(
         "-l",
@@ -591,6 +620,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     if level.lower() not in LEVELS:
         log.warning("unknown log level %r, using info", level)
+    log.info("starting as %s", name_process("main"))
     try:
         return asyncio.run(run(cfg))
     except KeyboardInterrupt:
