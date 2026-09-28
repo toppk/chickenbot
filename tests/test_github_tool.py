@@ -528,3 +528,77 @@ def test_the_declared_queries_name_a_kind():
     ]
     assert len(queries) == 4
     assert all("is:issue" in q or "is:pull-request" in q for q in queries)
+
+
+# -- restarting must not re-scan ------------------------------------------
+
+
+def test_a_fresh_user_is_skipped(gh):
+    gh.interval = 900
+    gh.users = ["toppk", "newcomer"]
+    gh.store.set_cursor("user:toppk", "", int(time.time()) - 60)
+    assert gh.stale("toppk") is False
+    assert gh.stale("newcomer") is True  # never polled
+
+
+def test_a_stale_user_is_not(gh):
+    gh.interval = 900
+    gh.store.set_cursor("user:toppk", "", int(time.time()) - 5000)
+    assert gh.stale("toppk") is True
+
+
+async def test_being_told_about_one_new_handle_polls_only_that_one(gh, monkeypatch):
+    """The regression this guards: an empty starting list means every restart
+    looked like a change, and re-scanned everyone."""
+    polled: list[str] = []
+
+    async def repos(user):
+        polled.append(user)
+        return []
+
+    async def events(user):
+        return []
+
+    async def search(query, limit=100):
+        return []
+
+    gh.interval = 900
+    gh.api = type(
+        "Api", (), {"repos": staticmethod(repos), "events": staticmethod(events), "search_issues": staticmethod(search)}
+    )()
+    monkeypatch.setattr("external.github.__main__.SEARCH_PACE", 0)
+
+    gh.users = ["toppk"]
+    await gh.poll_once()
+    assert polled == ["toppk"]
+
+    # chickenbot sends a configure adding one person
+    polled.clear()
+    gh.watch(["toppk", "newcomer"])
+    await gh.poll_once()
+    assert polled == ["newcomer"]  # toppk is still fresh
+
+
+async def test_forgetting_closed_items_waits_for_a_full_pass(gh, monkeypatch):
+    """Skipping a fresh user must not evict that user's open items."""
+    seen: list[int] = []
+    gh.interval = 900
+    gh.store.set_cursor("user:toppk", "", int(time.time()))  # fresh, will be skipped
+    gh.users = ["toppk", "other"]
+
+    async def nothing(*a, **k):
+        return []
+
+    gh.api = type(
+        "Api",
+        (),
+        {"repos": staticmethod(nothing), "events": staticmethod(nothing), "search_issues": staticmethod(nothing)},
+    )()
+    monkeypatch.setattr("external.github.__main__.SEARCH_PACE", 0)
+    monkeypatch.setattr(gh.store, "forget_closed", lambda before: seen.append(before) or 0)
+
+    await gh.poll_once()
+    assert seen == []  # partial pass: nothing evicted
+
+    await gh.poll_once(force=True)
+    assert len(seen) == 1

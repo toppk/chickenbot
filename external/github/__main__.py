@@ -141,10 +141,11 @@ def ago(seconds: int) -> str:
 
 
 class Tool:
-    def __init__(self, store: Store, api: GitHub, users: list[str]) -> None:
+    def __init__(self, store: Store, api: GitHub, users: list[str], interval: int = 900) -> None:
         self.store = store
         self.api = api
         self.users = list(users)
+        self.interval = interval
 
     def watch(self, users: list[str]) -> bool:
         """Replace who we follow. Returns whether it actually changed."""
@@ -157,11 +158,21 @@ class Tool:
 
     # -- polling ---------------------------------------------------------
 
-    async def poll_once(self) -> int:
+    def stale(self, user: str) -> bool:
+        """Has this user's slice of the mirror aged out? The mirror is on disk,
+        so restarting, or being told about one new handle, is not a reason to
+        refetch everyone."""
+        _etag, last = self.store.cursor(f"user:{user}")
+        return not last or time.time() - last >= self.interval
+
+    async def poll_once(self, *, force: bool = False) -> int:
         fresh = 0
         started = int(time.time())
         complete = True
-        for user in self.users:
+        due = [u for u in self.users if force or self.stale(u)]
+        if skipped := len(self.users) - len(due):
+            log.info("%d user(s) still fresh, polling %d", skipped, len(due))
+        for user in due:
             # Separate concerns: a failing search must not discard the repository
             # and event work that already succeeded.
             try:
@@ -188,8 +199,9 @@ class Tool:
                     complete = False
                     log.warning("searching %r failed: %s", query, exc)
                 await asyncio.sleep(SEARCH_PACE)  # search is 30/min, and touchy in bursts
-        if complete:
-            # Only safe after a clean pass: a failed one would evict the world.
+        if complete and len(due) == len(self.users):
+            # Only safe after a clean pass over everyone: a partial one would
+            # evict every open item belonging to a user we skipped.
             gone = self.store.forget_closed(started)
             if gone:
                 log.info("%d item(s) closed since the last pass", gone)
@@ -198,21 +210,21 @@ class Tool:
         return fresh
 
     def due_in(self, seconds: int) -> int:
-        """Seconds until the next poll is actually due. The mirror is on disk, so
-        restarting is not a reason to re-fetch what we already have -- debugging
-        a socket problem should not cost eight API calls a restart."""
-        last = max((self.store.cursor(f"user:{u}")[1] for u in self.users), default=0)
-        return max(0, int(last + seconds - time.time())) if last else 0
+        """Seconds until anyone is due. Zero when somebody already is."""
+        if not self.users:
+            return 0
+        oldest = min(self.store.cursor(f"user:{u}")[1] for u in self.users)
+        return max(0, int(oldest + seconds - time.time())) if oldest else 0
 
     async def poll_forever(self, seconds: int) -> None:
-        wait = self.due_in(seconds)
-        if wait:
-            log.info("mirror is still fresh, next poll in %ds", wait)
         while True:
-            await asyncio.sleep(wait)
+            wait = self.due_in(seconds)
+            if wait:
+                log.info("mirror still fresh, next poll in %ds", wait)
+                await asyncio.sleep(wait)
             with contextlib.suppress(Exception):
                 await self.poll_once()
-            wait = seconds
+            await asyncio.sleep(seconds)
 
     # -- tool calls --------------------------------------------------------
 
@@ -359,7 +371,7 @@ async def _pump(tool: Tool, reader: asyncio.StreamReader, send) -> None:
 async def run(args: argparse.Namespace) -> int:
     store = Store(args.db)
     api = GitHub(os.environ.get("GITHUB_TOKEN", ""))
-    tool = Tool(store, api, args.users)
+    tool = Tool(store, api, args.users, interval=args.interval)
     try:
         if args.once:
             fresh = await tool.poll_once()

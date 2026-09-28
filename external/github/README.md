@@ -27,8 +27,16 @@ The `.env` loader is a local copy rather than an import from chickenbot: a tool
 is a separate process that happens to live in this repo, and a third-party one
 could not import the bot's package either.
 
-Watched users default to `agent2x0r`, `toppk`, `iconidentify`, `a2f0`; override
-with `--users`. Polling interval is `--interval`, default 15 minutes.
+**Who it watches comes from chickenbot**, not from here. The tool asks for the
+`github` realm in its handshake and receives every GitHub handle the bot knows,
+then a `configure` message whenever somebody links a new one. `--users` exists
+only for running it detached from the bot.
+
+Freshness is **per user**, from the `poll` cursors on disk. Restarting does not
+re-fetch anyone whose slice is younger than `--interval` (default 15 minutes),
+and being told about one new handle polls that handle alone. Closed items are
+only evicted after a pass that covered everyone, since a partial one would drop
+the open items of whoever was skipped.
 
 ## What it declares
 
