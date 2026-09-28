@@ -116,6 +116,9 @@ class IRCTransport:
         if msg.command == "MODE" and msg.source and self.client.isupport.is_channel(msg.target):
             await self._on_mode(msg)
             return
+        if msg.command in ("JOIN", "PART") and msg.source:
+            await self._on_coming_and_going(msg)
+            return
         if msg.command != "PRIVMSG" or not msg.source:
             return
         if self.fold(msg.nick) == self.fold(self.me):
@@ -135,6 +138,31 @@ class IRCTransport:
                 text=text,
                 is_group=bool(room),
                 is_bot=msg.is_bot,
+            )
+        )
+
+    @staticmethod
+    def _joined_as(msg: Message) -> str:
+        if msg.command != "JOIN" or len(msg.params) < 3:
+            return ""
+        return "" if msg.params[1] == "*" else msg.params[1]
+
+    async def _on_coming_and_going(self, msg: Message) -> None:
+        """Somebody arrived or left. Our own joins are not news."""
+        if self.fold(msg.nick) == self.fold(self.me):
+            return
+        room = self.client.isupport.channel_of(msg.target)
+        if not room:
+            return
+        await self.sink(
+            Event(
+                kind=Kind.ARRIVAL if msg.command == "JOIN" else Kind.DEPARTURE,
+                transport=self,
+                room=room,
+                sender=msg.nick,
+                # extended-join carries the account on the JOIN itself; "*" is nobody.
+                account=self._joined_as(msg) or self.client.account_of(msg.nick),
+                text=msg.source,
             )
         )
 

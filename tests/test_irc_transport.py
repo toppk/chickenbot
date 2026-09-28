@@ -112,3 +112,33 @@ async def test_topic_needs_no_ops_and_respects_topiclen(irc):
 def test_output_is_stripped_of_markdown_and_wrapped(irc):
     assert irc.lines("**bold** and `code`") == ["bold and code"]
     assert all(len(line) <= 400 for line in irc.lines("word " * 500))
+
+
+async def test_somebody_arriving_is_an_event(irc):
+    await feed(irc, ":nate!u@example.com JOIN #chan")
+    event = irc.seen[-1]
+    assert event.kind.value == "arrival"
+    assert event.room == "#chan" and event.sender == "nate"
+    assert event.text == "nate!u@example.com"
+
+
+async def test_an_arrival_carries_the_account_from_extended_join(irc):
+    irc.client.caps.add("extended-join")
+    await feed(irc, ":nate!u@h JOIN #chan alice :Real Name")
+    assert irc.seen[-1].account == "alice"
+
+
+async def test_an_unauthenticated_arrival_has_no_account(irc):
+    irc.client.caps.add("extended-join")
+    await feed(irc, ":nate!u@h JOIN #chan * :Real Name")
+    assert irc.seen[-1].account == ""
+
+
+async def test_leaving_is_an_event_too(irc):
+    await feed(irc, ":nate!u@h PART #chan :bye")
+    assert irc.seen[-1].kind.value == "departure"
+
+
+async def test_our_own_arrival_is_not_news(irc):
+    await feed(irc, ":chickenbot!u@h JOIN #chan")
+    assert irc.seen == []

@@ -174,6 +174,8 @@ class Handler:
                 await self._run_scheduled(event)
             elif event.kind is Kind.MODE:
                 await self._handle_change(event)
+            elif event.kind in (Kind.ARRIVAL, Kind.DEPARTURE):
+                await self._handle_presence(event)
             elif event.kind is Kind.FEED:
                 note(outcome="announced", source=event.sender)
                 event.transport.say(event.room, event.text)
@@ -260,6 +262,10 @@ class Handler:
         )
         with activity(kind="follow", realm=tr.realm, room=room, nick=nick, account=account or "-"):
             await cmd_ask(self, ctx, following=True)
+
+    async def _handle_presence(self, event: Event) -> None:
+        """Somebody came or went. Nothing is said yet; the greeting rules land next."""
+        note(outcome="noted", who=event.sender, account=event.account or "-")
 
     async def _handle_change(self, event: Event) -> None:
         """A room's modes changed. Channel state is already updated by the

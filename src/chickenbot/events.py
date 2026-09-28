@@ -20,6 +20,8 @@ class Kind(StrEnum):
     SCHEDULED = "scheduled"  # a job came due
     FEED = "feed"  # a watcher has something to announce
     MODE = "mode"  # a room's modes changed, including bans
+    ARRIVAL = "arrival"  # somebody joined a room we are in
+    DEPARTURE = "departure"  # ...or left it
 
 
 @dataclass(frozen=True, slots=True)
