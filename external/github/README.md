@@ -17,7 +17,18 @@ and `--env` points somewhere else if you want a different one.
 ```bash
 python -m external.github --once     # poll, print a summary, exit
 python -m external.github --socket chickenbot-tools.sock
+python -m external.github --socket ... --poll   # also refresh on a timer
 ```
+
+**It does not prefetch by default.** Questions are answered from the mirror
+immediately, and if that slice is older than `--interval` (six hours) a refresh
+runs *behind* the answer, so the next question is fresh. Waiting on a dozen API
+calls before replying would make every question take half a minute, and polling
+on a timer spends quota on data nobody asked for. Every answer carries its age:
+`[as of 2h ago]`.
+
+`--poll` turns the timer back on if you want it, but deciding *when* a check-in
+is worth making is chickenbot's job, not the tool's.
 
 Without a token GitHub allows 60 requests an hour and the tool says so on
 startup. Four users at a 15 minute interval is 32 of those, so it works

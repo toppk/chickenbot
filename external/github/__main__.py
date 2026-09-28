@@ -30,6 +30,10 @@ SUBJECTS = "github"  # the realm whose handles chickenbot should send us
 # it actually talks to. A list in two places is a list that disagrees with itself.
 USERS: list[str] = []
 SEARCH_PACE = 2.0  # seconds between searches; the endpoint dislikes bursts
+# Nobody needs GitHub at their fingertips. Answers come from the mirror, and a
+# stale mirror is refreshed behind the question rather than in front of it, so
+# a poll costs nothing when nobody is asking.
+DEFAULT_INTERVAL = 6 * 3600
 RANGES = {"hour": 3600, "day": 86400, "week": 604800, "month": 2592000, "all": 0}
 
 
@@ -141,11 +145,12 @@ def ago(seconds: int) -> str:
 
 
 class Tool:
-    def __init__(self, store: Store, api: GitHub, users: list[str], interval: int = 900) -> None:
+    def __init__(self, store: Store, api: GitHub, users: list[str], interval: int = DEFAULT_INTERVAL) -> None:
         self.store = store
         self.api = api
         self.users = list(users)
         self.interval = interval
+        self._refreshing: asyncio.Task | None = None
 
     def watch(self, users: list[str]) -> bool:
         """Replace who we follow. Returns whether it actually changed."""
@@ -165,11 +170,12 @@ class Tool:
         _etag, last = self.store.cursor(f"user:{user}")
         return not last or time.time() - last >= self.interval
 
-    async def poll_once(self, *, force: bool = False) -> int:
+    async def poll_once(self, *, force: bool = False, only: list[str] | None = None) -> int:
         fresh = 0
         started = int(time.time())
         complete = True
-        due = [u for u in self.users if force or self.stale(u)]
+        candidates = only if only is not None else self.users
+        due = [u for u in candidates if force or self.stale(u)]
         if skipped := len(self.users) - len(due):
             log.info("%d user(s) still fresh, polling %d", skipped, len(due))
         for user in due:
@@ -286,6 +292,31 @@ class Tool:
         who = args.get("user") or "us"
         return self._items(rows[:limit], int(time.time()), whose=f"elsewhere by {who}")
 
+    def freshen(self, user: str = "") -> None:
+        """Stale answer now, fresh one next time. Waiting on a dozen API calls
+        before replying would make every question take half a minute."""
+        if self._refreshing and not self._refreshing.done():
+            return
+        due = [u for u in ([user] if user else self.users) if u in self.users and self.stale(u)]
+        if not due:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return  # called outside the event loop; nothing to schedule onto
+        log.info("answering from the mirror, refreshing %s behind it", ", ".join(due))
+        self._refreshing = loop.create_task(self._refresh(due))
+
+    async def _refresh(self, users: list[str]) -> None:
+        with contextlib.suppress(Exception):
+            await self.poll_once(only=users)
+
+    def age(self, user: str = "") -> str:
+        """How old the answer is, so a reader can judge it."""
+        stamps = [self.store.cursor(f"user:{u}")[1] for u in ([user] if user else self.users)]
+        stamps = [t for t in stamps if t]
+        return f"as of {ago(int(time.time()) - min(stamps))} ago" if stamps else "never fetched"
+
     def call(self, name: str, args: dict) -> str:
         handler = {
             "github_activity": self.github_activity,
@@ -295,7 +326,9 @@ class Tool:
         }.get(name)
         if handler is None:
             return f"error: no tool {name}"
-        return handler(args)
+        answer = handler(args)
+        self.freshen(str(args.get("user") or ""))
+        return f"{answer} [{self.age(str(args.get('user') or ''))}]"
 
 
 # -- the socket side ------------------------------------------------------
@@ -378,9 +411,14 @@ async def run(args: argparse.Namespace) -> int:
             print(f"{fresh} new item(s)")
             print(tool.github_activity({"range": "week", "summarize": True}))
             return 0
-        tasks = [asyncio.create_task(tool.poll_forever(args.interval))]
+        tasks = []
+        if args.poll:
+            tasks.append(asyncio.create_task(tool.poll_forever(args.interval)))
         if args.socket:
             tasks.append(asyncio.create_task(serve_forever(tool, args.socket)))
+        if not tasks:
+            log.error("nothing to do: give --socket, --poll or --once")
+            return 1
         await asyncio.gather(*tasks)
     finally:
         await api.aclose()
@@ -396,7 +434,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--users", nargs="*", default=USERS, help="only for running detached; chickenbot supplies these"
     )
-    parser.add_argument("--interval", type=int, default=900)
+    parser.add_argument(
+        "--interval",
+        type=int,
+        default=DEFAULT_INTERVAL,
+        help="how stale the mirror may get before a question refreshes it behind itself",
+    )
+    parser.add_argument(
+        "--poll",
+        action="store_true",
+        help="also refresh on a timer, not only when asked. Off by default: chickenbot"
+        " decides when a check-in is worth making.",
+    )
     parser.add_argument("--once", action="store_true", help="poll once, print a summary, exit")
     parser.add_argument("-l", "--log-level", default="info")
     args = parser.parse_args(argv)

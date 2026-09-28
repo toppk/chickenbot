@@ -482,6 +482,16 @@ is a separate message and IRC paces sends at `send_interval`.
 
 ## External tools
 
+**Tools cache; they do not prefetch.** The github tool answers from its mirror
+at once and refreshes behind the answer when a slice has aged past
+`--interval` (six hours). Timer polling is opt-in via `--poll`. It was every
+fifteen minutes at first, which cost roughly 1150 API calls a day for data
+nobody had asked for. Answers carry their age so a reader can judge them.
+
+Deciding *when* to go and look — a morning check-in, an announcement when
+something changed — belongs to chickenbot rather than to a tool, and is what
+the scheduler is for.
+
 `docs/tool-protocol.md` is the contract; `toolsocket.py` is the bot's side and
 `external/github/` is the first tool. A tool is a separate process that connects
 to a unix socket, declares what it can do, and answers calls — chickenbot never

@@ -160,7 +160,7 @@ def test_repos_reports_stars_and_recency(gh):
         }
     )
     out = gh.github_repos({"user": "toppk"})
-    assert out == "toppk/chickenbot (3 stars, 2 open, pushed 1h ago)"
+    assert out == "toppk/chickenbot (3 stars, 2 open, pushed 1h ago)"  # call() adds the age
 
 
 def test_declared_schemas_are_valid_for_the_protocol(gh):
@@ -221,7 +221,7 @@ async def test_the_tool_registers_and_answers_over_the_socket(tmp_path, cfg, sto
             in_channel=True,
         )
         result = await ToolBox(handler, ctx).run("ext_github_activity", {"user": "toppk", "summarize": True})
-        assert result == "toppk: 1 commit"
+        assert result.startswith("toppk: 1 commit")
     finally:
         for task in (tool_task, server_task):
             task.cancel()
@@ -602,3 +602,73 @@ async def test_forgetting_closed_items_waits_for_a_full_pass(gh, monkeypatch):
 
     await gh.poll_once(force=True)
     assert len(seen) == 1
+
+
+# -- answering from the mirror --------------------------------------------
+
+
+def test_the_answer_says_how_old_it_is(gh):
+    seed(gh, ago_s=60, kind="commit")
+    gh.store.set_cursor("user:toppk", "", int(time.time()) - 7200)
+    gh.users = ["toppk"]
+    assert "[as of 2h ago]" in gh.call("github_activity", {"user": "toppk", "summarize": True})
+
+
+def test_a_never_fetched_mirror_says_so(gh):
+    gh.users = ["toppk"]
+    assert "[never fetched]" in gh.call("github_repos", {})
+
+
+async def test_a_question_refreshes_behind_itself_not_in_front(gh, monkeypatch):
+    """Waiting on a dozen API calls before replying would make every question
+    take half a minute."""
+    polled: list[str] = []
+
+    async def repos(user):
+        await asyncio.sleep(0.05)
+        polled.append(user)
+        return []
+
+    async def nothing(*a, **k):
+        return []
+
+    gh.users = ["toppk"]
+    gh.interval = 900
+    gh.api = type(
+        "Api",
+        (),
+        {"repos": staticmethod(repos), "events": staticmethod(nothing), "search_issues": staticmethod(nothing)},
+    )()
+    monkeypatch.setattr("external.github.__main__.SEARCH_PACE", 0)
+
+    answer = gh.call("github_activity", {"user": "toppk", "summarize": True})
+    assert polled == []  # answered without waiting
+    assert "never fetched" in answer
+
+    await gh._refreshing
+    assert polled == ["toppk"]
+
+
+async def test_a_fresh_mirror_triggers_no_refresh(gh, monkeypatch):
+    called: list[str] = []
+
+    async def boom(user):
+        called.append(user)
+        return []
+
+    gh.users = ["toppk"]
+    gh.interval = 900
+    gh.store.set_cursor("user:toppk", "", int(time.time()))
+    gh.api = type("Api", (), {"repos": staticmethod(boom)})()
+    gh.call("github_activity", {"user": "toppk"})
+    assert gh._refreshing is None and called == []
+
+
+def test_polling_on_a_timer_is_off_unless_asked():
+    import inspect
+
+    from external.github import __main__ as ghm
+
+    assert ghm.DEFAULT_INTERVAL == 6 * 3600
+    source = inspect.getsource(ghm.run)
+    assert "if args.poll:" in source  # the loop is opt-in
