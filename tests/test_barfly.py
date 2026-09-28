@@ -113,3 +113,22 @@ async def test_the_remark_is_told_the_room_has_gone_quiet(cfg, store):
     spoke(store, "nate", now - QUIET - 60, realm="fake")
     await Barfly(h).tick(now)
     assert SILENT in provider.prompts[0]
+
+
+async def test_dump_rhythm_shows_what_has_been_learned(cfg, store):
+    from chickenbot.commands import COMMANDS, Context
+
+    h, tr, now = setup(cfg, store)
+    ctx = Context(
+        handler=h,
+        transport=tr,
+        nick="alice",
+        account="alice",
+        channel="#soup",
+        args="rhythm",
+        is_owner=True,
+        in_channel=True,
+    )
+    await COMMANDS["dump"].run(h, ctx)
+    said = " ".join(text for _room, text in tr.sent)
+    assert "#soup" in said and "awake now" in said

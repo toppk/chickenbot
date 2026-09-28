@@ -719,7 +719,20 @@ async def _dump_tools(h: Handler, ctx: Context) -> list[str]:
     return out or ["no tools registered"]
 
 
-_DUMPS = {"comms": _dump_comms, "engines": _dump_engines, "tools": _dump_tools}
+async def _dump_rhythm(h: Handler, ctx: Context) -> list[str]:
+    """What the bot has worked out about when each room is awake."""
+    out: list[str] = []
+    for tr in sorted(h.transports.values(), key=lambda t: t.realm):
+        for room in tr.rooms:
+            last = h.store.last_human_line(tr.realm, room)
+            quiet = f"quiet {ago(last)}" if last else "never heard anyone"
+            awake = "awake now" if h.rhythm.lively_now(tr.realm, room) else "off hours"
+            out.append(f"[{tr.realm}] {room}: {awake}, {quiet}")
+            out.append(f"  {h.rhythm.describe(tr.realm, room)}")
+    return out or ["not in any rooms"]
+
+
+_DUMPS = {"comms": _dump_comms, "engines": _dump_engines, "tools": _dump_tools, "rhythm": _dump_rhythm}
 
 
 @command("dump", owner=True, usage="dump <comms|engines|tools>", blurb="what the bot currently knows")
