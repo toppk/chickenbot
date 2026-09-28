@@ -175,10 +175,20 @@ copied in once at startup. Manage both without a running bot:
 ```bash
 chickenbot soul                                   # show
 chickenbot soul @new-soul.md                      # replace (also - for stdin)
+chickenbot soul --history                         # every past version
+chickenbot soul --revision 7                      # print one
+chickenbot soul --restore 7                       # make it current again
 chickenbot who                                    # everyone we know
 chickenbot who irc.chonkbase.net chrisk "notes"   # set
+chickenbot who irc.chonkbase.net chrisk --history
 chickenbot who irc.chonkbase.net chrisk --forget
 ```
+
+**Both are versioned.** Every change appends to a `revision` table with an
+author, capped at `MAX_REVISIONS` per document. Writing identical text is not a
+revision, and **restoring is itself a revision**, so undoing never destroys
+what it undid. Not git: these are small documents and a table answers the
+question — what did this say last week, and put it back.
 
 **Both are read-only to the bot.** `dossier.py` loads the asker's notes plus
 anyone the conversation names *in that realm*, into a `<known_people>` block.

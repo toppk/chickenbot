@@ -11,6 +11,8 @@ from pathlib import Path
 
 from . import irccase
 
+MAX_REVISIONS = 50
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS chatlog (
     id        INTEGER PRIMARY KEY,
@@ -54,6 +56,19 @@ CREATE TABLE IF NOT EXISTS person (
     updated_at INTEGER NOT NULL,
     PRIMARY KEY (realm, account)
 );
+
+-- Every change to a soul or a dossier, append-only. These are mutable state
+-- that someone will want to undo, and without this the previous wording is
+-- simply gone. Not git: a table is enough for documents this small.
+CREATE TABLE IF NOT EXISTS revision (
+    id     INTEGER PRIMARY KEY,
+    kind   TEXT NOT NULL,              -- soul | person
+    key    TEXT NOT NULL DEFAULT '',   -- '' for the soul, realm/account for a person
+    text   TEXT NOT NULL,              -- the value as of this change
+    author TEXT NOT NULL DEFAULT '',
+    ts     INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS revision_key ON revision (kind, key, id DESC);
 
 CREATE TABLE IF NOT EXISTS job (
     id         INTEGER PRIMARY KEY,
@@ -254,13 +269,14 @@ class Store:
         row = self._db.execute("SELECT text FROM soul WHERE id = 1").fetchone()
         return row["text"] if row else ""
 
-    def set_soul(self, text: str) -> None:
+    def set_soul(self, text: str, author: str = "cli") -> None:
+        text = text.strip()
         self._db.execute(
             "INSERT INTO soul (id, text, updated_at) VALUES (1, ?, ?)"
             " ON CONFLICT(id) DO UPDATE SET text = excluded.text, updated_at = excluded.updated_at",
-            (text.strip(), int(time.time())),
+            (text, int(time.time())),
         )
-        self._db.commit()
+        self._keep_revision("soul", "", text, author)
 
     def person(self, realm: str, account: str) -> str:
         row = self._db.execute(
@@ -268,14 +284,50 @@ class Store:
         ).fetchone()
         return row["notes"] if row else ""
 
-    def set_person(self, realm: str, account: str, notes: str) -> None:
+    def set_person(self, realm: str, account: str, notes: str, author: str = "cli") -> None:
+        notes = notes.strip()
         self._db.execute(
             "INSERT INTO person (realm, account, notes, updated_at) VALUES (?, ?, ?, ?)"
             " ON CONFLICT(realm, account) DO UPDATE SET notes = excluded.notes,"
             " updated_at = excluded.updated_at",
-            (realm, account, notes.strip(), int(time.time())),
+            (realm, account, notes, int(time.time())),
+        )
+        self._keep_revision("person", f"{realm}/{account}", notes, author)
+
+    # -- history -----------------------------------------------------------
+
+    def _keep_revision(self, kind: str, key: str, text: str, author: str) -> None:
+        """Append, then trim. Documents this small are cheap to keep, but not
+        without bound once something starts writing them automatically."""
+        previous = self._db.execute(
+            "SELECT text FROM revision WHERE kind = ? AND key = ? ORDER BY id DESC LIMIT 1", (kind, key)
+        ).fetchone()
+        if previous is not None and previous["text"] == text:
+            self._db.commit()
+            return  # a no-op write is not a revision
+        self._db.execute(
+            "INSERT INTO revision (kind, key, text, author, ts) VALUES (?, ?, ?, ?, ?)",
+            (kind, key, text, author, int(time.time())),
+        )
+        self._db.execute(
+            "DELETE FROM revision WHERE kind = ? AND key = ? AND id NOT IN"
+            " (SELECT id FROM revision WHERE kind = ? AND key = ? ORDER BY id DESC LIMIT ?)",
+            (kind, key, kind, key, MAX_REVISIONS),
         )
         self._db.commit()
+
+    def revisions(self, kind: str, key: str = "") -> list[tuple[int, int, str, int]]:
+        """(id, ts, author, length), newest first."""
+        rows = self._db.execute(
+            "SELECT id, ts, author, LENGTH(text) AS n FROM revision WHERE kind = ? AND key = ? ORDER BY id DESC",
+            (kind, key),
+        ).fetchall()
+        return [(r["id"], r["ts"], r["author"], r["n"]) for r in rows]
+
+    def revision(self, revision_id: int) -> tuple[str, str, str] | None:
+        """(kind, key, text) for one revision."""
+        row = self._db.execute("SELECT kind, key, text FROM revision WHERE id = ?", (revision_id,)).fetchone()
+        return (row["kind"], row["key"], row["text"]) if row else None
 
     def forget_person(self, realm: str, account: str) -> bool:
         cur = self._db.execute("DELETE FROM person WHERE realm = ? AND account = ? COLLATE NOCASE", (realm, account))

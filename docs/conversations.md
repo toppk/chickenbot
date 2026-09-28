@@ -37,7 +37,13 @@ sit on two IRC networks, and the transport name for Signal, Discord and
 Telegram, which are each a single network.
 
 Editing is `chickenbot soul` and `chickenbot who`, which read and write the
-database without a running bot. Seeding happens once at startup and never from
+database without a running bot. Both are **versioned**: every change appends to
+a `revision` table with an author, so the previous wording is recoverable. That
+matters more once the bot writes dossiers itself — an extraction that goes
+wrong should be one `--restore` away, not gone. Embedded git was considered and
+rejected as far too much machinery for documents this size; restoring is itself
+recorded as a revision, which is the only property of git that was actually
+wanted here. Seeding happens once at startup and never from
 a read path: the bot writing its own soul is the thing being avoided, and a
 silent write from inside `Soul.text()` would blur that line.
 

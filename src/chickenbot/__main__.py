@@ -135,12 +135,7 @@ def manage(cfg: config.Config, args: argparse.Namespace) -> int:
     try:
         if args.what == "soul":
             seed_soul(store)
-            if args.text is None:
-                print(store.soul() or "(none; using llm.persona)")
-            else:
-                store.set_soul(_read_text(args.text))
-                print(f"soul set, {len(store.soul())} chars")
-            return 0
+            return _document(store, "soul", "", args, lambda text: store.set_soul(text))
 
         if args.account is None:
             rows = store.people(args.realm or "")
@@ -155,14 +150,55 @@ def manage(cfg: config.Config, args: argparse.Namespace) -> int:
         if args.forget:
             print("forgotten" if store.forget_person(args.realm, args.account) else "no such person")
             return 0
-        if args.text is None:
-            print(store.person(args.realm, args.account) or "(nothing known)")
-            return 0
-        store.set_person(args.realm, args.account, _read_text(args.text))
-        print(f"{args.realm}/{args.account} updated")
-        return 0
+        return _document(
+            store,
+            "person",
+            f"{args.realm}/{args.account}",
+            args,
+            lambda text: store.set_person(args.realm, args.account, text),
+        )
     finally:
         store.close()
+
+
+def _document(cfg_store: Store, kind: str, key: str, args: argparse.Namespace, write) -> int:
+    """Show, set, list history, print an old revision, or restore one."""
+    current = cfg_store.soul() if kind == "soul" else cfg_store.person(*key.split("/", 1))
+
+    if args.history:
+        rows = cfg_store.revisions(kind, key)
+        for rid, ts, author, length in rows:
+            when = time.strftime("%Y-%m-%d %H:%M", time.localtime(ts))
+            marker = "*" if rid == (rows[0][0] if rows else 0) else " "
+            print(f"{marker} {rid:5}  {when}  {author:8} {length:6} chars")
+        if not rows:
+            print("(no history)")
+        return 0
+
+    if args.revision is not None:
+        found = cfg_store.revision(args.revision)
+        if found is None or found[0] != kind or found[1] != key:
+            print(f"no revision {args.revision} of this", file=sys.stderr)
+            return 1
+        print(found[2])
+        return 0
+
+    if args.restore is not None:
+        found = cfg_store.revision(args.restore)
+        if found is None or found[0] != kind or found[1] != key:
+            print(f"no revision {args.restore} of this", file=sys.stderr)
+            return 1
+        # Restoring is itself a revision, so nothing is ever lost by undoing.
+        write(found[2])
+        print(f"restored revision {args.restore}")
+        return 0
+
+    if args.text is None:
+        print(current or ("(none; using llm.persona)" if kind == "soul" else "(nothing known)"))
+        return 0
+    write(_read_text(args.text))
+    print("updated")
+    return 0
 
 
 def _read_text(value: str) -> str:
@@ -185,9 +221,16 @@ def main(argv: list[str] | None = None) -> int:
         help="override log_level from the config file",
     )
     sub = parser.add_subparsers(dest="what")
-    soul = sub.add_parser("soul", help="show or set the bot's voice")
+
+    def versioned(sub_parser):
+        sub_parser.add_argument("--history", action="store_true", help="list past revisions")
+        sub_parser.add_argument("--revision", type=int, metavar="N", help="print revision N")
+        sub_parser.add_argument("--restore", type=int, metavar="N", help="make revision N current")
+        return sub_parser
+
+    soul = versioned(sub.add_parser("soul", help="show, set or roll back the bot's voice"))
     soul.add_argument("text", nargs="?", help="new text, @file, or - for stdin; omit to show")
-    who = sub.add_parser("who", help="show or set what is known about a person")
+    who = versioned(sub.add_parser("who", help="show, set or roll back what is known about a person"))
     who.add_argument("realm", nargs="?", help="e.g. irc.chonkbase.net; omit to list everyone")
     who.add_argument("account", nargs="?")
     who.add_argument("text", nargs="?", help="new notes, @file, or - for stdin; omit to show")

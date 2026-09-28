@@ -143,3 +143,82 @@ def test_soul_reads_a_file(tmp_path):
     (tmp_path / "s.md").write_text("from a file")
     cli(tmp_path, "soul", f"@{tmp_path / 's.md'}")
     assert "from a file" in cli(tmp_path, "soul")[1]
+
+
+# -- history -------------------------------------------------------------
+
+
+def test_every_change_is_kept(store):
+    store.set_soul("first")
+    store.set_soul("second")
+    history = store.revisions("soul")
+    assert [r[0] for r in history] == sorted([r[0] for r in history], reverse=True)  # newest first
+    assert len(history) == 2
+    assert store.revision(history[-1][0])[2] == "first"
+
+
+def test_writing_the_same_text_is_not_a_revision(store):
+    store.set_soul("same")
+    store.set_soul("same")
+    assert len(store.revisions("soul")) == 1
+
+
+def test_a_persons_history_is_their_own(store):
+    store.set_person("irc", "a", "one")
+    store.set_person("irc", "b", "other")
+    store.set_person("irc", "a", "two")
+    assert len(store.revisions("person", "irc/a")) == 2
+    assert len(store.revisions("person", "irc/b")) == 1
+
+
+def test_the_author_is_recorded(store):
+    store.set_soul("by hand", author="cli")
+    store.set_soul("by the bot", author="bot")
+    assert [r[2] for r in store.revisions("soul")] == ["bot", "cli"]
+
+
+def test_history_is_capped(store):
+    from chickenbot.store import MAX_REVISIONS
+
+    for i in range(MAX_REVISIONS + 10):
+        store.set_soul(f"version {i}")
+    assert len(store.revisions("soul")) == MAX_REVISIONS
+
+
+def test_restoring_is_itself_a_revision(tmp_path):
+    """Undo must never lose what it undid."""
+    cli(tmp_path, "soul", "first")
+    cli(tmp_path, "soul", "second")
+    # newest first, and revision 1 is the template seed
+    lines = cli(tmp_path, "soul", "--history")[1].strip().splitlines()
+    assert len(lines) == 3
+    was_first = int(lines[-2].split()[0])
+
+    assert cli(tmp_path, "soul", "--restore", str(was_first))[0] == 0
+    assert cli(tmp_path, "soul")[1].strip() == "first"
+    assert len(cli(tmp_path, "soul", "--history")[1].strip().splitlines()) == 4
+
+
+def test_printing_an_old_revision_does_not_change_anything(tmp_path):
+    cli(tmp_path, "soul", "first")
+    cli(tmp_path, "soul", "second")
+    lines = cli(tmp_path, "soul", "--history")[1].strip().splitlines()
+    was_first = int(lines[-2].split()[0])
+    assert cli(tmp_path, "soul", "--revision", str(was_first))[1].strip() == "first"
+    assert cli(tmp_path, "soul")[1].strip() == "second"  # printing changed nothing
+
+
+def test_a_revision_of_something_else_is_refused(tmp_path):
+    cli(tmp_path, "soul", "mine")
+    cli(tmp_path, "who", "irc", "someone", "theirs")
+    code, _ = cli(tmp_path, "soul", "--revision", "99999")
+    assert code == 1
+
+
+def test_a_person_can_be_rolled_back(tmp_path):
+    cli(tmp_path, "who", "irc", "chrisk", "gh: wrong")
+    cli(tmp_path, "who", "irc", "chrisk", "gh: iconidentify")
+    code, out = cli(tmp_path, "who", "irc", "chrisk", "--history")
+    first = int(out.strip().splitlines()[-1].split()[0])
+    cli(tmp_path, "who", "irc", "chrisk", "--restore", str(first))
+    assert "gh: wrong" in cli(tmp_path, "who", "irc", "chrisk")[1]
