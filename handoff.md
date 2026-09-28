@@ -544,7 +544,8 @@ socket through a full bot restart to pin that.
 
 ## Reading the record back
 
-Two different questions, two different commands. `log` is what was *said*;
+`docs/reviewing.md` is the procedure for a maintainer reviewing behaviour after
+the fact. In short: two different questions, two different commands. `log` is what was *said*;
 `activity` is what the bot *decided*, spent and called:
 
 ```bash
@@ -560,6 +561,10 @@ serving provider, tools called, cost and duration. `observe.set_sink` wires
 `Activity` to the store at startup, so the field set is exactly what the log
 line shows and nothing has to be kept in step by hand.
 
+
+`chickenbot activity` also takes `--kind` (message, barfly, vibe, arrival,
+scheduled) and `--room`, which is how the unprompted behaviour is reviewed
+without wading through everything anyone said.
 
 `chickenbot log` browses the chat log without a running bot: no argument lists
 rooms across every transport, `transport/#room` reads one, with `--days`,
@@ -581,6 +586,12 @@ Three levels that matter, set by `log_level` in the toml or `--log-level` /
   secret. Turn it on to read the wire, not to run.
 - **debug** — internal decisions, individual tool calls.
 - **info** — exactly one line per event, and the lifecycle messages.
+
+The log goes to stdout, for the journal to keep and rotate. `--log-file PATH`
+(or `log_file` in the toml) writes a rotating file instead, 8 MB × 5, for
+running by hand; `external/github` takes the same flag. The durable record is
+the database either way: logs are for watching it work now, `chatlog` and
+`activity` are for working out later why it did something.
 
 `observe.py` implements the one-line-per-event part. `Handler.dispatch` opens an
 `activity(...)`, everything downstream adds fields to it through `note()` /

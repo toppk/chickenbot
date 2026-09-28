@@ -103,3 +103,48 @@ def test_since_filters_by_hours(tmp_path):
 
     out = cli(tmp_path, "activity", "--since", "1")[1]
     assert "now" in out and "recent" not in out
+
+
+async def test_filtering_by_kind_isolates_what_it_did_unbidden(recorded, store):
+    """A maintainer reviewing the barfly should not have to read every line
+    somebody else said."""
+    handler, tr = recorded
+    await handler.dispatch(tr.envelope("chatter"))
+    store.record_activity({"ts": int(time.time()), "kind": "barfly", "room": "#chan", "outcome": "remarked"})
+    store.record_activity({"ts": int(time.time()), "kind": "vibe", "room": "#chan", "outcome": "noted"})
+
+    assert [r["outcome"] for r in store.activity(kind="barfly")] == ["remarked"]
+    assert [r["outcome"] for r in store.activity(kind="vibe")] == ["noted"]
+    assert len(store.activity()) == 3
+
+
+async def test_filtering_by_room(recorded, store):
+    handler, tr = recorded
+    await handler.dispatch(tr.envelope("chatter"))
+    store.record_activity({"ts": int(time.time()), "kind": "barfly", "room": "#other", "outcome": "remarked"})
+
+    assert [r["room"] for r in store.activity(room="#chan")] == ["#chan"]
+    assert [r["room"] for r in store.activity(room="#OTHER")] == ["#other"]  # rooms fold
+
+
+def test_the_cli_takes_the_new_filters(tmp_path):
+    code, out = cli(tmp_path, "activity", "--kind", "barfly", "--room", "#soup")
+    assert code == 0
+    assert "nothing recorded" in out
+
+
+def test_a_log_file_is_written_instead_of_stdout(tmp_path):
+    from chickenbot.__main__ import log_handlers
+
+    target = tmp_path / "logs" / "chickenbot.log"
+    handlers = log_handlers(str(target))
+    assert handlers is not None
+    handlers[0].emit(__import__("logging").LogRecord("t", 20, "p", 1, "hello", None, None))
+    handlers[0].close()
+    assert "hello" in target.read_text()
+
+
+def test_no_log_file_leaves_logging_on_stdout():
+    from chickenbot.__main__ import log_handlers
+
+    assert log_handlers("") is None

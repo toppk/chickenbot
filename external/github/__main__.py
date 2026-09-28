@@ -15,7 +15,9 @@ import contextlib
 import json
 import logging
 import os
+import sys
 import time
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from .github import GitHub
@@ -448,8 +450,19 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--once", action="store_true", help="poll once, print a summary, exit")
     parser.add_argument("-l", "--log-level", default="info")
+    parser.add_argument("--log-file", default="", metavar="PATH", help="log here instead of stdout, rotating")
     args = parser.parse_args(argv)
-    logging.basicConfig(level=args.log_level.upper(), format="%(asctime)s %(levelname)-5s %(name)s %(message)s")
+    handlers = None
+    if args.log_file:
+        target = Path(args.log_file).expanduser()
+        target.parent.mkdir(parents=True, exist_ok=True)
+        print(f"logging to {target}", file=sys.stderr)
+        handlers = [RotatingFileHandler(target, maxBytes=8 * 1024 * 1024, backupCount=5, encoding="utf-8")]
+    logging.basicConfig(
+        level=args.log_level.upper(),
+        format="%(asctime)s %(levelname)-5s %(name)s %(message)s",
+        handlers=handlers,
+    )
     load_env(Path(args.env))
     if not os.environ.get("GITHUB_TOKEN"):
         log.warning("no GITHUB_TOKEN: unauthenticated GitHub allows 60 requests an hour")

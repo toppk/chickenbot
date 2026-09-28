@@ -11,6 +11,7 @@ import random
 import signal
 import sys
 import time
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from . import brain, config
@@ -27,6 +28,9 @@ from .vibe import VibeCheck
 from .watcher import Watcher
 
 log = logging.getLogger("chickenbot")
+
+LOG_BYTES = 8 * 1024 * 1024
+LOG_KEEP = 5
 
 LEVELS = {
     "trace": TRACE,  # raw protocol lines
@@ -317,7 +321,14 @@ def show_activity(cfg: config.Config, args: argparse.Namespace) -> int:
             window = f"the last {args.since}h" if args.since else "all time"
             print(f"{count} model call(s) over {window}: ${spent:.4f}")
             return 0
-        rows = store.activity(since=since, outcome=args.outcome or "", command=args.command or "", limit=args.limit)
+        rows = store.activity(
+            since=since,
+            outcome=args.outcome or "",
+            command=args.command or "",
+            kind=args.kind or "",
+            room=args.room or "",
+            limit=args.limit,
+        )
         for row in reversed(rows):
             when = time.strftime("%m-%d %H:%M", time.localtime(row["ts"]))
             bits = [f"{when} {row['kind']:8} {row['room'] or '-':<12} {row['nick'] or '-':>12}"]
@@ -421,6 +432,17 @@ def _read_text(value: str) -> str:
     return value
 
 
+def log_handlers(path: str) -> list[logging.Handler] | None:
+    """None leaves logging on stdout, which is where a service manager wants it.
+    A path is for running by hand, where the terminal scrolls away."""
+    if not path:
+        return None
+    target = Path(path).expanduser()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    print(f"logging to {target}", file=sys.stderr)
+    return [RotatingFileHandler(target, maxBytes=LOG_BYTES, backupCount=LOG_KEEP, encoding="utf-8")]
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="chickenbot")
     parser.add_argument("-c", "--config", default="chickenbot.toml", help="config file")
@@ -430,6 +452,11 @@ def main(argv: list[str] | None = None) -> int:
         "--log-level",
         choices=sorted(LEVELS),
         help="override log_level from the config file",
+    )
+    parser.add_argument(
+        "--log-file",
+        metavar="PATH",
+        help="write the log here instead of stdout, rotating; overrides log_file",
     )
     sub = parser.add_subparsers(dest="what")
 
@@ -459,6 +486,8 @@ def main(argv: list[str] | None = None) -> int:
     act = sub.add_parser("activity", help="what the bot decided, spent and called")
     act.add_argument("--since", type=int, metavar="HOURS")
     act.add_argument("--outcome", help="e.g. answered, denied, llm-error, tool-loop")
+    act.add_argument("--kind", help="e.g. message, barfly, vibe, arrival, scheduled")
+    act.add_argument("--room", help="one channel, e.g. #soup")
     act.add_argument("--command", help="e.g. ask, topic")
     act.add_argument("--cost", action="store_true", help="just the model spend")
     act.add_argument("--limit", type=int, default=40)
@@ -499,6 +528,7 @@ def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(
         level=LEVELS.get(level.lower(), logging.INFO),
         format="%(asctime)s %(levelname)-5s %(name)s %(message)s",
+        handlers=log_handlers(args.log_file or cfg.log_file),
     )
     if level.lower() not in LEVELS:
         log.warning("unknown log level %r, using info", level)

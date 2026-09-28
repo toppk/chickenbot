@@ -400,9 +400,24 @@ class Store:
         )
         self._db.commit()
 
-    def activity(self, *, since: int = 0, outcome: str = "", command: str = "", limit: int = 50) -> list[dict]:
+    def activity(
+        self,
+        *,
+        since: int = 0,
+        outcome: str = "",
+        command: str = "",
+        kind: str = "",
+        room: str = "",
+        limit: int = 50,
+    ) -> list[dict]:
         sql = "SELECT * FROM activity WHERE ts >= ?"
         args: list = [since]
+        if kind:
+            sql += " AND kind = ?"
+            args.append(kind)
+        if room:
+            sql += " AND room = ? COLLATE NOCASE"
+            args.append(room)
         if outcome:
             sql += " AND outcome = ?"
             args.append(outcome)

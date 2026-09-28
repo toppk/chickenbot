@@ -195,6 +195,7 @@ class Config:
     data_dir: str = "data"
     db_path: str = "chickenbot.db"
     log_level: str = "info"  # trace | debug | info | warn | error
+    log_file: str = ""  # empty: stdout, for journald to keep
     chatlog_days: int = 365
     irc: IRCConfig = field(default_factory=IRCConfig)
     signal: SignalConfig = field(default_factory=SignalConfig)
