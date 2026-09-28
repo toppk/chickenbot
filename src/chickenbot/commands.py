@@ -118,7 +118,7 @@ class Handler:
         produces exactly one activity line whatever happens inside."""
         with activity(
             kind=str(event.kind),
-            transport=event.transport.name,
+            realm=event.transport.realm,
             room=event.room,
             nick=event.sender,
             account=event.account or "-",
@@ -544,9 +544,9 @@ MAX_DUMP_LINES = 12
 async def _dump_comms(h: Handler, ctx: Context) -> list[str]:
     """Every network, every room, and everyone we have seen identified."""
     out: list[str] = []
-    for name, tr in sorted(h.transports.items()):
+    for _name, tr in sorted(h.transports.items()):
         caps = "+".join(sorted(tr.caps)) or "none"
-        out.append(f"[{name}] as {tr.me}, can: {caps}")
+        out.append(f"[{tr.realm}] as {tr.me}, can: {caps}")
         out += [f"  {line}" for line in tr.describe()]
     if not out:
         out.append("no transports")

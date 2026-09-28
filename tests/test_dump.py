@@ -49,7 +49,7 @@ async def test_comms_spans_every_transport_not_just_this_one(handler, transport,
 
     said = await dump(handler, transport, "comms")
     blob = "\n".join(said)
-    assert "[fake]" in blob and "[signal]" in blob
+    assert "[fake]" in blob and "[signal]" in blob  # realms, one per network
     assert "group-abc" in blob
 
 

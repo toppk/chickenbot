@@ -53,7 +53,7 @@ async def test_ordinary_chat_produces_one_line(handler, transport, caplog):
         await send(handler, transport, "just chatting")
     assert len(lines(caplog)) == 1
     assert "outcome=chat" in lines(caplog)[0]
-    assert "transport=fake" in lines(caplog)[0]
+    assert "realm=fake" in lines(caplog)[0]
     assert "nick=nate" in lines(caplog)[0]
 
 
@@ -152,3 +152,13 @@ async def test_an_ask_logs_the_same_either_way(cfg, transport, store, caplog):
         assert "command=ask" in line
         assert "outcome=answered" in line
         assert "owner=false" in line
+
+
+async def test_the_activity_line_names_the_network_not_the_kind(cfg, transport, store, caplog):
+    """`transport=irc` is ambiguous the moment there are two IRC networks."""
+    handler = Handler(cfg, store, None, None)
+    with caplog.at_level(logging.INFO):
+        await send(handler, transport, "just chatting")
+    line = lines(caplog)[0]
+    assert "realm=fake" in line
+    assert "transport=" not in line
