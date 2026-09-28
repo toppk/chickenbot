@@ -146,11 +146,19 @@ def manage(cfg: config.Config, args: argparse.Namespace) -> int:
             return _document(store, "soul", "", args, lambda text: store.set_soul(text))
 
         if args.account is None:
+            # A bare handle searches every realm, which is how "who is
+            # iconidentify" finds the notes filed under chrisk.
+            if args.realm and (ids := store.whois(args.realm)):
+                for pid in ids:
+                    print(" = ".join(f"{r}/{h}" for r, h in store.aliases(pid)))
+                    print(store.person_notes(pid) or "(nothing known)")
+                return 0
             rows = store.people(args.realm or "")
-            for realm, account, updated in rows:
-                print(f"{realm}/{account}\t{time.strftime('%Y-%m-%d', time.localtime(updated))}")
+            for _pid, handles, updated in rows:
+                names = " = ".join(f"{r}/{h}" for r, h in handles)
+                print(f"{names}\t{time.strftime('%Y-%m-%d', time.localtime(updated))}")
             if not rows:
-                print("(nobody yet)")
+                print("(nobody matching)" if args.realm else "(nobody yet)")
             return 0
         if not args.realm:
             print("who needs --realm with an account", file=sys.stderr)
@@ -158,10 +166,25 @@ def manage(cfg: config.Config, args: argparse.Namespace) -> int:
         if args.forget:
             print("forgotten" if store.forget_person(args.realm, args.account) else "no such person")
             return 0
+        if args.alias:
+            pid = store.person_id(args.realm, args.account)
+            if pid is None:
+                print(f"no such person: {args.realm}/{args.account}", file=sys.stderr)
+                return 1
+            other_realm, _, other_handle = args.alias.partition("/")
+            if not other_handle:
+                print("an alias looks like realm/handle, e.g. github/iconidentify", file=sys.stderr)
+                return 1
+            ok = store.add_alias(pid, other_realm, other_handle)
+            print("linked" if ok else "that handle already belongs to someone")
+            return 0 if ok else 1
+        # Revisions are keyed on the person, not the handle: linking a second
+        # handle must not orphan their history.
+        pid = store.person_id(args.realm, args.account)
         return _document(
             store,
             "person",
-            f"{args.realm}/{args.account}",
+            str(pid) if pid else "",
             args,
             lambda text: store.set_person(args.realm, args.account, text),
         )
@@ -342,7 +365,7 @@ def export(cfg: config.Config, args: argparse.Namespace) -> int:
 
 def _document(cfg_store: Store, kind: str, key: str, args: argparse.Namespace, write) -> int:
     """Show, set, list history, print an old revision, or restore one."""
-    current = cfg_store.soul() if kind == "soul" else cfg_store.person(*key.split("/", 1))
+    current = cfg_store.soul() if kind == "soul" else (cfg_store.person_notes(int(key)) if key else "")
 
     if args.history:
         rows = cfg_store.revisions(kind, key)
@@ -414,6 +437,7 @@ def main(argv: list[str] | None = None) -> int:
     who.add_argument("account", nargs="?")
     who.add_argument("text", nargs="?", help="new notes, @file, or - for stdin; omit to show")
     who.add_argument("--forget", action="store_true")
+    who.add_argument("--alias", metavar="REALM/HANDLE", help="another name the same person goes by")
 
     log_cmd = sub.add_parser("log", help="browse what was said")
     log_cmd.add_argument("room", nargs="?", help="transport/#channel; omit to list rooms")

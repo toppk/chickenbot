@@ -1,7 +1,9 @@
 """What the bot knows about the people it talks to.
 
-Keyed on realm plus account, never on nick: `chrisk` on irc.chonkbase.net and
-`chrisk` on Telegram are different people, and a nick is transient anyway.
+One person, many handles. `chrisk` on irc.chonkbase.net is `iconidentify` on
+GitHub, and a question about either finds the same notes -- which is the whole
+point, since the failure it fixes was the bot knowing the answer and looking it
+up under the wrong name.
 """
 
 from __future__ import annotations
@@ -15,31 +17,45 @@ log = logging.getLogger(__name__)
 
 MAX_CHARS = 1200
 MAX_PEOPLE = 4
+_WORD = re.compile(r"[A-Za-z0-9._-]{2,64}")
 
 
 class Dossiers:
     def __init__(self, store: Store) -> None:
         self.store = store
 
-    def read(self, realm: str, account: str) -> str:
-        return self.store.person(realm, account)[:MAX_CHARS]
+    def read(self, realm: str, handle: str) -> str:
+        return self.store.person(realm, handle)[:MAX_CHARS]
 
     def relevant(self, *, realm: str, account: str = "", text: str = "") -> dict[str, str]:
-        """Whoever is asking, plus anyone in this realm the conversation names."""
-        found: dict[str, str] = {}
-        if account and (notes := self.read(realm, account)):
-            found[account] = notes
-        lowered = text.lower()
-        for row_realm, row_account, _updated in self.store.people(realm):
-            if row_account in found or len(found) >= MAX_PEOPLE:
-                continue
-            if re.search(rf"\b{re.escape(row_account.lower())}\b", lowered):
-                found[row_account] = self.read(row_realm, row_account)
-        return found
+        """Whoever is asking, plus anyone the conversation names by any handle
+        they are known by, on any network."""
+        found: dict[int, str] = {}
+        order: list[int] = []
+
+        if account and (pid := self.store.person_id(realm, account)):
+            found[pid] = self.store.person_notes(pid)[:MAX_CHARS]
+            order.append(pid)
+
+        for word in dict.fromkeys(_WORD.findall(text)):  # first mention wins
+            for pid in self.store.whois(word):
+                if pid not in found and len(order) < MAX_PEOPLE:
+                    found[pid] = self.store.person_notes(pid)[:MAX_CHARS]
+                    order.append(pid)
+
+        return {self.label(pid): found[pid] for pid in order if found[pid]}
+
+    def label(self, person_id: int) -> str:
+        """How to head their entry: every handle, so the model can connect them."""
+        handles = self.store.aliases(person_id)
+        return (
+            " = ".join(f"{handle}" if realm.startswith("irc") else f"{handle} ({realm})" for realm, handle in handles)
+            or f"person {person_id}"
+        )
 
     def block(self, *, realm: str, account: str = "", text: str = "") -> str:
         found = self.relevant(realm=realm, account=account, text=text)
         if not found:
             return ""
-        entries = "\n\n".join(f"## {name}\n{body}" for name, body in found.items() if body)
-        return f"<known_people>\n{entries}\n</known_people>" if entries else ""
+        entries = "\n\n".join(f"## {name}\n{body}" for name, body in found.items())
+        return f"<known_people>\n{entries}\n</known_people>"

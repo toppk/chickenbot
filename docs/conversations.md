@@ -112,8 +112,8 @@ Two kinds of thing are worth keeping about a person:
 - **Temporary activity.** What they are working on this week, what they asked
   about yesterday, what they are stuck on. Decays.
 
-Both in `data/others/<id>.md`, one file per participant, keyed by the
-authenticated account rather than the nick — nicks are transient and the
+Both against a `person` record, reached through any `alias` they are known by,
+rather than the nick — nicks are transient and the
 account is the identity everything else already keys on. The file is markdown
 so it can be read and corrected by hand.
 

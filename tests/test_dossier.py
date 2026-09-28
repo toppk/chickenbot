@@ -6,7 +6,8 @@ from chickenbot.dossier import MAX_CHARS, MAX_PEOPLE, Dossiers
 
 @pytest.fixture
 def people(store) -> Dossiers:
-    store.set_person("irc.chonkbase.net", "chrisk", "GitHub: iconidentify")
+    pid = store.set_person("irc.chonkbase.net", "chrisk", "GitHub: iconidentify")
+    store.add_alias(pid, "github", "iconidentify")
     store.set_person("irc.chonkbase.net", "toppk", "Runs chickenbot")
     store.set_person("telegram", "chrisk", "a different chrisk entirely")
     return Dossiers(store)
@@ -22,12 +23,31 @@ def test_the_asker_is_always_included(people):
 
 def test_someone_named_in_the_conversation_is_included(people):
     found = people.relevant(realm="irc.chonkbase.net", account="toppk", text="what is chrisk working on")
-    assert set(found) == {"toppk", "chrisk"}
-    assert "iconidentify" in found["chrisk"]
+    assert any("Runs chickenbot" in body for body in found.values())  # the asker
+    assert any("iconidentify" in body for body in found.values())  # the person named
+
+
+def test_any_handle_finds_the_same_person(people):
+    """Asking about iconidentify must find the notes filed under chrisk."""
+    by_github = people.relevant(realm="irc.chonkbase.net", text="who is iconidentify")
+    assert list(by_github.values()) == ["GitHub: iconidentify"]
+    by_irc = people.relevant(realm="irc.chonkbase.net", text="who is chrisk")
+    assert "GitHub: iconidentify" in by_irc.values()
+
+
+def test_the_entry_is_headed_with_every_handle(people):
+    block = people.block(realm="irc.chonkbase.net", text="tell me about iconidentify")
+    assert "iconidentify (github)" in block and "chrisk" in block
+
+
+def test_linking_a_handle_someone_else_holds_is_refused(store, people):
+    other = store.set_person("github", "somebodyelse", "notes")
+    assert store.add_alias(other, "github", "iconidentify") is False
 
 
 def test_the_same_name_on_another_network_is_another_person(people):
-    """`chrisk` on chonkbase and `chrisk` on Telegram are not the same human."""
+    """`chrisk` on chonkbase and `chrisk` on Telegram are not the same human,
+    unless somebody says they are by linking them."""
     irc = people.read("irc.chonkbase.net", "chrisk")
     tg = people.read("telegram", "chrisk")
     assert "iconidentify" in irc
@@ -35,10 +55,11 @@ def test_the_same_name_on_another_network_is_another_person(people):
     assert irc != tg
 
 
-def test_a_realm_only_sees_its_own_people(people):
-    found = people.relevant(realm="telegram", text="ask chrisk and toppk")
-    assert set(found) == {"chrisk"}  # toppk has no telegram dossier
-    assert "different chrisk" in found["chrisk"]
+def test_a_bare_handle_can_match_more_than_one_person(people):
+    """Two unlinked chrisks: the model gets both and can say so."""
+    found = people.relevant(realm="telegram", text="ask chrisk")
+    assert len(found) == 2
+    assert any("different chrisk" in b for b in found.values())
 
 
 def test_a_name_inside_another_word_does_not_count(people):
@@ -52,6 +73,11 @@ def test_an_unknown_asker_brings_nothing(people):
 def test_a_huge_dossier_is_truncated(store):
     store.set_person("irc", "big", "x" * (MAX_CHARS * 3))
     assert len(Dossiers(store).read("irc", "big")) == MAX_CHARS
+
+
+def test_facts_are_structured_for_the_decision_engine(store):
+    pid = store.set_person("irc", "toppk", "prose for the model", facts={"github": "toppk", "tz": "UTC-4"})
+    assert store.person_facts(pid) == {"github": "toppk", "tz": "UTC-4"}
 
 
 def test_only_so_many_people_at_once(store):
@@ -120,6 +146,24 @@ def test_who_round_trips_a_person(tmp_path):
     assert "irc.chonkbase.net/chrisk" in cli(tmp_path, "who")[1]
 
 
+def test_who_links_handles_and_finds_either(tmp_path):
+    cli(tmp_path, "who", "irc:host", "chrisk", "runs the server")
+    assert cli(tmp_path, "who", "irc:host", "chrisk", "--alias", "github/iconidentify")[0] == 0
+    for handle in ("chrisk", "iconidentify"):
+        out = cli(tmp_path, "who", handle)[1]
+        assert "runs the server" in out
+        assert "github/iconidentify" in out and "irc:host/chrisk" in out
+
+
+def test_linking_to_an_unknown_person_is_refused(tmp_path):
+    assert cli(tmp_path, "who", "irc:host", "nobody", "--alias", "github/x")[0] == 1
+
+
+def test_a_malformed_alias_is_refused(tmp_path):
+    cli(tmp_path, "who", "irc:host", "chrisk", "notes")
+    assert cli(tmp_path, "who", "irc:host", "chrisk", "--alias", "noslash")[0] == 1
+
+
 def test_who_can_forget(tmp_path):
     cli(tmp_path, "who", "irc", "gone", "notes")
     assert "forgotten" in cli(tmp_path, "who", "irc", "gone", "--forget")[1]
@@ -164,11 +208,11 @@ def test_writing_the_same_text_is_not_a_revision(store):
 
 
 def test_a_persons_history_is_their_own(store):
-    store.set_person("irc", "a", "one")
-    store.set_person("irc", "b", "other")
+    first = store.set_person("irc", "a", "one")
+    second = store.set_person("irc", "b", "other")
     store.set_person("irc", "a", "two")
-    assert len(store.revisions("person", "irc/a")) == 2
-    assert len(store.revisions("person", "irc/b")) == 1
+    assert len(store.revisions("person", str(first))) == 2
+    assert len(store.revisions("person", str(second))) == 1
 
 
 def test_the_author_is_recorded(store):
@@ -222,3 +266,28 @@ def test_a_person_can_be_rolled_back(tmp_path):
     first = int(out.strip().splitlines()[-1].split()[0])
     cli(tmp_path, "who", "irc", "chrisk", "--restore", str(first))
     assert "gh: wrong" in cli(tmp_path, "who", "irc", "chrisk")[1]
+
+
+def test_the_old_two_column_table_migrates_to_aliases(tmp_path):
+    """Rows written before one person could have several handles."""
+    import sqlite3
+
+    path = tmp_path / "old.db"
+    old = sqlite3.connect(path)
+    old.execute(
+        "CREATE TABLE person (realm TEXT NOT NULL, account TEXT NOT NULL, notes TEXT NOT NULL DEFAULT '',"
+        " updated_at INTEGER NOT NULL, PRIMARY KEY (realm, account))"
+    )
+    old.execute("INSERT INTO person VALUES ('irc:host', 'chrisk', 'the notes', 1)")
+    old.commit()
+    old.close()
+
+    from chickenbot.store import Store
+
+    st = Store(path)
+    try:
+        assert st.person("irc:host", "chrisk") == "the notes"
+        pid = st.person_id("irc:host", "chrisk")
+        assert st.aliases(pid) == [("irc:host", "chrisk")]
+    finally:
+        st.close()

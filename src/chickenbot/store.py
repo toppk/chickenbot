@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import sqlite3
 import time
 from collections.abc import Callable, Iterable
@@ -47,15 +48,26 @@ CREATE TABLE IF NOT EXISTS soul (
     updated_at INTEGER NOT NULL
 );
 
--- What we know about a person, keyed by network: `chrisk` on chonkbase and
--- `chrisk` on Telegram are different people.
+-- A person, and the handles they go by. One human, many identities: chrisk on
+-- chonkbase is iconidentify on GitHub, and a question about either should find
+-- the same notes. `facts` is json so the decision engine can use it without
+-- reading prose.
 CREATE TABLE IF NOT EXISTS person (
-    realm      TEXT NOT NULL,
-    account    TEXT NOT NULL,
+    id         INTEGER PRIMARY KEY,
     notes      TEXT NOT NULL DEFAULT '',
-    updated_at INTEGER NOT NULL,
-    PRIMARY KEY (realm, account)
+    facts      TEXT NOT NULL DEFAULT '{}',
+    updated_at INTEGER NOT NULL
 );
+
+-- realm is a network (irc:irc.chonkbase.net, telegram) or an external service
+-- (github). Same handle in two realms is two aliases, possibly two people.
+CREATE TABLE IF NOT EXISTS alias (
+    realm     TEXT NOT NULL,
+    handle    TEXT NOT NULL,
+    person_id INTEGER NOT NULL REFERENCES person(id) ON DELETE CASCADE,
+    PRIMARY KEY (realm, handle)
+);
+CREATE INDEX IF NOT EXISTS alias_handle ON alias (handle COLLATE NOCASE);
 
 -- Every change to a soul or a dossier, append-only. These are mutable state
 -- that someone will want to undo, and without this the previous wording is
@@ -194,6 +206,22 @@ class Store:
         if watch_cols and "transport" in watch_cols:
             self._db.execute("ALTER TABLE watch RENAME COLUMN transport TO realm")
             watch_cols = {r["name"] for r in self._db.execute("PRAGMA table_info(watch)")}
+        person_cols = {r["name"] for r in self._db.execute("PRAGMA table_info(person)")}
+        if person_cols and "id" not in person_cols:
+            # person(realm, account, notes) becomes person(id, notes) + alias.
+            old = self._db.execute("SELECT realm, account, notes, updated_at FROM person").fetchall()
+            self._db.execute("DROP TABLE person")
+            self._db.executescript(SCHEMA)
+            for row in old:
+                cur = self._db.execute(
+                    "INSERT INTO person (notes, facts, updated_at) VALUES (?, '{}', ?)",
+                    (row["notes"], row["updated_at"]),
+                )
+                self._db.execute(
+                    "INSERT INTO alias (realm, handle, person_id) VALUES (?, ?, ?)",
+                    (row["realm"], row["account"], int(cur.lastrowid or 0)),
+                )
+
         job_cols = {r["name"] for r in self._db.execute("PRAGMA table_info(job)")}
         if job_cols and "transport" in job_cols:
             self._db.execute("ALTER TABLE job RENAME COLUMN transport TO realm")
@@ -416,21 +444,73 @@ class Store:
         )
         self._keep_revision("soul", "", text, author)
 
-    def person(self, realm: str, account: str) -> str:
+    def person_id(self, realm: str, handle: str) -> int | None:
         row = self._db.execute(
-            "SELECT notes FROM person WHERE realm = ? AND account = ? COLLATE NOCASE", (realm, account)
+            "SELECT person_id FROM alias WHERE realm = ? AND handle = ? COLLATE NOCASE", (realm, handle)
         ).fetchone()
+        return int(row["person_id"]) if row else None
+
+    def person(self, realm: str, handle: str) -> str:
+        pid = self.person_id(realm, handle)
+        return self.person_notes(pid) if pid else ""
+
+    def person_notes(self, person_id: int) -> str:
+        row = self._db.execute("SELECT notes FROM person WHERE id = ?", (person_id,)).fetchone()
         return row["notes"] if row else ""
 
-    def set_person(self, realm: str, account: str, notes: str, author: str = "cli") -> None:
+    def person_facts(self, person_id: int) -> dict:
+        row = self._db.execute("SELECT facts FROM person WHERE id = ?", (person_id,)).fetchone()
+        try:
+            return json.loads(row["facts"]) if row else {}
+        except ValueError:
+            return {}
+
+    def aliases(self, person_id: int) -> list[tuple[str, str]]:
+        rows = self._db.execute(
+            "SELECT realm, handle FROM alias WHERE person_id = ? ORDER BY realm, handle", (person_id,)
+        ).fetchall()
+        return [(r["realm"], r["handle"]) for r in rows]
+
+    def whois(self, handle: str) -> list[int]:
+        """Everyone answering to this handle, in any realm. This is what makes
+        "who is iconidentify" find the notes filed under chrisk."""
+        rows = self._db.execute(
+            "SELECT DISTINCT person_id FROM alias WHERE handle = ? COLLATE NOCASE", (handle,)
+        ).fetchall()
+        return [int(r["person_id"]) for r in rows]
+
+    def set_person(self, realm: str, handle: str, notes: str, author: str = "cli", facts: dict | None = None) -> int:
         notes = notes.strip()
-        self._db.execute(
-            "INSERT INTO person (realm, account, notes, updated_at) VALUES (?, ?, ?, ?)"
-            " ON CONFLICT(realm, account) DO UPDATE SET notes = excluded.notes,"
-            " updated_at = excluded.updated_at",
-            (realm, account, notes, int(time.time())),
-        )
-        self._keep_revision("person", f"{realm}/{account}", notes, author)
+        pid = self.person_id(realm, handle)
+        if pid is None:
+            cur = self._db.execute(
+                "INSERT INTO person (notes, facts, updated_at) VALUES (?, ?, ?)",
+                (notes, json.dumps(facts or {}), int(time.time())),
+            )
+            pid = int(cur.lastrowid or 0)
+            self._db.execute("INSERT INTO alias (realm, handle, person_id) VALUES (?, ?, ?)", (realm, handle, pid))
+        else:
+            if facts is None:
+                self._db.execute(
+                    "UPDATE person SET notes = ?, updated_at = ? WHERE id = ?", (notes, int(time.time()), pid)
+                )
+            else:
+                self._db.execute(
+                    "UPDATE person SET notes = ?, facts = ?, updated_at = ? WHERE id = ?",
+                    (notes, json.dumps(facts), int(time.time()), pid),
+                )
+        self._keep_revision("person", str(pid), notes, author)
+        return pid
+
+    def add_alias(self, person_id: int, realm: str, handle: str) -> bool:
+        try:
+            self._db.execute(
+                "INSERT INTO alias (realm, handle, person_id) VALUES (?, ?, ?)", (realm, handle, person_id)
+            )
+        except sqlite3.IntegrityError:
+            return False
+        self._db.commit()
+        return True
 
     # -- history -----------------------------------------------------------
 
@@ -467,19 +547,26 @@ class Store:
         row = self._db.execute("SELECT kind, key, text FROM revision WHERE id = ?", (revision_id,)).fetchone()
         return (row["kind"], row["key"], row["text"]) if row else None
 
-    def forget_person(self, realm: str, account: str) -> bool:
-        cur = self._db.execute("DELETE FROM person WHERE realm = ? AND account = ? COLLATE NOCASE", (realm, account))
+    def forget_person(self, realm: str, handle: str) -> bool:
+        pid = self.person_id(realm, handle)
+        if pid is None:
+            return False
+        self._db.execute("DELETE FROM alias WHERE person_id = ?", (pid,))
+        self._db.execute("DELETE FROM person WHERE id = ?", (pid,))
         self._db.commit()
-        return cur.rowcount > 0
+        return True
 
-    def people(self, realm: str = "") -> list[tuple[str, str, int]]:
-        sql = "SELECT realm, account, updated_at FROM person"
-        args: tuple = ()
+    def people(self, realm: str = "") -> list[tuple[int, list[tuple[str, str]], int]]:
+        """(person_id, aliases, updated_at). With a realm, only those known there."""
         if realm:
-            sql += " WHERE realm = ?"
-            args = (realm,)
-        rows = self._db.execute(f"{sql} ORDER BY realm, account", args).fetchall()
-        return [(r["realm"], r["account"], r["updated_at"]) for r in rows]
+            rows = self._db.execute(
+                "SELECT DISTINCT p.id, p.updated_at FROM person p JOIN alias a ON a.person_id = p.id"
+                " WHERE a.realm = ? ORDER BY p.id",
+                (realm,),
+            ).fetchall()
+        else:
+            rows = self._db.execute("SELECT id, updated_at FROM person ORDER BY id").fetchall()
+        return [(int(r["id"]), self.aliases(int(r["id"])), r["updated_at"]) for r in rows]
 
     # -- scheduled jobs ----------------------------------------------------
 
