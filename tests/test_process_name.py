@@ -98,3 +98,27 @@ def test_without_it_the_bare_defaults_apply(monkeypatch):
     args = build_parser().parse_args([])
     assert args.socket == "" and args.db == "github-tool.db"
     assert main(["--check-config"]) == 1  # no chickenbot.toml in the working directory
+
+
+# -- how far this build is from a release -------------------------------
+
+
+def test_a_release_build_has_no_suffix(monkeypatch):
+    import chickenbot as pkg
+
+    monkeypatch.setattr(pkg, "revision", lambda: "")
+    assert "+" not in pkg.version()
+
+
+def test_a_build_past_a_release_says_how_far(monkeypatch):
+    import chickenbot as pkg
+
+    monkeypatch.setattr(pkg, "revision", lambda: "3.g54f0a4d")
+    assert pkg.version().endswith("+3.g54f0a4d")
+
+
+def test_an_undeployed_checkout_says_dev(tmp_path, monkeypatch):
+    import chickenbot as pkg
+
+    monkeypatch.setattr(pkg, "_STAMP", tmp_path / "missing.txt")
+    assert pkg.revision() == "dev"

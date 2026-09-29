@@ -705,11 +705,9 @@ def from_instance(*parts: str) -> str:
 
 def versions() -> str:
     """What is actually installed, which is not always what the checkout says."""
-    from . import revision
+    from . import version
 
-    out = [f"chickenbot {_installed('chickenbot')}+{revision()}"]
-    out.append(f"chickenbot-github-tool {_installed('chickenbot-github-tool')}")
-    return ", ".join(out)
+    return f"chickenbot {version()}, chickenbot-github-tool {_installed('chickenbot-github-tool')}"
 
 
 def _installed(dist: str) -> str:
