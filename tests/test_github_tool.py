@@ -136,12 +136,12 @@ def test_omitting_the_user_covers_everyone(gh):
     assert gh.github_activity({"range": "day", "summarize": True}).startswith("everyone: 2 commit")
 
 
-def test_a_quiet_window_says_so_rather_than_returning_nothing(gh):
+async def test_a_quiet_window_says_so_rather_than_returning_nothing(gh):
     assert "no activity" in gh.github_activity({"user": "toppk", "range": "hour"})
 
 
-def test_an_unknown_tool_name_is_an_error_string(gh):
-    assert gh.call("github_nonsense", {}) == "error: no tool github_nonsense"
+async def test_an_unknown_tool_name_is_an_error_string(gh):
+    assert await gh.call("github_nonsense", {}) == "error: no tool github_nonsense"
 
 
 def test_repos_reports_stars_and_recency(gh):
@@ -607,16 +607,16 @@ async def test_forgetting_closed_items_waits_for_a_full_pass(gh, monkeypatch):
 # -- answering from the mirror --------------------------------------------
 
 
-def test_the_answer_says_how_old_it_is(gh):
+async def test_the_answer_says_how_old_it_is(gh):
     seed(gh, ago_s=60, kind="commit")
     gh.store.set_cursor("user:toppk", "", int(time.time()) - 7200)
     gh.users = ["toppk"]
-    assert "[as of 2h ago]" in gh.call("github_activity", {"user": "toppk", "summarize": True})
+    assert "[as of 2h ago]" in await gh.call("github_activity", {"user": "toppk", "summarize": True})
 
 
-def test_a_never_fetched_mirror_says_so(gh):
+async def test_a_never_fetched_mirror_says_so(gh):
     gh.users = ["toppk"]
-    assert "nothing fetched yet" in gh.call("github_repos", {})
+    assert "nothing fetched yet" in await gh.call("github_repos", {})
 
 
 async def test_a_question_refreshes_behind_itself_not_in_front(gh, monkeypatch):
@@ -641,7 +641,7 @@ async def test_a_question_refreshes_behind_itself_not_in_front(gh, monkeypatch):
     )()
     monkeypatch.setattr("external.github.__main__.SEARCH_PACE", 0)
 
-    answer = gh.call("github_activity", {"user": "toppk", "summarize": True})
+    answer = await gh.call("github_activity", {"user": "toppk", "summarize": True})
     assert polled == []  # answered without waiting
     assert "nothing fetched yet" in answer
 
@@ -660,7 +660,7 @@ async def test_a_fresh_mirror_triggers_no_refresh(gh, monkeypatch):
     gh.interval = 900
     gh.store.set_cursor("user:toppk", "", int(time.time()))
     gh.api = type("Api", (), {"repos": staticmethod(boom)})()
-    gh.call("github_activity", {"user": "toppk"})
+    await gh.call("github_activity", {"user": "toppk"})
     assert gh._refreshing is None and called == []
 
 
@@ -674,15 +674,86 @@ def test_polling_on_a_timer_is_off_unless_asked():
     assert "if args.poll:" in source  # the loop is opt-in
 
 
-def test_a_handle_nobody_watches_says_that_instead(gh):
+async def test_a_handle_nobody_watches_says_that_instead(gh):
     """ "nothing fetched yet" and "not watched" are different kinds of nothing,
     and a reader told only the second concludes the first."""
-    answer = gh.call("github_activity", {"user": "stranger"})
+    answer = await gh.call("github_activity", {"user": "stranger"})
     assert "stranger is not watched here" in answer
 
 
-def test_a_watched_handle_says_it_is_watched(gh):
+async def test_a_watched_handle_says_it_is_watched(gh):
     gh.watch(["newcomer"])
-    answer = gh.call("github_activity", {"user": "newcomer"})
+    answer = await gh.call("github_activity", {"user": "newcomer"})
     assert "not watched" not in answer
     assert "nothing fetched yet" in answer
+
+
+# -- going and looking now ----------------------------------------------
+
+
+async def test_refreshing_fetches_rather_than_answering_from_the_mirror(gh, monkeypatch):
+    """The other tools answer from the mirror on purpose; this is the one that
+    waits, for "has it landed yet"."""
+    called = []
+
+    async def poll(*, force=False, only=None):
+        called.append((force, only))
+        return 3
+
+    monkeypatch.setattr(gh, "poll_once", poll)
+    gh.watch(["toppk"])
+    answer = await gh.call("github_refresh", {"user": "toppk"})
+    assert called == [(True, ["toppk"])]
+    assert "refreshed toppk: 3 new item(s)" in answer
+
+
+async def test_refreshing_everyone_when_no_handle_is_given(gh, monkeypatch):
+    async def poll(*, force=False, only=None):
+        return 0
+
+    monkeypatch.setattr(gh, "poll_once", poll)
+    gh.watch(["toppk", "chrisk"])
+    assert "nothing new" in await gh.call("github_refresh", {})
+
+
+async def test_refreshing_a_handle_nobody_watches_is_refused(gh):
+    gh.watch(["toppk"])
+    answer = await gh.call("github_refresh", {"user": "stranger"})
+    assert "not watched here" in answer
+
+
+async def test_refreshing_twice_in_a_minute_is_just_quota(gh, monkeypatch):
+    from external.github import __main__ as ghmod
+
+    polls = []
+
+    async def poll(*, force=False, only=None):
+        polls.append(only)
+        return 0
+
+    monkeypatch.setattr(gh, "poll_once", poll)
+    gh.watch(["toppk"])
+    gh.store.set_cursor("user:toppk", "", int(time.time()))
+    answer = await gh.call("github_refresh", {"user": "toppk"})
+    assert "already" in answer and polls == []
+    assert ghmod.REFRESH_GAP > 0
+
+
+async def test_a_slow_fetch_does_not_hold_the_conversation(gh, monkeypatch):
+    from external.github import __main__ as ghmod
+
+    monkeypatch.setattr(ghmod, "REFRESH_BUDGET", 0.01)
+
+    async def slow(*, force=False, only=None):
+        await asyncio.sleep(1)
+        return 0
+
+    monkeypatch.setattr(gh, "poll_once", slow)
+    gh.watch(["toppk"])
+    assert "ask again in a moment" in await gh.call("github_refresh", {"user": "toppk"})
+
+
+def test_the_refresh_tool_is_declared():
+    from external.github.__main__ import TOOLS
+
+    assert any(t["name"] == "github_refresh" for t in TOOLS)

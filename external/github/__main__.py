@@ -33,6 +33,8 @@ SUBJECTS = "github"  # the realm whose handles chickenbot should send us
 # it actually talks to. A list in two places is a list that disagrees with itself.
 USERS: list[str] = []
 SEARCH_PACE = 2.0  # seconds between searches; the endpoint dislikes bursts
+REFRESH_GAP = 60.0  # a forced refresh this soon after the last one is just quota
+REFRESH_BUDGET = 25.0  # give up waiting rather than hold the conversation
 # Nobody needs GitHub at their fingertips. Answers come from the mirror, and a
 # stale mirror is refreshed behind the question rather than in front of it, so
 # a poll costs nothing when nobody is asking.
@@ -96,6 +98,21 @@ TOOLS = [
                     "description": "true for counts per kind, false for the individual items",
                 },
             },
+            "required": [],
+        },
+    },
+    {
+        "name": "github_refresh",
+        "description": (
+            "Fetch from GitHub now rather than answering from the mirror. Use it when "
+            "somebody asks whether something has landed *yet*, or says they have just "
+            "pushed. Costs API quota and takes a few seconds, so it is not the way to "
+            "answer an ordinary question -- the other tools are already refreshed behind "
+            "your back when the mirror ages."
+        ),
+        "params": {
+            "type": "object",
+            "properties": {"user": {"type": "string", "description": "one handle; omit for everyone watched"}},
             "required": [],
         },
     },
@@ -328,7 +345,34 @@ class Tool:
             return f"as of {ago(int(time.time()) - min(stamps))} ago"
         return "watched, but nothing fetched yet; ask again in a moment"
 
-    def call(self, name: str, args: dict) -> str:
+    async def github_refresh(self, args: dict) -> str:
+        """Go and look now. The other tools answer from the mirror on purpose;
+        this is the one that waits."""
+        user = str(args.get("user") or "")
+        known = {u.casefold() for u in self.users}
+        if user and user.casefold() not in known:
+            return f"{user} is not watched here, so there is nothing to refresh"
+        who = [u for u in self.users if not user or u.casefold() == user.casefold()]
+        if not who:
+            return "nobody is watched here yet"
+        since = min((self.store.cursor(f"user:{u}")[1] or 0) for u in who)
+        if since and time.time() - since < REFRESH_GAP:
+            return f"fetched {ago(int(time.time() - since))} ago already; nothing will have changed"
+        try:
+            async with asyncio.timeout(REFRESH_BUDGET):
+                fresh = await self.poll_once(force=True, only=who)
+        except TimeoutError:
+            return "still fetching; ask again in a moment"
+        return (
+            f"refreshed {', '.join(who)}: {fresh} new item(s)" if fresh else f"refreshed {', '.join(who)}: nothing new"
+        )
+
+    async def call(self, name: str, args: dict) -> str:
+        """Every tool but one answers from the mirror without waiting. The
+        exception is `github_refresh`, which is the point of it."""
+        if name == "github_refresh":
+            user = str(args.get("user") or "")
+            return f"{await self.github_refresh(args)} [{self.age(user)}]"
         handler = {
             "github_activity": self.github_activity,
             "github_repos": self.github_repos,
@@ -405,7 +449,7 @@ async def _pump(tool: Tool, reader: asyncio.StreamReader, send) -> None:
         elif message.get("type") == "call":
             name = str(message.get("tool", "")).removeprefix("ext_")
             try:
-                content = tool.call(name, message.get("args") or {})
+                content = await tool.call(name, message.get("args") or {})
                 await send({"type": "result", "id": message.get("id"), "ok": True, "content": content})
             except Exception as exc:  # noqa: BLE001 - the bot gets the failure, not a traceback
                 log.exception("call %s failed", name)

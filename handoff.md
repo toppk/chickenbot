@@ -556,6 +556,8 @@ prints. Nothing logs or prints the key itself.
 
 ## Documentation
 
+- `docs/deploying.md` -- installing, instances, deploying, rolling back,
+  backups, and starting one over.
 - `docs/chatting.md` -- for anybody in a channel with it. No jargon, no
   configuration: attention, what it can see, what it does unprompted, what it
   will not do, and what to check when it seems wrong.
@@ -859,7 +861,14 @@ is a separate message and IRC paces sends at `send_interval`.
 
 ## External tools
 
-**Tools cache; they do not prefetch.** The github tool answers from its mirror
+**Tools cache; they do not prefetch.** `ext_github_refresh` is the one that
+goes and looks now -- for "has it landed yet" -- and it waits rather than
+answering from the mirror. It is owner-only (unlisted in `grants`), refuses a
+second fetch within a minute, and gives up after 25 seconds rather than holding
+the conversation open. Everything else answers from the mirror and refreshes
+behind the answer.
+
+ The github tool answers from its mirror
 at once and refreshes behind the answer when a slice has aged past
 `--interval` (six hours). Timer polling is opt-in via `--poll`. It was every
 fifteen minutes at first, which cost roughly 1150 API calls a day for data
