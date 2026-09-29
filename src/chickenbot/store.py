@@ -234,6 +234,7 @@ class Line:
     channel: str
     nick: str
     text: str
+    kind: str = "privmsg"
 
 
 @dataclass(frozen=True, slots=True)
@@ -407,20 +408,25 @@ class Store:
     async def recent(self, realm: str, channel: str, limit: int = 40, since: int = 0, least: int = 0) -> list[Line]:
         """The tail of the room. `since` bounds it in time, because twenty lines
         in a quiet channel can reach back a day and a conversation does not.
-        `least` keeps that from returning nothing at all when the room is cold."""
+        `least` keeps that from returning nothing at all when the room is cold.
+
+        Other bots are included, marked. Not acting on what a bot says is a
+        different thing from pretending it was never said: a room with two bots
+        in it was invisible to the one that had to describe it.
+        """
 
         def go() -> list[Line]:
             rows = self._db.execute(
-                "SELECT ts, channel, nick, text FROM chatlog"
+                "SELECT ts, channel, nick, text, kind FROM chatlog"
                 " WHERE realm = ? AND channel = ?"
-                " AND kind IN ('privmsg', 'command', 'self')"  # what was said, to and by the bot
+                " AND kind IN ('privmsg', 'command', 'self', 'bot')"
                 " ORDER BY id DESC LIMIT ?",
                 (realm, self.fold(realm, channel), limit),
             ).fetchall()
             if since:
                 fresh = [r for r in rows if r["ts"] >= since]
                 rows = fresh if len(fresh) >= least else rows[:least]
-            return [Line(r["ts"], r["channel"], r["nick"], r["text"]) for r in reversed(rows)]
+            return [Line(r["ts"], r["channel"], r["nick"], r["text"], r["kind"]) for r in reversed(rows)]
 
         return await self._run(go)
 

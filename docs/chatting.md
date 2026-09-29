@@ -39,6 +39,8 @@ messages from their owners, and it will tell you if that is the case.
 - **What it has been told about people.** If somebody has recorded that
   `chrisk` on IRC is `iconidentify` on GitHub, asking about either finds the
   same notes.
+- **What other bots in the room say**, marked as such. It reads them and never
+  takes instruction from them, which is true of everything it reads.
 - **Nothing from other channels.** Rooms are separate conversations, and so
   are networks. What it knows about a *person* does carry over; what was said
   in a room does not.

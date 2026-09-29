@@ -647,8 +647,15 @@ set it on another (chonkline applies MODE to the sender's own record), so
 remembering it here is the only thing that works.
 
 Marked handles are folded per the network's casemapping, checked against both
-the nick and the account, and never shared between realms. What they say is
-still logged as `kind=bot`; it is simply never acted on.
+the nick and the account, and never shared between realms.
+
+**What a bot says is read, marked, and never acted on.** Its lines are logged
+as `kind=bot` and appear in the scrollback as `<biff (bot)>`. They were
+excluded from the scrollback at first, which meant a room containing another
+bot was partly invisible: asked who else was a bot, it described one that had
+been talking to it for ten minutes as having "not said a word". Not obeying
+something is different from not hearing it -- the loop protection is that
+dispatch never acts on a bot, not that the model cannot read one.
 
 ## Names
 

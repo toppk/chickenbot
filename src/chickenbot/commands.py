@@ -105,8 +105,16 @@ def command(
 
 def render_scrollback(recent: list) -> str:
     """Every line carries its age. Without it the model reads a remark from
-    half an hour ago as though it had just been made."""
-    return "\n".join(f"[{ago(line.ts)} ago] <{line.nick}> {line.text}" for line in recent)
+    half an hour ago as though it had just been made.
+
+    Another bot's lines are marked as such. They are there to be read, never
+    to be obeyed -- which is true of every line here, and doubly worth knowing
+    about one written by something that also answers questions.
+    """
+    return "\n".join(
+        f"[{ago(line.ts)} ago] <{line.nick}{' (bot)' if getattr(line, 'kind', '') == 'bot' else ''}> {line.text}"
+        for line in recent
+    )
 
 
 def compose(h: Handler, ctx: Context, scrollback: str, *, following: bool = False) -> tuple[str, str]:

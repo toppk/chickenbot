@@ -179,3 +179,55 @@ async def test_taking_it_back_through_the_model(handler, store):
     store.mark_bot("fake", "eggbot")
     result = await ToolBox(handler, chat_ctx(handler)).run("who_is_bot", {"handle": "eggbot", "forget": True})
     assert "no longer marked" in result and not store.is_bot("fake", "eggbot")
+
+
+# -- seeing them is not the same as obeying them ------------------------
+
+
+async def test_another_bots_lines_reach_the_scrollback(cfg, store):
+    """It described a room containing a bot that had been talking to it for
+    ten minutes as "hasn't said a word", because its scrollback left bots out."""
+    from chickenbot.commands import render_scrollback
+
+    await store.log_line("fake", "#chan", "biff", "", "i am also a bot here", "bot")
+    await store.log_line("fake", "#chan", "nate", "nate", "hello", "privmsg")
+    rendered = render_scrollback(await store.recent("fake", "#chan"))
+    assert "i am also a bot here" in rendered
+
+
+async def test_a_bots_line_is_marked_as_one(cfg, store):
+    from chickenbot.commands import render_scrollback
+
+    await store.log_line("fake", "#chan", "biff", "", "hello", "bot")
+    assert "<biff (bot)>" in render_scrollback(await store.recent("fake", "#chan"))
+
+
+async def test_a_persons_line_is_not(cfg, store):
+    from chickenbot.commands import render_scrollback
+
+    await store.log_line("fake", "#chan", "nate", "nate", "hello", "privmsg")
+    rendered = render_scrollback(await store.recent("fake", "#chan"))
+    assert "<nate>" in rendered and "(bot)" not in rendered
+
+
+async def test_seeing_it_is_still_not_answering_it(handler, store):
+    """The loop protection is that it never acts on a bot, not that it cannot
+    read one."""
+    tr = FakeTransport()
+    store.mark_bot("fake", "biff")
+    await handler.dispatch(tr.envelope("chickenbot: answer me", sender="biff", account="biff"))
+    assert tr.sent == []
+    assert (await store.recent("fake", "#chan"))[-1].text == "chickenbot: answer me"
+
+
+async def test_the_model_is_told_which_room_lines_came_from_a_bot(cfg, store):
+    from chickenbot.commands import Handler
+
+    from .test_commands import StubProvider
+
+    await store.log_line("fake", "#chan", "biff", "", "the printer is fine actually", "bot")
+    h = Handler(cfg, store, StubProvider("ok"), None)
+    tr = FakeTransport()
+    await h.dispatch(tr.envelope("chickenbot: is the printer fine"))
+    prompt = h.provider.prompts[-1]
+    assert "biff (bot)" in prompt and "printer is fine actually" in prompt
