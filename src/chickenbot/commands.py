@@ -276,6 +276,12 @@ class Handler:
 
         return sorted(name for name in self.cfg.tools.grants if name.startswith("ext_") and name not in TOOLS)
 
+    def greets(self, realm: str, room: str) -> bool:
+        """Saying hello is unprompted, so it waits for standing like anything
+        else does. A guest in somebody else's channel greeting the regulars on
+        its first day is exactly the wrong note."""
+        return self.policies.of(realm, room).greet and self.rooms.may_act_out(realm, room)
+
     def known_bot(self, realm: str, nick: str, account: str) -> bool:
         """Told to us, for a network that does not set the bot flag itself.
         Either name will do: an account is stabler, a nick is what you can see."""
@@ -374,7 +380,7 @@ class Handler:
             note(outcome="noted")
             return
         tr = event.transport
-        if not self.policies.of(tr.realm, event.room).greet:
+        if not self.greets(tr.realm, event.room):
             note(outcome="not-here")
             return
         hello = self.welcome.on_arrival(tr.realm, event.room, event.sender)
@@ -412,11 +418,7 @@ class Handler:
             # Anything aimed at the bot is an invocation, not room chat, so it
             # stays out of search and out of the scrollback handed to the model.
             # Asked before the line is logged, or they have always just spoken.
-            hello = (
-                self.welcome.on_speech(tr.realm, env.room, env.sender)
-                if self.policies.of(tr.realm, env.room).greet
-                else ""
-            )
+            hello = self.welcome.on_speech(tr.realm, env.room, env.sender) if self.greets(tr.realm, env.room) else ""
             kind = "command" if body is not None else "privmsg"
             await self.store.log_line(tr.realm, env.room, env.sender, env.account, env.text, kind)
             # Learning the room's hours is a side effect of watching it.

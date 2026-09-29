@@ -18,6 +18,12 @@ def spoke(store, nick, when, realm="irc", room="#soup") -> None:
     store._db.commit()
 
 
+def settled_in(store, realm="fake", room="#soup") -> None:
+    """Heard enough of the room to have standing in it, and nate with it."""
+    for line in range(250):
+        spoke(store, "nate", midday(line % 3 + 1), realm=realm, room=room)
+
+
 def midday(days_ago: float = 0.0) -> float:
     now = time.localtime()
     noon = time.mktime((now.tm_year, now.tm_mon, now.tm_mday, 12, 0, 0, 0, 0, -1))
@@ -129,11 +135,21 @@ def arrival(tr, nick, kind=Kind.ARRIVAL) -> Event:
 
 
 async def test_a_regular_walking_in_is_greeted_out_loud(cfg, store):
-    spoke(store, "nate", midday(1), realm="fake")
+    settled_in(store)
     tr = FakeTransport()
     h = Handler(cfg, store, None, None)
     await h.dispatch(arrival(tr, "nate"))
     assert tr.sent and "nate" in tr.sent[0][1]
+
+
+async def test_a_guest_greets_nobody(cfg, store):
+    """Saying hello is unprompted. In a room it has only just arrived in, that
+    is the wrong note however well it knows the person."""
+    spoke(store, "nate", midday(1), realm="fake")
+    tr = FakeTransport()
+    h = Handler(cfg, store, None, None)
+    await h.dispatch(arrival(tr, "nate"))
+    assert tr.sent == []
 
 
 async def test_a_stranger_walking_in_is_met_with_silence(cfg, store):
@@ -144,7 +160,7 @@ async def test_a_stranger_walking_in_is_met_with_silence(cfg, store):
 
 
 async def test_leaving_is_never_remarked_on(cfg, store):
-    spoke(store, "nate", midday(1), realm="fake")
+    settled_in(store)
     tr = FakeTransport()
     h = Handler(cfg, store, None, None)
     await h.dispatch(arrival(tr, "nate", Kind.DEPARTURE))
