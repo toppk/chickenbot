@@ -182,6 +182,34 @@ def manage_settings(settings: Settings, args: argparse.Namespace) -> int:
         return 1
 
 
+def manage_rooms(store: Store, args: argparse.Namespace) -> int:
+    """A channel is a job, not a skill level: the partyline takes orders, a
+    room the bot was invited into does not."""
+    from .policy import PROFILES, Policies, Unknown
+
+    policies = Policies(store)
+    if not args.room:
+        rows = [r for r in store.described_rooms(any_policy=True) if not args.realm or r[0] == args.realm]
+        for realm, room, _updated in rows:
+            print(f"{realm}/{room}\t{policies.describe(realm, room)}")
+        if not rows:
+            print(f"(no room configured; new ones are '{PROFILES['public'].profile}')")
+        return 0
+    if not args.realm:
+        print("room needs a realm and a room", file=sys.stderr)
+        return 1
+    try:
+        if args.what and args.value:
+            policies.set_knob(args.realm, args.room, args.what, args.value)
+        elif args.what:
+            policies.set_profile(args.realm, args.room, args.what)
+    except Unknown as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    print(f"{args.realm}/{args.room}: {policies.describe(args.realm, args.room)}")
+    return 0
+
+
 def manage_bots(store: Store, args: argparse.Namespace) -> int:
     """Who else in the room is a bot. IRCv3 bot mode and the platform flags
     cover the well-behaved ones; this is for the rest."""
@@ -209,6 +237,9 @@ def manage(cfg: config.Config, args: argparse.Namespace) -> int:
     try:
         if args.what == "bot":
             return manage_bots(store, args)
+
+        if args.what == "room":
+            return manage_rooms(store, args)
 
         if args.what == "tune":
             return manage_settings(Settings(store, cfg), args)
@@ -621,6 +652,12 @@ def main(argv: list[str] | None = None) -> int:
     set_cmd.add_argument("key", nargs="?", help=f"one of: {', '.join(SETTABLE)}")
     set_cmd.add_argument("value", nargs="?", help="omit to read it back")
     set_cmd.add_argument("--unset", action="store_true", help="fall back to the config file")
+
+    room_cmd = sub.add_parser("room", help="what the bot is in a room: profile and knobs")
+    room_cmd.add_argument("realm", nargs="?", help="e.g. irc:irc.chonkbase.net; omit to list")
+    room_cmd.add_argument("room", nargs="?")
+    room_cmd.add_argument("what", nargs="?", help="a profile, or a knob to set")
+    room_cmd.add_argument("value", nargs="?", help="the knob's value")
 
     log_cmd = sub.add_parser("log", help="browse what was said")
     log_cmd.add_argument("room", nargs="?", help="transport/#channel; omit to list rooms")

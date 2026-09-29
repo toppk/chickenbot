@@ -59,6 +59,9 @@ class Barfly:
                     await self.remark(tr, room, now)
 
     def _due(self, realm: str, room: str, now: float) -> bool:
+        # Some rooms want it present and quiet, whatever it has learned.
+        if not self.h.policies.of(realm, room).barfly:
+            return False
         # A guest does not hold forth in a room it has only just walked into.
         if not self.h.rooms.may_act_out(realm, room):
             return False

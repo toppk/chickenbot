@@ -84,6 +84,7 @@ async def test_registers_joins_and_answers(toy, cfg, store):
     os.environ["TOY_SASL"] = "hunter2"
     transport = IRCTransport(cfg.irc, None)
     transport.client.send_interval = 0.0
+    store.set_room_policy(transport.realm, "#chan", "partyline", {})
     handler = Handler(cfg, store, None, None)
     handler.transports = {"irc": transport}
     transport.sink = handler.dispatch

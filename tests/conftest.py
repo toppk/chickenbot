@@ -102,5 +102,10 @@ def transport() -> FakeTransport:
 @pytest.fixture
 def store(tmp_path) -> Store:
     st = Store(tmp_path / "t.db")
+    # #chan stands in for the bot's own room throughout the suite: the
+    # partyline, where it takes orders. Rooms default to `public`, and
+    # test_policy.py covers what that means.
+    for realm, room in (("fake", "#chan"), ("signal", "#chan"), ("signal", "group1"), ("irc", "#chan")):
+        st.set_room_policy(realm, room, "partyline", {})
     yield st
     st.close()

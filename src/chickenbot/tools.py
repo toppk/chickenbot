@@ -86,9 +86,18 @@ class ToolBox:
     def _available(self, spec: Tool) -> bool:
         """Usable here, by this person. Declaring a tool the caller cannot use
         just buys a refused round trip and wastes the context it occupies."""
+        if spec.requires and self.ctx.in_channel and not self._room_moderates():
+            return False
         if spec.owner and not self.ctx.is_owner:
             return False
         return spec.requires <= self.ctx.transport.caps
+
+    def _room_moderates(self) -> bool:
+        """A room the bot participates in is not one it polices, even opped."""
+        handler = self.handler
+        if handler is None or not hasattr(handler, "policies"):
+            return True
+        return handler.policies.of(self.ctx.transport.realm, self.ctx.channel).moderation
 
     async def run(self, name: str, args: dict) -> str:
         result = await self._run(name, args)
@@ -116,6 +125,8 @@ class ToolBox:
         # The asking user's rights, not the bot's: the model cannot widen them.
         if spec.owner and not self.ctx.is_owner:
             return "error: refused, that tool is owner-only and the user asking is not an owner"
+        if spec.requires and self.ctx.in_channel and not self._room_moderates():
+            return f"error: i do not moderate {self.ctx.channel}; i am a guest here, not staff"
         if not self._available(spec):
             missing = ", ".join(sorted(spec.requires - self.ctx.transport.caps))
             return f"error: {self.ctx.transport.name} cannot do that ({missing})"

@@ -17,6 +17,7 @@ from .config import Config
 from .dossier import Dossiers
 from .events import Event, Kind
 from .observe import activity, note, note_default
+from .policy import ALL, BASIC, EITHER, NAME, NONE, PREFIX, Policies, Unknown
 from .restraint import Refused, Restraint
 from .rhythm import Rhythm
 from .rooms import MAX_CHARS as ROOM_NOTES_MAX
@@ -82,14 +83,17 @@ class Command:
     owner: bool
     usage: str
     blurb: str
+    tier: str = BASIC  # BASIC everywhere it is allowed at all; ALL only where it administers
 
 
 COMMANDS: dict[str, Command] = {}
 
 
-def command(name: str, *, owner: bool = False, usage: str = "", blurb: str = "") -> Callable[[Runner], Runner]:
+def command(
+    name: str, *, owner: bool = False, usage: str = "", blurb: str = "", tier: str = BASIC
+) -> Callable[[Runner], Runner]:
     def register(fn: Runner) -> Runner:
-        COMMANDS[name] = Command(name, fn, owner, usage or name, blurb)
+        COMMANDS[name] = Command(name, fn, owner, usage or name, blurb, tier)
         return fn
 
     return register
@@ -194,6 +198,7 @@ class Handler:
         self.rooms = Rooms(store)
         self.settings = Settings(store, cfg)
         self.restraint = Restraint(store)
+        self.policies = Policies(store)
         self._writes: set[asyncio.Task] = set()
         self.transports: dict[str, Transport] = {}
         self._asks: dict[str, deque[float]] = defaultdict(deque)
@@ -298,6 +303,15 @@ class Handler:
     async def _invoke(self, cmd: Command, ctx: Context) -> None:
         """Gate, then run. Shared by typed commands and scheduled jobs."""
         note(command=cmd.name, owner=ctx.is_owner)
+        policy = self.policies.of(ctx.transport.realm, ctx.channel) if ctx.in_channel else None
+        if policy is not None and not policy.allows(cmd.tier):
+            note(outcome="not-here")
+            # An owner is told that the command exists elsewhere. Nobody is told
+            # anything in a room set to take no commands at all: silence is the
+            # whole point of that setting.
+            if ctx.is_owner and policy.commands != NONE:
+                ctx.say(f"{ctx.nick}: not in this room; ask me where i take orders")
+            return
         if cmd.owner and not ctx.is_owner:
             note(outcome="denied")
             ctx.say(self._denial(ctx))
@@ -340,6 +354,9 @@ class Handler:
             note(outcome="noted")
             return
         tr = event.transport
+        if not self.policies.of(tr.realm, event.room).greet:
+            note(outcome="not-here")
+            return
         hello = self.welcome.on_arrival(tr.realm, event.room, event.sender)
         if not hello:
             note(outcome="quiet")
@@ -362,7 +379,7 @@ class Handler:
                 await self.store.log_line(tr.realm, env.room, env.sender, env.account, env.text, "bot")
             return
 
-        body = self._extract(tr, env.text, env.is_group)
+        body = self._extract(tr, env.text, env.is_group, env.room)
         name, _, args = body.partition(" ") if body else ("", "", "")
         key = f"{tr.realm}/{env.room}"
         self._rooms[key] = (tr, env.room)
@@ -370,7 +387,11 @@ class Handler:
             # Anything aimed at the bot is an invocation, not room chat, so it
             # stays out of search and out of the scrollback handed to the model.
             # Asked before the line is logged, or they have always just spoken.
-            hello = self.welcome.on_speech(tr.realm, env.room, env.sender)
+            hello = (
+                self.welcome.on_speech(tr.realm, env.room, env.sender)
+                if self.policies.of(tr.realm, env.room).greet
+                else ""
+            )
             kind = "command" if body is not None else "privmsg"
             await self.store.log_line(tr.realm, env.room, env.sender, env.account, env.text, kind)
             # Learning the room's hours is a side effect of watching it.
@@ -426,10 +447,18 @@ class Handler:
     def forget_wake_words(self, realm: str = "") -> None:
         self._wake_cache.pop(realm, None) if realm else self._wake_cache.clear()
 
-    def _extract(self, tr: Transport, text: str, in_group: bool) -> str | None:
-        """Return the command body, or None when the bot was not being spoken to."""
-        if text.startswith(self.cfg.prefix) and len(text) > len(self.cfg.prefix):
+    def _extract(self, tr: Transport, text: str, in_group: bool, room: str = "") -> str | None:
+        """Return the command body, or None when the bot was not being spoken to.
+
+        A bare prefix is the partyline's convenience. In somebody else's
+        channel it would fight whatever already owns that character, so there
+        the bot answers to its name and nothing else.
+        """
+        how = self.policies.of(tr.realm, room).address if in_group and room else EITHER
+        if how != NAME and text.startswith(self.cfg.prefix) and len(text) > len(self.cfg.prefix):
             return text[len(self.cfg.prefix) :].strip()
+        if how == PREFIX:
+            return None if in_group else text
         lowered = tr.fold(text)
         for word in self.wake_words(tr):
             folded = tr.fold(word)
@@ -611,7 +640,7 @@ async def cmd_watching(h: Handler, ctx: Context) -> None:
 # -- owner commands ------------------------------------------------------
 
 
-@command("watch", owner=True, usage="watch <owner/repo> [feeds]", blurb="watch a repo in this channel")
+@command("watch", owner=True, tier=ALL, usage="watch <owner/repo> [feeds]", blurb="watch a repo in this channel")
 async def cmd_watch(h: Handler, ctx: Context) -> None:
     parts = ctx.args.split()
     slug = parse_slug(parts[0]) if parts else None
@@ -630,7 +659,7 @@ async def cmd_watch(h: Handler, ctx: Context) -> None:
         ctx.say(f"{owner}/{repo} is already watched here")
 
 
-@command("unwatch", owner=True, usage="unwatch <owner/repo>", blurb="stop watching a repo")
+@command("unwatch", owner=True, tier=ALL, usage="unwatch <owner/repo>", blurb="stop watching a repo")
 async def cmd_unwatch(h: Handler, ctx: Context) -> None:
     slug = parse_slug(ctx.args)
     if slug is None:
@@ -645,27 +674,27 @@ def _who(ctx: Context) -> str:
     return ctx.args.split(" ")[0] if ctx.args else ctx.nick
 
 
-@command("op", owner=True, usage="op [nick]", blurb="give ops")
+@command("op", owner=True, tier=ALL, usage="op [nick]", blurb="give ops")
 async def cmd_op(h: Handler, ctx: Context) -> None:
     await moderate(ctx, OP, _who(ctx))
 
 
-@command("deop", owner=True, usage="deop [nick]", blurb="take ops")
+@command("deop", owner=True, tier=ALL, usage="deop [nick]", blurb="take ops")
 async def cmd_deop(h: Handler, ctx: Context) -> None:
     await moderate(ctx, DEOP, _who(ctx))
 
 
-@command("voice", owner=True, usage="voice [nick]", blurb="give voice")
+@command("voice", owner=True, tier=ALL, usage="voice [nick]", blurb="give voice")
 async def cmd_voice(h: Handler, ctx: Context) -> None:
     await moderate(ctx, VOICE, _who(ctx))
 
 
-@command("devoice", owner=True, usage="devoice [nick]", blurb="take voice")
+@command("devoice", owner=True, tier=ALL, usage="devoice [nick]", blurb="take voice")
 async def cmd_devoice(h: Handler, ctx: Context) -> None:
     await moderate(ctx, DEVOICE, _who(ctx))
 
 
-@command("kick", owner=True, usage="kick <nick> [reason]", blurb="kick someone")
+@command("kick", owner=True, tier=ALL, usage="kick <nick> [reason]", blurb="kick someone")
 async def cmd_kick(h: Handler, ctx: Context) -> None:
     who, _, reason = ctx.args.partition(" ")
     if not who:
@@ -674,7 +703,7 @@ async def cmd_kick(h: Handler, ctx: Context) -> None:
     await moderate(ctx, KICK, who, reason.strip() or f"requested by {ctx.nick}")
 
 
-@command("ban", owner=True, usage="ban <nick>", blurb="ban someone")
+@command("ban", owner=True, tier=ALL, usage="ban <nick>", blurb="ban someone")
 async def cmd_ban(h: Handler, ctx: Context) -> None:
     if not ctx.args:
         ctx.say(f"usage: {h.cfg.prefix}ban <nick>")
@@ -682,7 +711,7 @@ async def cmd_ban(h: Handler, ctx: Context) -> None:
     await moderate(ctx, BAN, ctx.args.split(" ")[0])
 
 
-@command("unban", owner=True, usage="unban <mask>", blurb="lift a ban")
+@command("unban", owner=True, tier=ALL, usage="unban <mask>", blurb="lift a ban")
 async def cmd_unban(h: Handler, ctx: Context) -> None:
     if not ctx.args:
         ctx.say(f"usage: {h.cfg.prefix}unban <mask>")
@@ -690,7 +719,7 @@ async def cmd_unban(h: Handler, ctx: Context) -> None:
     await moderate(ctx, UNBAN, ctx.args.split(" ")[0])
 
 
-@command("topic", owner=True, usage="topic [text]", blurb="show or set the topic")
+@command("topic", owner=True, tier=ALL, usage="topic [text]", blurb="show or set the topic")
 async def cmd_topic(h: Handler, ctx: Context) -> None:
     if not ctx.args:
         # Bare `.topic` used to set an empty one, which is a rotten way to
@@ -726,7 +755,7 @@ async def cmd_vibe(h: Handler, ctx: Context) -> None:
     ctx.say(f"noted, that is what {ctx.channel} is like")
 
 
-@command("tune", owner=True, usage="tune [key] [value]", blurb="change behaviour, no restart")
+@command("tune", owner=True, tier=ALL, usage="tune [key] [value]", blurb="change behaviour, no restart")
 async def cmd_tune(h: Handler, ctx: Context) -> None:
     """Not `set`: an addressed line starting with a common verb is somebody
     talking, and "chickenbot: set the topic" must not become a command."""
@@ -748,13 +777,36 @@ async def cmd_tune(h: Handler, ctx: Context) -> None:
         ctx.say(f"{ctx.nick}: bad value ({exc})")
 
 
-@command("say", owner=True, usage="say <text>", blurb="speak")
+@command("room", owner=True, tier=ALL, usage="room [profile|knob] [value]", blurb="what the bot is in this room")
+async def cmd_room(h: Handler, ctx: Context) -> None:
+    if not ctx.in_channel:
+        ctx.say("a direct message is not a room")
+        return
+    realm = ctx.transport.realm
+    what, _, value = ctx.args.partition(" ")
+    if not what:
+        ctx.say(f"{ctx.channel}: {h.policies.describe(realm, ctx.channel)}")
+        return
+    try:
+        if not value.strip():
+            policy = h.policies.set_profile(realm, ctx.channel, what.strip())
+        else:
+            policy = h.policies.set_knob(realm, ctx.channel, what.strip(), value)
+    except Unknown as exc:
+        ctx.say(f"{ctx.nick}: {exc}")
+        return
+    ctx.say(f"{ctx.channel} is now {h.policies.describe(realm, ctx.channel)}")
+    if policy.commands == NONE:
+        ctx.say("(i will stop taking commands here; change it from another room or the command line)")
+
+
+@command("say", owner=True, tier=ALL, usage="say <text>", blurb="speak")
 async def cmd_say(h: Handler, ctx: Context) -> None:
     if ctx.args:
         ctx.say(ctx.args)
 
 
-@command("in", owner=True, usage="in <delay> <command>", blurb="run a command later")
+@command("in", owner=True, tier=ALL, usage="in <delay> <command>", blurb="run a command later")
 async def cmd_in(h: Handler, ctx: Context) -> None:
     delay_text, _, rest = ctx.args.partition(" ")
     delay = parse_delay(delay_text)
@@ -791,7 +843,7 @@ async def cmd_jobs(h: Handler, ctx: Context) -> None:
     ctx.say(", ".join(f"{j.id}: {j.command} (in {describe(j.due_at - now)})" for j in jobs[:5]))
 
 
-@command("unschedule", owner=True, usage="unschedule <id>", blurb="cancel a scheduled job")
+@command("unschedule", owner=True, tier=ALL, usage="unschedule <id>", blurb="cancel a scheduled job")
 async def cmd_unschedule(h: Handler, ctx: Context) -> None:
     raw = ctx.args.split(" ")[0] if ctx.args else ""
     if not raw.isdigit():
@@ -876,7 +928,7 @@ async def _dump_rhythm(h: Handler, ctx: Context) -> list[str]:
 _DUMPS = {"comms": _dump_comms, "engines": _dump_engines, "tools": _dump_tools, "rhythm": _dump_rhythm}
 
 
-@command("dump", owner=True, usage="dump <comms|engines|tools>", blurb="what the bot currently knows")
+@command("dump", owner=True, tier=ALL, usage="dump <comms|engines|tools>", blurb="what the bot currently knows")
 async def cmd_dump(h: Handler, ctx: Context) -> None:
     section = (ctx.args.split(" ")[0] if ctx.args else "").lower()
     dumper = _DUMPS.get(section)
@@ -914,7 +966,7 @@ def parse_tool_args(text: str) -> dict:
     return args
 
 
-@command("tool", usage="tool [name] [key=value ...]", blurb="run a tool directly, without the model")
+@command("tool", tier=ALL, usage="tool [name] [key=value ...]", blurb="run a tool directly, without the model")
 async def cmd_tool(h: Handler, ctx: Context) -> None:
     from .tools import ToolBox
 

@@ -202,6 +202,7 @@ async def test_an_owner_on_one_network_is_not_an_owner_on_another(cfg, store):
     signal.name = "signal"
     handler = Handler(cfg, store, None, None)
 
+    store.set_room_policy("signal", "g1", "partyline", {})
     await handler.dispatch(signal.envelope("!topic nope", account="alice", room="g1"))
     assert "owner-only" in signal.said()[0]
 

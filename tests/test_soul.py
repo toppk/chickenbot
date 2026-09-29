@@ -91,5 +91,6 @@ async def test_the_session_is_stable_per_room(cfg, transport, store, spy):
     handler = Handler(cfg, store, spy, None)
     await handler.dispatch(transport.envelope("!ask hi"))
     assert spy.session == "fake:#chan"
+    store.set_room_policy("fake", "#other", "partyline", {})
     await handler.dispatch(transport.envelope("!ask hi", room="#other"))
     assert spy.session == "fake:#other"

@@ -567,6 +567,42 @@ model asked only for wording:
   model as impressions — it is distilled from the log, so it is still other
   people's words.
 
+## A channel is a job, not a skill level
+
+`policy.py`. `#soup` is the partyline: invite-only, where the admins watch the
+bot work, so it takes orders in full and answers a bare `.cmd`. A room it has
+been invited into as a participant is a different job -- it talks, it does not
+administer, and a bare `.help` there would fight whatever already owns that
+prefix.
+
+| profile | commands | address | moderation | greet | barfly |
+|---|---|---|---|---|---|
+| `partyline` | all | either | yes | yes | yes |
+| `public` (the default) | basic | by name | no | yes | yes |
+| `quiet` | none | by name | no | no | no |
+
+Knobs override one field of a profile; setting a profile clears them, because
+a knob set against the old profile is an invisible surprise under the new.
+
+```
+.room                        what this room is
+.room partyline              set the profile (owner, partyline-only command)
+.room barfly off             one knob
+chickenbot room irc:irc.chonkbase.net '#soup' partyline
+```
+
+Commands carry a `tier`: `BASIC` is talking (help, uptime, seen, history, ask,
+watching, vibe, jobs), `ALL` is administering (moderation, watch, tune, dump,
+tool, say, in, topic, room). Outside the partyline an owner is told the command
+lives elsewhere; in a `quiet` room nobody is told anything, which is the point
+of it. Moderation tools are not even declared to the model where the room does
+not police, so it neither offers nor tries.
+
+Rooms default to `public` because being too quiet in the partyline is a
+complaint and being too forward in someone else's channel is an incident.
+Policy is read per message -- no cache, so `chickenbot room` from the command
+line takes effect without a restart.
+
 ## Restraint: what it will not do with ops
 
 `restraint.py`. The owner check says who may ask; this says what happens
