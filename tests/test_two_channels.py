@@ -144,3 +144,58 @@ async def test_the_two_rooms_keep_their_own_scrollback(both, store):
     await h.dispatch(tr.envelope("soup business", room="#soup"))
     await h.dispatch(tr.envelope("chickenbot: what is going on", room="#lobby", account="alice"))
     assert "soup business" not in h.provider.prompts[-1]
+
+
+# -- being spoken to is not an invitation to join in --------------------
+
+
+async def test_it_follows_only_whoever_spoke_to_it_in_the_lobby(both, store):
+    """The 00:38 failure: toppk said "you back?", and it started answering
+    chrisk, who had not addressed it at all."""
+    h, tr = both
+    await h.dispatch(tr.envelope("chickenbot: you back?", room="#lobby", sender="toppk", account="toppk"))
+    tr.sent.clear()
+    h.provider.prompts.clear()
+
+    await h.dispatch(tr.envelope("asahi, nope, different universe", room="#lobby", sender="chrisk", account="chrisk"))
+    await h.drain()
+    assert tr.sent == []
+    assert h.provider.prompts == []
+
+
+async def test_it_still_follows_the_person_who_did_speak_to_it(both):
+    h, tr = both
+    await h.dispatch(tr.envelope("chickenbot: you back?", room="#lobby", sender="toppk", account="toppk"))
+    tr.sent.clear()
+    await h.dispatch(tr.envelope("and another thing", room="#lobby", sender="toppk", account="toppk"))
+    assert h.attention.engaged("fake/#lobby")
+
+
+async def test_the_partyline_still_follows_the_room(both):
+    """Its own room is the one place where being drawn in means listening to
+    everybody: that is what a barfly does."""
+    h, tr = both
+    await h.dispatch(tr.envelope("chickenbot: you back?", room="#soup", sender="toppk", account="toppk"))
+    await h.dispatch(tr.envelope("unrelated chatter", room="#soup", sender="chrisk", account="chrisk"))
+    assert h.follows_everyone(tr, "#soup") is True
+
+
+async def test_standing_earns_the_same_in_a_public_room(both, store):
+    """Once it knows the place, it may join in like anyone else."""
+    h, tr = both
+    for i in range(250):
+        said(store, "#lobby", f"line {i}", ago_seconds=86400 * (i % 3 + 1))
+    assert h.follows_everyone(tr, "#lobby") is True
+
+
+async def test_a_line_it_will_not_follow_is_recorded_as_such(both, store):
+    from chickenbot.observe import set_sink
+
+    h, tr = both
+    await h.dispatch(tr.envelope("chickenbot: you back?", room="#lobby", sender="toppk", account="toppk"))
+    set_sink(store.record_activity)
+    try:
+        await h.dispatch(tr.envelope("something else", room="#lobby", sender="chrisk", account="chrisk"))
+    finally:
+        set_sink(None)
+    assert store.activity()[0]["outcome"] == "not-mine"
