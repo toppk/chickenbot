@@ -30,6 +30,12 @@ uv sync --extra claude                        # LLM provider
 uv sync --extra signal --extra discord --extra telegram   # the networks you use
 ```
 
+## Talking to it
+
+`docs/chatting.md` is the guide for anybody sharing a channel with it:
+how to get its attention, what it can see, what it does unprompted, and what
+it will not do. Nothing in it is required reading -- say its name and ask.
+
 ## Configure
 
 An instance lives in its own run directory -- config, secrets, database, tool

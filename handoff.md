@@ -502,6 +502,16 @@ Deliberately not asked for, because chickenbot uses none of them: `WHOX`,
 `chathistory`, `echo-message`, `labeled-response`, `batch`, `multiline`, `setname`,
 `MONITOR`, `standard-replies`. Keep it that way — asks should track real need.
 
+## Documentation
+
+- `docs/chatting.md` -- for anybody in a channel with it. No jargon, no
+  configuration: attention, what it can see, what it does unprompted, what it
+  will not do, and what to check when it seems wrong.
+- `docs/authority.md` -- the trust model.
+- `docs/reviewing.md` -- reading back what was said and done.
+- `docs/tool-protocol.md` -- the external tool contract.
+- `docs/conversations.md` -- design discussions kept for their reasoning.
+
 ## Authority
 
 `docs/authority.md` is the trust model in one place: what an owner is and what

@@ -192,3 +192,35 @@ def test_the_room_cli_does_not_collide_with_the_subcommand(tmp_path, store):
     toml.write_text(f'db_path = "{store.path}"\n[irc]\nenabled = true\nhost = "x"\nowners = ["a"]\n')
     assert main(["-c", str(toml), "room", "irc:host", "#soup", "partyline"]) == 0
     assert Policies(store).of("irc:host", "#soup").profile == PARTYLINE
+
+
+async def test_help_lists_only_what_works_here(cfg, store):
+    from chickenbot.commands import COMMANDS, Handler
+
+    h = Handler(cfg, store, None, None)
+    c = ctx(h, room="#public")
+    await COMMANDS["help"].run(h, c)
+    said = " ".join(text for _room, text in c.transport.sent)
+    assert "ask" in said and "uptime" in said
+    assert "kick" not in said and "tune" not in said
+
+
+async def test_help_in_the_partyline_lists_the_lot(cfg, store):
+    from chickenbot.commands import COMMANDS, Handler
+
+    store.set_room_policy("fake", "#soup", PARTYLINE, {})
+    h = Handler(cfg, store, None, None)
+    c = ctx(h, room="#soup")
+    await COMMANDS["help"].run(h, c)
+    said = " ".join(text for _room, text in c.transport.sent)
+    assert "kick" in said and "tune" in said
+
+
+async def test_help_shows_how_to_address_it_here(cfg, store):
+    """In a room that answers to its name, a list of dot-commands is a lie."""
+    from chickenbot.commands import COMMANDS, Handler
+
+    h = Handler(cfg, store, None, None)
+    c = ctx(h, room="#public")
+    await COMMANDS["help"].run(h, c)
+    assert "chickenbot: ask" in c.transport.sent[0][1]

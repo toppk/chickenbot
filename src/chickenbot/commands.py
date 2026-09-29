@@ -592,12 +592,17 @@ async def guarded(ctx: Context, action: str, target: str, reason: str = "") -> s
 
 @command("help", blurb="list commands")
 async def cmd_help(h: Handler, ctx: Context) -> None:
-    p = h.cfg.prefix
-    open_cmds = [c.name for c in COMMANDS.values() if not c.owner]
-    owner_cmds = [c.name for c in COMMANDS.values() if c.owner]
+    """Only what works here. Listing commands this room does not take is a
+    promise the next line breaks."""
+    policy = h.policies.of(ctx.transport.realm, ctx.channel) if ctx.in_channel else None
+    here = [c for c in COMMANDS.values() if policy is None or policy.allows(c.tier)]
+    p = h.cfg.prefix if policy is None or policy.address != NAME else f"{ctx.transport.me}: "
+    open_cmds = [c.name for c in here if not c.owner]
+    owner_cmds = [c.name for c in here if c.owner]
     ctx.say(f"{ctx.nick}: {p}" + f", {p}".join(open_cmds))
-    if ctx.is_owner:
+    if ctx.is_owner and owner_cmds:
         ctx.say(f"owner: {p}" + f", {p}".join(owner_cmds))
+    ctx.say("or just talk to me; i will use the tools i need")
 
 
 @command("uptime", blurb="how long i have been up")
