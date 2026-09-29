@@ -544,6 +544,16 @@ Deliberately not asked for, because chickenbot uses none of them: `WHOX`,
 `chathistory`, `echo-message`, `labeled-response`, `batch`, `multiline`, `setname`,
 `MONITOR`, `standard-replies`. Keep it that way — asks should track real need.
 
+## Spend
+
+`spend.py`, reported by `chickenbot spend`, `.spend` in the partyline, and the
+`self_spend` tool. Two sources on purpose: the `activity` table is ours, exact
+per instance and lost on a reset; OpenRouter's `GET /api/v1/key` is the
+authority and carries `usage_daily`, `usage_weekly`, `usage_monthly`, `usage`
+and the credit limit **for that key**, which is why each instance gets its own
+key. A provider that cannot report spend raises and the local tally still
+prints. Nothing logs or prints the key itself.
+
 ## Documentation
 
 - `docs/chatting.md` -- for anybody in a channel with it. No jargon, no

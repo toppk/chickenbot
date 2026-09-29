@@ -90,9 +90,25 @@ chickenbot activity --outcome restrained    # and what it refused to do
 ## Cost
 
 ```bash
-chickenbot activity --cost            # all time
+chickenbot spend                      # ours and the provider's, side by side
+chickenbot activity --cost            # ours, all time
 chickenbot activity --cost --since 24
 ```
+
+`spend` reports two things that should roughly agree:
+
+```
+mine: 24h $0.0006 over 3 call(s), 7d $0.0006 over 3 call(s), all $0.0006 over 3 call(s)
+openrouter: 24h $0.0009, 7d $0.0194, 30d $0.0259, all $0.0259, $49.97 left of $50.00
+```
+
+`mine` is the `activity` table, written as each request completes: exact for
+this instance, and gone if the database is reset. The provider's line is its
+own books for this instance's API key, which is the reason to give each
+instance a key of its own. They will not match exactly -- ours counts what the
+response reported, theirs what they billed -- and a gap is itself worth seeing.
+The same is available in the partyline as `.spend`, and to the model as
+`self_spend` so it can answer "what have you cost me".
 
 ## Taking a copy away
 

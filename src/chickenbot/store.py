@@ -487,6 +487,11 @@ class Store:
         args.append(limit)
         return [dict(r) for r in self._db.execute(sql, args).fetchall()]
 
+    def spend(self, windows: dict[str, int]) -> dict[str, tuple[int, float]]:
+        """{name: (calls, spent)} for each {name: seconds ago}; 0 means all time."""
+        now = int(time.time())
+        return {name: self.activity_cost(now - seconds if seconds else 0) for name, seconds in windows.items()}
+
     def activity_cost(self, since: int = 0) -> tuple[int, float]:
         row = self._db.execute(
             "SELECT COUNT(*) AS n, COALESCE(SUM(cost), 0) AS spent FROM activity WHERE ts >= ? AND cost > 0",

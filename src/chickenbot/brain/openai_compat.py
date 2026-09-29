@@ -52,6 +52,33 @@ class OpenAICompatProvider:
     async def aclose(self) -> None:
         await self.client.aclose()
 
+    async def spend(self) -> dict:
+        """What this API key has cost, from the provider's own books.
+
+        OpenRouter's `/key` reports day, week, month and lifetime for the key
+        itself, which is why an instance gets a key of its own. Providers that
+        do not offer it raise, and the caller falls back to our own tally.
+        """
+        if self.name != "openrouter":
+            raise ProviderError(f"{self.name} does not report spend")
+        try:
+            response = await self.client.get(f"{self.base_url}/key")
+            response.raise_for_status()
+            data = response.json().get("data") or {}
+        except httpx.HTTPError as exc:
+            raise ProviderError(f"could not read key usage: {type(exc).__name__}") from exc
+        except ValueError as exc:
+            raise ProviderError("key usage was not json") from exc
+        # The label is a masked key prefix; nothing here is the key itself.
+        return {
+            "day": data.get("usage_daily"),
+            "week": data.get("usage_weekly"),
+            "month": data.get("usage_monthly"),
+            "total": data.get("usage"),
+            "limit": data.get("limit"),
+            "remaining": data.get("limit_remaining"),
+        }
+
     async def reply(
         self, *, system: str, history: list[Turn], prompt: str, search: bool, toolbox=None, session: str = ""
     ) -> str:

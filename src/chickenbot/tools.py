@@ -368,6 +368,22 @@ async def tool_who_is_bot(h: Handler, ctx: Context, args: dict) -> str:
 
 
 @tool(
+    "self_spend",
+    owner=True,
+    description=(
+        "What you have cost: your own tally of model spend over the last day, week "
+        "and all time, and the same from the provider's books for this instance's "
+        "API key. Use it when asked what you cost, how much has been spent, or "
+        "whether there is credit left. Owner-only: it reports an account balance."
+    ),
+)
+async def tool_self_spend(h: Handler, ctx: Context, args: dict) -> str:
+    from .spend import report
+
+    return "\n".join(await report(h.store, h.provider)) or "nothing spent yet"
+
+
+@tool(
     "chan_state",
     description=(
         "Who is in this room, what modes are set, and the current ban list. "

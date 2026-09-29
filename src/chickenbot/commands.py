@@ -856,6 +856,14 @@ async def cmd_bot(h: Handler, ctx: Context) -> None:
     )
 
 
+@command("spend", owner=True, tier=ALL, blurb="what i have cost")
+async def cmd_spend(h: Handler, ctx: Context) -> None:
+    from .spend import report
+
+    for line in await report(h.store, h.provider):
+        ctx.say(line)
+
+
 @command("activity", owner=True, tier=ALL, usage="activity [kind|outcome]", blurb="what i have been doing")
 async def cmd_activity(h: Handler, ctx: Context) -> None:
     """The same record `chickenbot activity` reads, from the chair."""

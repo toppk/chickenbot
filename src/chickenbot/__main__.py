@@ -182,6 +182,29 @@ def manage_settings(settings: Settings, args: argparse.Namespace) -> int:
         return 1
 
 
+def show_spend(cfg: config.Config, store: Store) -> int:
+    """Ours from the activity table; the provider's from its own books."""
+    from .spend import report
+
+    provider = None
+    if cfg.llm.enabled:
+        try:
+            provider = brain.build(cfg.llm)
+        except Exception as exc:  # noqa: BLE001 - the local tally still works
+            print(f"({type(exc).__name__}: {exc}; local tally only)", file=sys.stderr)
+
+    async def go() -> list[str]:
+        try:
+            return await report(store, provider)
+        finally:
+            if provider is not None:
+                await provider.aclose()
+
+    for line in asyncio.run(go()):
+        print(line)
+    return 0
+
+
 def manage_rooms(cfg: config.Config, store: Store, args: argparse.Namespace) -> int:
     """Read-only: a room's job is declared in the toml, beside its channel
     list. Change it there and restart."""
@@ -221,6 +244,9 @@ def manage(cfg: config.Config, args: argparse.Namespace) -> int:
     """Read and write what the bot knows, without a running bot."""
     store = Store(cfg.db_path)
     try:
+        if args.what == "spend":
+            return show_spend(cfg, store)
+
         if args.what == "bot":
             return manage_bots(store, args)
 
@@ -680,6 +706,8 @@ def main(argv: list[str] | None = None) -> int:
 
     room_cmd = sub.add_parser("room", help="what each room is for, as the config declares it")
     room_cmd.add_argument("realm", nargs="?", help="e.g. irc:irc.chonkbase.net; omit for every one")
+
+    sub.add_parser("spend", help="what the model has cost, ours and the provider's")
 
     log_cmd = sub.add_parser("log", help="browse what was said")
     log_cmd.add_argument("room", nargs="?", help="transport/#channel; omit to list rooms")
