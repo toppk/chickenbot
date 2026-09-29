@@ -9,7 +9,7 @@ import pytest
 
 from chickenbot.commands import Handler
 
-from .conftest import FakeTransport
+from .conftest import FakeTransport, declare
 from .test_commands import StubProvider
 
 
@@ -17,7 +17,7 @@ from .test_commands import StubProvider
 def handler(cfg, store) -> Handler:
     h = Handler(cfg, store, StubProvider("42"), None)
     for realm, room in (("fake", "#one"), ("fake", "#two"), ("other", "#one")):
-        store.set_room_policy(realm, room, "partyline", {})
+        declare(h, realm, room, "partyline")
     return h
 
 

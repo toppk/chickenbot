@@ -11,6 +11,8 @@ from chickenbot.config import IRCConfig
 from chickenbot.irc import Client
 from chickenbot.transports.irc_transport import IRCTransport
 
+from .conftest import declare
+
 
 class ToyServer:
     def __init__(self) -> None:
@@ -84,8 +86,8 @@ async def test_registers_joins_and_answers(toy, cfg, store):
     os.environ["TOY_SASL"] = "hunter2"
     transport = IRCTransport(cfg.irc, None)
     transport.client.send_interval = 0.0
-    store.set_room_policy(transport.realm, "#chan", "partyline", {})
     handler = Handler(cfg, store, None, None)
+    declare(handler, transport.realm, "#chan", "partyline")
     handler.transports = {"irc": transport}
     transport.sink = handler.dispatch
     client = transport.client

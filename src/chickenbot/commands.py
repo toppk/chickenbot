@@ -17,7 +17,7 @@ from .config import Config
 from .dossier import Dossiers
 from .events import Event, Kind
 from .observe import activity, note, note_default
-from .policy import ALL, BASIC, EITHER, NAME, NONE, PREFIX, Policies, Unknown, seeds_from
+from .policy import ALL, BASIC, EITHER, NAME, NONE, PREFIX, Policies, rooms_from
 from .restraint import Refused, Restraint
 from .rhythm import Rhythm
 from .rooms import MAX_CHARS as ROOM_NOTES_MAX
@@ -209,7 +209,7 @@ class Handler:
         self.rooms = Rooms(store)
         self.settings = Settings(store, cfg)
         self.restraint = Restraint(store)
-        self.policies = Policies(store, seeds_from(cfg))
+        self.policies = Policies(store, rooms_from(cfg))
         self._writes: set[asyncio.Task] = set()
         self.transports: dict[str, Transport] = {}
         self._asks: dict[str, deque[float]] = defaultdict(deque)
@@ -874,33 +874,6 @@ async def cmd_activity(h: Handler, ctx: Context) -> None:
     for row in reversed(rows):
         extra = " ".join(f"{f}={row[f]}" for f in ("command", "outcome", "tools", "error") if row[f])
         ctx.say(f"{ago(row['ts'])} ago {row['kind']} {row['nick'] or '-'} {extra}")
-
-
-@command("room", owner=True, tier=ALL, usage="room [profile|knob] [value]", blurb="what the bot is in this room")
-async def cmd_room(h: Handler, ctx: Context) -> None:
-    if not ctx.in_channel:
-        ctx.say("a direct message is not a room")
-        return
-    realm = ctx.transport.realm
-    what, _, value = ctx.args.partition(" ")
-    if not what:
-        ctx.say(f"{ctx.channel}: {h.policies.describe(realm, ctx.channel)}")
-        return
-    if what.strip().lower() == "forget":
-        h.policies.forget(realm, ctx.channel)
-        ctx.say(f"{ctx.channel} is back to {h.policies.describe(realm, ctx.channel)}")
-        return
-    try:
-        if not value.strip():
-            policy = h.policies.set_profile(realm, ctx.channel, what.strip())
-        else:
-            policy = h.policies.set_knob(realm, ctx.channel, what.strip(), value)
-    except Unknown as exc:
-        ctx.say(f"{ctx.nick}: {exc}")
-        return
-    ctx.say(f"{ctx.channel} is now {h.policies.describe(realm, ctx.channel)}")
-    if policy.commands == NONE:
-        ctx.say("(i will stop taking commands here; change it from another room or the command line)")
 
 
 @command("say", owner=True, tier=ALL, usage="say <text>", blurb="speak")

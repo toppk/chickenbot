@@ -114,10 +114,29 @@ def transport() -> FakeTransport:
 @pytest.fixture
 def store(tmp_path) -> Store:
     st = Store(tmp_path / "t.db")
-    # #chan stands in for the bot's own room throughout the suite: the
-    # partyline, where it takes orders. Rooms default to `public`, and
-    # test_policy.py covers what that means.
-    for realm, room in (("fake", "#chan"), ("signal", "#chan"), ("signal", "group1"), ("irc", "#chan")):
-        st.set_room_policy(realm, room, "partyline", {})
     yield st
     st.close()
+
+
+# #chan stands in for the bot's own room throughout the suite: the partyline,
+# where it takes orders. Rooms are declared in the toml, so the suite declares
+# these the same way a config would. Rooms default to `public`, and
+# test_policy.py covers what that means.
+TEST_ROOMS = {
+    ("fake", "#chan"): "partyline",
+    ("signal", "#chan"): "partyline",
+    ("signal", "group1"): "partyline",
+}
+
+
+@pytest.fixture(autouse=True)
+def declared_rooms(monkeypatch):
+    from chickenbot import commands
+
+    real = commands.rooms_from
+    monkeypatch.setattr(commands, "rooms_from", lambda cfg: {**real(cfg), **TEST_ROOMS})
+
+
+def declare(handler, realm: str, room: str, value) -> None:
+    """What the config would have said about one more room."""
+    handler.policies.rooms[(realm, handler.store.fold(realm, room))] = value

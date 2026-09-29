@@ -672,23 +672,25 @@ prefix.
 | `public` (the default) | basic | by name | no | yes | yes |
 | `quiet` | none | by name | no | no | no |
 
-**The toml seeds a room's profile**, because after a reset the bot cannot be
-*told* which room is the partyline -- telling it is itself a partyline command:
+**A room's job is declared in the toml and nothing at runtime changes it.**
+There is deliberately no `.room` command: the bot does not decide what kind of
+room it is in, any more than it decides who its owners are. It is also the only
+thing that can work after a reset, since telling it would itself be a
+partyline command.
 
 ```toml
 [irc]
 channels = ["#soup", "#lobby"]
-rooms = { "#soup" = "partyline", "#lobby" = "quiet" }
+rooms = { "#soup" = "partyline", "#lobby" = { profile = "public", barfly = false } }
 ```
 
-Inline on purpose: a `[irc.rooms]` header mid-section swallows every key below
-it, which is caught at load but is a miserable way to find out. `.room` in chat
-writes to the database and wins from then on; `.room forget` (or
-`chickenbot room ... --forget`) drops back to the config. `.room` says which of
-the three it is answering from.
+A bare string is a profile; a table is a profile plus knobs, and a table with
+no `profile` is `public` with knobs. Inline on purpose: an `[irc.rooms]` header
+mid-section swallows every key below it. Bad profiles, unknown knobs and wrong
+value types are all refused at load, naming the room.
 
-Knobs override one field of a profile; setting a profile clears them, because
-a knob set against the old profile is an invisible surprise under the new.
+`chickenbot room` reads it back, with `(from the config)` or `(default)` on
+each line. Every transport section takes `rooms`.
 
 ```
 .room                        what this room is

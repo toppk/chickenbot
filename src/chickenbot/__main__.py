@@ -183,33 +183,16 @@ def manage_settings(settings: Settings, args: argparse.Namespace) -> int:
 
 
 def manage_rooms(cfg: config.Config, store: Store, args: argparse.Namespace) -> int:
-    """A channel is a job, not a skill level: the partyline takes orders, a
-    room the bot was invited into does not."""
-    from .policy import PROFILES, Policies, Unknown, seeds_from
+    """Read-only: a room's job is declared in the toml, beside its channel
+    list. Change it there and restart."""
+    from .policy import Policies, rooms_from
 
-    policies = Policies(store, seeds_from(cfg))
-    if not args.room:
-        known = {(r[0], r[1]) for r in store.described_rooms(any_policy=True)} | set(policies.seeds)
-        rows = sorted(r for r in known if not args.realm or r[0] == args.realm)
-        for realm, room in rows:
-            print(f"{realm}/{room}\t{policies.describe(realm, room)}")
-        if not rows:
-            print(f"(no room configured; new ones are '{PROFILES['public'].profile}')")
-        return 0
-    if not args.realm:
-        print("room needs a realm and a room", file=sys.stderr)
-        return 1
-    try:
-        if args.forget:
-            policies.forget(args.realm, args.room)
-        elif args.field and args.value:
-            policies.set_knob(args.realm, args.room, args.field, args.value)
-        elif args.field:
-            policies.set_profile(args.realm, args.room, args.field)
-    except Unknown as exc:
-        print(str(exc), file=sys.stderr)
-        return 1
-    print(f"{args.realm}/{args.room}: {policies.describe(args.realm, args.room)}")
+    policies = Policies(store, rooms_from(cfg))
+    rooms = sorted(r for r in policies.rooms if not args.realm or r[0] == args.realm)
+    for realm, room in rooms:
+        print(f"{realm}/{room}\t{policies.describe(realm, room)}")
+    if not rooms:
+        print("(no room declared; every room is 'public'. see `rooms` under a transport section)")
     return 0
 
 
@@ -695,13 +678,8 @@ def main(argv: list[str] | None = None) -> int:
     set_cmd.add_argument("value", nargs="?", help="omit to read it back")
     set_cmd.add_argument("--unset", action="store_true", help="fall back to the config file")
 
-    room_cmd = sub.add_parser("room", help="what the bot is in a room: profile and knobs")
-    room_cmd.add_argument("realm", nargs="?", help="e.g. irc:irc.chonkbase.net; omit to list")
-    room_cmd.add_argument("room", nargs="?")
-    # Not "what": that is the subparser's own dest, and it would be overwritten.
-    room_cmd.add_argument("field", nargs="?", help="a profile, or a knob to set")
-    room_cmd.add_argument("value", nargs="?", help="the knob's value")
-    room_cmd.add_argument("--forget", action="store_true", help="drop back to whatever the config says")
+    room_cmd = sub.add_parser("room", help="what each room is for, as the config declares it")
+    room_cmd.add_argument("realm", nargs="?", help="e.g. irc:irc.chonkbase.net; omit for every one")
 
     log_cmd = sub.add_parser("log", help="browse what was said")
     log_cmd.add_argument("room", nargs="?", help="transport/#channel; omit to list rooms")

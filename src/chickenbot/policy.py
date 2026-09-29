@@ -10,11 +10,15 @@ So rooms carry a profile, and a profile is a set of defaults that individual
 knobs override. Unconfigured rooms get `public`, which is the careful one:
 being too quiet in the partyline is a complaint, being too forward in
 somebody else's channel is an incident.
+
+This is **configuration, not state**. What a room is for is declared in the
+toml beside the channel list, and nothing at runtime changes it: the bot does
+not decide what kind of room it is in, any more than it decides who its owners
+are. Editing the config and restarting is the whole interface.
 """
 
 from __future__ import annotations
 
-import json
 import logging
 from dataclasses import asdict, dataclass
 
@@ -66,83 +70,67 @@ class Unknown(ValueError):
 
 
 class Policies:
-    def __init__(self, store: Store, seeds: dict[tuple[str, str], str] | None = None) -> None:
-        self.store = store
-        # What the toml says a room is for. Folded on the way in, so "#SOUP"
-        # in the config matches the room as the network spells it. Only
-        # consulted when nothing has been set in chat: the config is where a
-        # room starts, not what it is forever.
-        self.seeds = {(realm, store.fold(realm, room)): p for (realm, room), p in (seeds or {}).items()}
+    """What each room is for, as the config declares it."""
 
-    def seeded(self, realm: str, room: str) -> str:
-        return self.seeds.get((realm, self.store.fold(realm, room)), "")
+    def __init__(self, store: Store, rooms: dict[tuple[str, str], object] | None = None) -> None:
+        self.store = store
+        # Folded on the way in, so "#SOUP" in the config matches the room as
+        # the network spells it.
+        self.rooms = {(realm, store.fold(realm, room)): v for (realm, room), v in (rooms or {}).items()}
+
+    def declared(self, realm: str, room: str) -> object:
+        return self.rooms.get((realm, self.store.fold(realm, room)))
 
     def of(self, realm: str, room: str) -> Policy:
-        """Read every time. One indexed row per message is cheaper than a
-        cache that has to be told when `chickenbot room` changed something in
-        another process."""
-        profile, knobs = self.store.room_policy(realm, room)
-        profile = profile or self.seeded(realm, room)
-        settled = Policy(**asdict(PROFILES.get(profile or PUBLIC, PROFILES[PUBLIC])))
+        declared = self.declared(realm, room)
+        if isinstance(declared, dict):
+            profile = str(declared.get("profile", PUBLIC))
+            knobs = {k: v for k, v in declared.items() if k != "profile"}
+        else:
+            profile, knobs = str(declared or PUBLIC), {}
+        settled = Policy(**asdict(PROFILES.get(profile, PROFILES[PUBLIC])))
         for name, value in knobs.items():
             if name in KNOBS:
                 setattr(settled, name, value)
         return settled
 
-    def set_profile(self, realm: str, room: str, profile: str) -> Policy:
-        if profile not in PROFILES:
-            raise Unknown(f"profiles are {', '.join(PROFILES)}")
-        # A profile is a fresh start: knobs set against the old one would be
-        # invisible surprises under the new.
-        self.store.set_room_policy(realm, room, profile, {})
-        return self.of(realm, room)
-
-    def set_knob(self, realm: str, room: str, knob: str, raw: str) -> Policy:
-        if knob not in KNOBS:
-            raise Unknown(f"knobs are {', '.join(KNOBS)}")
-        value = _coerce(knob, raw)
-        profile, knobs = self.store.room_policy(realm, room)
-        knobs[knob] = value
-        self.store.set_room_policy(realm, room, profile or PUBLIC, knobs)
-        return self.of(realm, room)
-
-    def forget(self, realm: str, room: str) -> None:
-        self.store.set_room_policy(realm, room, "", {})
-
     def describe(self, realm: str, room: str) -> str:
         p = self.of(realm, room)
         flags = " ".join(f"{name}={'on' if getattr(p, name) else 'off'}" for name in FLAGS)
-        stored, _knobs = self.store.room_policy(realm, room)
-        source = "" if stored else (" (from the config)" if self.seeded(realm, room) else " (default)")
-        return f"{p.profile}{source}: commands={p.commands} address={p.address} {flags}"
+        source = "from the config" if self.declared(realm, room) is not None else "default"
+        return f"{p.profile} ({source}): commands={p.commands} address={p.address} {flags}"
 
 
-def seeds_from(cfg) -> dict[tuple[str, str], str]:
-    """{(realm, room): profile} for every room a transport section names."""
+def check(where: str, room: str, declared: object) -> None:
+    """Raise Unknown on anything a room table should not contain."""
+    if isinstance(declared, str):
+        if declared not in PROFILES:
+            raise Unknown(f"[{where}] {room}: {declared!r} is not one of {', '.join(PROFILES)}")
+        return
+    if not isinstance(declared, dict):
+        raise Unknown(f"[{where}] {room}: expected a profile name or a table, got {type(declared).__name__}")
+    profile = declared.get("profile", PUBLIC)
+    if profile not in PROFILES:
+        raise Unknown(f"[{where}] {room}: {profile!r} is not one of {', '.join(PROFILES)}")
+    for knob, value in declared.items():
+        if knob == "profile":
+            continue
+        if knob not in KNOBS:
+            raise Unknown(f"[{where}] {room}: {knob!r} is not one of {', '.join(KNOBS)}")
+        if knob in FLAGS and not isinstance(value, bool):
+            raise Unknown(f"[{where}] {room}: {knob} is true or false")
+        if knob in CHOICES and value not in CHOICES[knob]:
+            raise Unknown(f"[{where}] {room}: {knob} is one of {', '.join(CHOICES[knob])}")
+
+
+def rooms_from(cfg) -> dict[tuple[str, str], object]:
+    """{(realm, room): profile or table} for every room a section declares."""
     from .config import realm_for
 
-    out: dict[tuple[str, str], str] = {}
+    out: dict[tuple[str, str], object] = {}
     for name, section in cfg.enabled_transports().items():
         realm = realm_for(cfg, name)
-        for room, profile in (section.rooms or {}).items():
-            out[(realm, room)] = profile
+        for room, declared in (section.rooms or {}).items():
+            check(f"{name}.rooms", room, declared)
+            out[(realm, room)] = declared
     return out
-
-
-def _coerce(knob: str, raw: str) -> object:
-    text = raw.strip().lower()
-    if knob in FLAGS:
-        if text not in ("on", "off", "true", "false", "yes", "no"):
-            raise Unknown(f"{knob} is on or off")
-        return text in ("on", "true", "yes")
-    if text not in CHOICES[knob]:
-        raise Unknown(f"{knob} is one of {', '.join(CHOICES[knob])}")
-    return text
-
-
-def loads(raw: str) -> dict:
-    try:
-        parsed = json.loads(raw or "{}")
-    except ValueError:
-        return {}
-    return parsed if isinstance(parsed, dict) else {}

@@ -3,6 +3,8 @@ import pytest
 from chickenbot.commands import Handler
 from chickenbot.soul import MAX_CHARS, TEMPLATE, Soul, seed
 
+from .conftest import declare
+
 
 def test_an_unseeded_store_falls_back_to_the_persona(store):
     soul = Soul(store, "fallback persona")
@@ -91,6 +93,6 @@ async def test_the_session_is_stable_per_room(cfg, transport, store, spy):
     handler = Handler(cfg, store, spy, None)
     await handler.dispatch(transport.envelope("!ask hi"))
     assert spy.session == "fake:#chan"
-    store.set_room_policy("fake", "#other", "partyline", {})
+    declare(handler, "fake", "#other", "partyline")
     await handler.dispatch(transport.envelope("!ask hi", room="#other"))
     assert spy.session == "fake:#other"

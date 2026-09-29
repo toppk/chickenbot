@@ -83,8 +83,6 @@ CREATE TABLE IF NOT EXISTS room (
     name       TEXT NOT NULL,
     notes      TEXT NOT NULL DEFAULT '',
     observed   TEXT NOT NULL DEFAULT '',
-    profile    TEXT NOT NULL DEFAULT '',   -- partyline | public | quiet; '' means the default
-    knobs      TEXT NOT NULL DEFAULT '{}', -- json, overriding the profile one field at a time
     checked_at INTEGER NOT NULL DEFAULT 0,
     updated_at INTEGER NOT NULL,
     PRIMARY KEY (realm, name)
@@ -303,9 +301,10 @@ class Store:
             self._db.execute("ALTER TABLE alias ADD COLUMN added_at INTEGER NOT NULL DEFAULT 0")
 
         room_cols = {r["name"] for r in self._db.execute("PRAGMA table_info(room)")}
-        if room_cols and "profile" not in room_cols:
-            self._db.execute("ALTER TABLE room ADD COLUMN profile TEXT NOT NULL DEFAULT ''")
-            self._db.execute("ALTER TABLE room ADD COLUMN knobs TEXT NOT NULL DEFAULT '{}'")
+        for gone in ("profile", "knobs"):
+            # What a room is for is configuration now, declared in the toml.
+            if gone in room_cols:
+                self._db.execute(f"ALTER TABLE room DROP COLUMN {gone}")
         if room_cols and "observed" not in room_cols:
             self._db.execute("ALTER TABLE room ADD COLUMN observed TEXT NOT NULL DEFAULT ''")
             self._db.execute("ALTER TABLE room ADD COLUMN checked_at INTEGER NOT NULL DEFAULT 0")
@@ -760,24 +759,6 @@ class Store:
             (realm, name, text, now, now),
         )
         self._keep_revision("room-observed", f"{realm}/{name}", text, "vibe-check")
-
-    def room_policy(self, realm: str, room: str) -> tuple[str, dict]:
-        from .policy import loads
-
-        row = self._db.execute(
-            "SELECT profile, knobs FROM room WHERE realm = ? AND name = ?", (realm, self.fold(realm, room))
-        ).fetchone()
-        return (row["profile"], loads(row["knobs"])) if row else ("", {})
-
-    def set_room_policy(self, realm: str, room: str, profile: str, knobs: dict) -> None:
-        now = int(time.time())
-        self._db.execute(
-            "INSERT INTO room (realm, name, profile, knobs, updated_at) VALUES (?, ?, ?, ?, ?)"
-            " ON CONFLICT(realm, name) DO UPDATE SET profile = excluded.profile, knobs = excluded.knobs,"
-            " updated_at = excluded.updated_at",
-            (realm, self.fold(realm, room), profile, json.dumps(knobs), now),
-        )
-        self._db.commit()
 
     def room_checked(self, realm: str, room: str) -> int:
         """When the bot last read the room to see what it is like, 0 if never."""

@@ -77,8 +77,9 @@ Said in passing, in ordinary words:
   record of its own actions and will read it back rather than making something
   up.
 
-Owners can also tell it that somebody is a bot, give it a nickname, link
-somebody else's handle, and change what it does in a room. Those are in
+Owners can also tell it that somebody is a bot, give it a nickname, and link
+somebody else's handle. What a room is *for* is not something anyone can tell
+it -- that is declared in its config file. Those are in
 `docs/reviewing.md` and `docs/authority.md`.
 
 ## What it does without being asked

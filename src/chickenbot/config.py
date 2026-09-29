@@ -9,9 +9,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import irccase
-from .policy import PROFILES as _PROFILES
-
-PROFILE_NAMES = tuple(_PROFILES)
+from .policy import Unknown as PolicyUnknown
+from .policy import rooms_from
 
 
 def irc_realm(host: str) -> str:
@@ -66,10 +65,10 @@ class IRCConfig:
     username: str = ""
     realname: str = "chickenbot"
     channels: list[str] = field(default_factory=list)
-    # What a room is for: {"#soup" = "partyline"}. Seeds the profile a room
-    # starts with, because after a reset the bot cannot be *told* which room is
-    # the partyline -- telling it is itself a partyline command. Anything set
-    # later with `.room` lives in the database and wins from then on.
+    # What each room is for: {"#soup" = "partyline"}, or a table when a knob
+    # needs overriding: {"#soup" = { profile = "partyline", barfly = false }}.
+    # Configuration, not state: the bot does not decide what kind of room it
+    # is in any more than it decides who its owners are.
     rooms: dict = field(default_factory=dict)
     # Services account names, not nicks.
     owners: list[str] = field(default_factory=list)
@@ -98,10 +97,10 @@ class SignalConfig:
     service: str = "127.0.0.1:8080"
     # Group ids to listen in; empty means every group the account is in.
     groups: list[str] = field(default_factory=list)
-    # What a room is for: {"#soup" = "partyline"}. Seeds the profile a room
-    # starts with, because after a reset the bot cannot be *told* which room is
-    # the partyline -- telling it is itself a partyline command. Anything set
-    # later with `.room` lives in the database and wins from then on.
+    # What each room is for: {"#soup" = "partyline"}, or a table when a knob
+    # needs overriding: {"#soup" = { profile = "partyline", barfly = false }}.
+    # Configuration, not state: the bot does not decide what kind of room it
+    # is in any more than it decides who its owners are.
     rooms: dict = field(default_factory=dict)
 
     # Signal identities are uuids or E.164 numbers, never display names.
@@ -115,10 +114,10 @@ class DiscordConfig:
     token_env: str = "DISCORD_TOKEN"
     # Channel ids as strings; Discord snowflakes exceed 2^53 in JSON.
     channels: list[str] = field(default_factory=list)
-    # What a room is for: {"#soup" = "partyline"}. Seeds the profile a room
-    # starts with, because after a reset the bot cannot be *told* which room is
-    # the partyline -- telling it is itself a partyline command. Anything set
-    # later with `.room` lives in the database and wins from then on.
+    # What each room is for: {"#soup" = "partyline"}, or a table when a knob
+    # needs overriding: {"#soup" = { profile = "partyline", barfly = false }}.
+    # Configuration, not state: the bot does not decide what kind of room it
+    # is in any more than it decides who its owners are.
     rooms: dict = field(default_factory=dict)
     owners: list[str] = field(default_factory=list)
     ignore_senders: list[str] = field(default_factory=list)
@@ -133,10 +132,10 @@ class TelegramConfig:
     enabled: bool = False
     token_env: str = "TELEGRAM_TOKEN"
     chats: list[str] = field(default_factory=list)
-    # What a room is for: {"#soup" = "partyline"}. Seeds the profile a room
-    # starts with, because after a reset the bot cannot be *told* which room is
-    # the partyline -- telling it is itself a partyline command. Anything set
-    # later with `.room` lives in the database and wins from then on.
+    # What each room is for: {"#soup" = "partyline"}, or a table when a knob
+    # needs overriding: {"#soup" = { profile = "partyline", barfly = false }}.
+    # Configuration, not state: the bot does not decide what kind of room it
+    # is in any more than it decides who its owners are.
     rooms: dict = field(default_factory=dict)
 
     owners: list[str] = field(default_factory=list)
@@ -306,10 +305,10 @@ def load(path: str | Path) -> Config:
         cfg.irc.channels = [c if c.startswith(("#", "&")) else "#" + c for c in cfg.irc.channels]
         if cfg.irc.casemapping and cfg.irc.casemapping not in irccase.MAPPINGS:
             raise ConfigError(f"irc.casemapping must be one of {', '.join(sorted(irccase.MAPPINGS))}")
-    for name, section in cfg.enabled_transports().items():
-        for room, profile in (section.rooms or {}).items():
-            if profile not in PROFILE_NAMES:
-                raise ConfigError(f"[{name}.rooms] {room}: {profile!r} is not one of {', '.join(PROFILE_NAMES)}")
+    try:
+        rooms_from(cfg)
+    except PolicyUnknown as exc:
+        raise ConfigError(str(exc)) from exc
     if cfg.signal.enabled and not cfg.signal.phone_number:
         raise ConfigError("signal.phone_number is required")
     providers = {"claude", "openrouter", "xai", "none"}
