@@ -771,7 +771,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     if level.lower() not in LEVELS:
         log.warning("unknown log level %r, using info", level)
-    log.info("starting as %s: %s", name_process("main"), versions())
+    # At warning, not info: which build started, and as what, is the one line
+    # worth having in a journal that is otherwise quiet by default.
+    log.warning("starting as %s: %s", name_process("main"), versions())
     try:
         return asyncio.run(run(cfg))
     except KeyboardInterrupt:

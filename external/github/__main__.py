@@ -514,7 +514,7 @@ def main(argv: list[str] | None = None) -> int:
         handlers=handlers,
     )
     load_env(Path(args.env))
-    log.info("starting as %s", name_process("github"))
+    log.warning("starting as %s", name_process("github"))
     if not os.environ.get("GITHUB_TOKEN"):
         log.warning("no GITHUB_TOKEN: unauthenticated GitHub allows 60 requests an hour")
     try:

@@ -123,7 +123,8 @@ def compose(h: Handler, ctx: Context, scrollback: str, *, following: bool = Fals
     now = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime())
     situation = (
         f"<context>network={ctx.transport.name} room={ctx.channel} kind={where}"
-        f" asking={ctx.nick} you={'/'.join(h.wake_words(ctx.transport))} now={now}</context>"
+        f" asking={ctx.nick} you={'/'.join(h.wake_words(ctx.transport))}"
+        f" now={now} running_for={ago(int(h.started))}</context>"
     )
     # What it can actually do here, right now. Without this the model finds out
     # by proposing a kick it has no power to perform and relaying the refusal.

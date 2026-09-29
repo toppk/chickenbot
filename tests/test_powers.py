@@ -90,3 +90,10 @@ def test_a_registered_tool_is_not_reported_missing(handler, cfg):
 def test_tools_nobody_configured_are_not_expected(handler, cfg):
     cfg.tools.grants = {}
     assert handler.tools_offline() == []
+
+
+def test_the_model_is_told_how_long_it_has_been_running(handler):
+    """It was asked its uptime and invented an answer about its own log,
+    because nothing in the prompt said."""
+    _system, prompt = compose(handler, ctx(handler, FakeTransport()), scrollback="")
+    assert "running_for=" in prompt
