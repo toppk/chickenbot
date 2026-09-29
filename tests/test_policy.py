@@ -224,3 +224,77 @@ async def test_help_shows_how_to_address_it_here(cfg, store):
     c = ctx(h, room="#public")
     await COMMANDS["help"].run(h, c)
     assert "chickenbot: ask" in c.transport.sent[0][1]
+
+
+# -- what the config says a room is for ---------------------------------
+
+
+def seeded(store, mapping):
+    return Policies(store, mapping)
+
+
+def test_the_config_can_say_a_room_is_the_partyline(store):
+    """After a reset the bot cannot be *told* which room is the partyline:
+    telling it is itself a partyline command."""
+    p = seeded(store, {("irc:host", "#soup"): PARTYLINE}).of("irc:host", "#soup")
+    assert p.profile == PARTYLINE and p.commands == ALL
+
+
+def test_a_seeded_room_folds_like_the_network_spells_it(store):
+    p = seeded(store, {("irc:host", "#SOUP"): PARTYLINE}).of("irc:host", "#soup")
+    assert p.profile == PARTYLINE
+
+
+def test_rooms_the_config_says_nothing_about_are_public(store):
+    p = seeded(store, {("irc:host", "#soup"): PARTYLINE}).of("irc:host", "#elsewhere")
+    assert p.profile == PUBLIC
+
+
+def test_chat_overrides_the_config_from_then_on(store):
+    policies = seeded(store, {("irc:host", "#soup"): PARTYLINE})
+    policies.set_profile("irc:host", "#soup", QUIET)
+    assert policies.of("irc:host", "#soup").profile == QUIET
+
+
+def test_forgetting_comes_back_to_the_config(store):
+    policies = seeded(store, {("irc:host", "#soup"): PARTYLINE})
+    policies.set_profile("irc:host", "#soup", QUIET)
+    policies.forget("irc:host", "#soup")
+    assert policies.of("irc:host", "#soup").profile == PARTYLINE
+
+
+def test_describe_says_where_the_answer_came_from(store):
+    policies = seeded(store, {("irc:host", "#soup"): PARTYLINE})
+    assert "from the config" in policies.describe("irc:host", "#soup")
+    assert "(default)" in policies.describe("irc:host", "#other")
+    policies.set_profile("irc:host", "#soup", QUIET)
+    assert "from the config" not in policies.describe("irc:host", "#soup")
+
+
+def test_seeds_are_read_off_the_transport_sections(cfg):
+    from chickenbot.policy import seeds_from
+
+    cfg.irc.enabled = True
+    cfg.irc.host = "irc.example.net"
+    cfg.irc.rooms = {"#soup": PARTYLINE}
+    assert seeds_from(cfg) == {("irc:irc.example.net", "#soup"): PARTYLINE}
+
+
+def test_a_profile_that_does_not_exist_is_refused_at_load(tmp_path):
+    from chickenbot import config
+
+    toml = tmp_path / "c.toml"
+    toml.write_text('[irc]\nenabled = true\nhost = "x"\nowners = ["a"]\nrooms = { "#soup" = "chaos" }\n')
+    with pytest.raises(config.ConfigError, match="chaos"):
+        config.load(str(toml))
+
+
+def test_a_room_table_header_mistake_is_caught(tmp_path):
+    """`[irc.rooms]` mid-section swallows the keys under it. The profile check
+    is what notices, so the message points at the right place."""
+    from chickenbot import config
+
+    toml = tmp_path / "c.toml"
+    toml.write_text('[irc]\nenabled = true\nhost = "x"\n[irc.rooms]\nowners = ["a"]\n')
+    with pytest.raises(config.ConfigError):
+        config.load(str(toml))

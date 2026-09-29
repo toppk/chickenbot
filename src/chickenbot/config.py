@@ -9,6 +9,20 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import irccase
+from .policy import PROFILES as _PROFILES
+
+PROFILE_NAMES = tuple(_PROFILES)
+
+
+def irc_realm(host: str) -> str:
+    """One bot could sit on two IRC networks, so the host is part of the name."""
+    return f"irc:{host}"
+
+
+def realm_for(cfg: Config, section: str) -> str:
+    """The realm a configured transport will report, without building one."""
+    return irc_realm(cfg.irc.host) if section == "irc" else section
+
 
 log = logging.getLogger(__name__)
 
@@ -52,6 +66,11 @@ class IRCConfig:
     username: str = ""
     realname: str = "chickenbot"
     channels: list[str] = field(default_factory=list)
+    # What a room is for: {"#soup" = "partyline"}. Seeds the profile a room
+    # starts with, because after a reset the bot cannot be *told* which room is
+    # the partyline -- telling it is itself a partyline command. Anything set
+    # later with `.room` lives in the database and wins from then on.
+    rooms: dict = field(default_factory=dict)
     # Services account names, not nicks.
     owners: list[str] = field(default_factory=list)
     # Networks without IRCv3 bot mode need the other bots named by hand.
@@ -79,6 +98,12 @@ class SignalConfig:
     service: str = "127.0.0.1:8080"
     # Group ids to listen in; empty means every group the account is in.
     groups: list[str] = field(default_factory=list)
+    # What a room is for: {"#soup" = "partyline"}. Seeds the profile a room
+    # starts with, because after a reset the bot cannot be *told* which room is
+    # the partyline -- telling it is itself a partyline command. Anything set
+    # later with `.room` lives in the database and wins from then on.
+    rooms: dict = field(default_factory=dict)
+
     # Signal identities are uuids or E.164 numbers, never display names.
     owners: list[str] = field(default_factory=list)
     ignore_senders: list[str] = field(default_factory=list)
@@ -90,6 +115,11 @@ class DiscordConfig:
     token_env: str = "DISCORD_TOKEN"
     # Channel ids as strings; Discord snowflakes exceed 2^53 in JSON.
     channels: list[str] = field(default_factory=list)
+    # What a room is for: {"#soup" = "partyline"}. Seeds the profile a room
+    # starts with, because after a reset the bot cannot be *told* which room is
+    # the partyline -- telling it is itself a partyline command. Anything set
+    # later with `.room` lives in the database and wins from then on.
+    rooms: dict = field(default_factory=dict)
     owners: list[str] = field(default_factory=list)
     ignore_senders: list[str] = field(default_factory=list)
 
@@ -103,6 +133,12 @@ class TelegramConfig:
     enabled: bool = False
     token_env: str = "TELEGRAM_TOKEN"
     chats: list[str] = field(default_factory=list)
+    # What a room is for: {"#soup" = "partyline"}. Seeds the profile a room
+    # starts with, because after a reset the bot cannot be *told* which room is
+    # the partyline -- telling it is itself a partyline command. Anything set
+    # later with `.room` lives in the database and wins from then on.
+    rooms: dict = field(default_factory=dict)
+
     owners: list[str] = field(default_factory=list)
     ignore_senders: list[str] = field(default_factory=list)
 
@@ -270,6 +306,10 @@ def load(path: str | Path) -> Config:
         cfg.irc.channels = [c if c.startswith(("#", "&")) else "#" + c for c in cfg.irc.channels]
         if cfg.irc.casemapping and cfg.irc.casemapping not in irccase.MAPPINGS:
             raise ConfigError(f"irc.casemapping must be one of {', '.join(sorted(irccase.MAPPINGS))}")
+    for name, section in cfg.enabled_transports().items():
+        for room, profile in (section.rooms or {}).items():
+            if profile not in PROFILE_NAMES:
+                raise ConfigError(f"[{name}.rooms] {room}: {profile!r} is not one of {', '.join(PROFILE_NAMES)}")
     if cfg.signal.enabled and not cfg.signal.phone_number:
         raise ConfigError("signal.phone_number is required")
     providers = {"claude", "openrouter", "xai", "none"}

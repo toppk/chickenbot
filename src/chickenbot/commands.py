@@ -17,7 +17,7 @@ from .config import Config
 from .dossier import Dossiers
 from .events import Event, Kind
 from .observe import activity, note, note_default
-from .policy import ALL, BASIC, EITHER, NAME, NONE, PREFIX, Policies, Unknown
+from .policy import ALL, BASIC, EITHER, NAME, NONE, PREFIX, Policies, Unknown, seeds_from
 from .restraint import Refused, Restraint
 from .rhythm import Rhythm
 from .rooms import MAX_CHARS as ROOM_NOTES_MAX
@@ -209,7 +209,7 @@ class Handler:
         self.rooms = Rooms(store)
         self.settings = Settings(store, cfg)
         self.restraint = Restraint(store)
-        self.policies = Policies(store)
+        self.policies = Policies(store, seeds_from(cfg))
         self._writes: set[asyncio.Task] = set()
         self.transports: dict[str, Transport] = {}
         self._asks: dict[str, deque[float]] = defaultdict(deque)
@@ -885,6 +885,10 @@ async def cmd_room(h: Handler, ctx: Context) -> None:
     what, _, value = ctx.args.partition(" ")
     if not what:
         ctx.say(f"{ctx.channel}: {h.policies.describe(realm, ctx.channel)}")
+        return
+    if what.strip().lower() == "forget":
+        h.policies.forget(realm, ctx.channel)
+        ctx.say(f"{ctx.channel} is back to {h.policies.describe(realm, ctx.channel)}")
         return
     try:
         if not value.strip():

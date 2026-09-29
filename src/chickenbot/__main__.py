@@ -182,15 +182,16 @@ def manage_settings(settings: Settings, args: argparse.Namespace) -> int:
         return 1
 
 
-def manage_rooms(store: Store, args: argparse.Namespace) -> int:
+def manage_rooms(cfg: config.Config, store: Store, args: argparse.Namespace) -> int:
     """A channel is a job, not a skill level: the partyline takes orders, a
     room the bot was invited into does not."""
-    from .policy import PROFILES, Policies, Unknown
+    from .policy import PROFILES, Policies, Unknown, seeds_from
 
-    policies = Policies(store)
+    policies = Policies(store, seeds_from(cfg))
     if not args.room:
-        rows = [r for r in store.described_rooms(any_policy=True) if not args.realm or r[0] == args.realm]
-        for realm, room, _updated in rows:
+        known = {(r[0], r[1]) for r in store.described_rooms(any_policy=True)} | set(policies.seeds)
+        rows = sorted(r for r in known if not args.realm or r[0] == args.realm)
+        for realm, room in rows:
             print(f"{realm}/{room}\t{policies.describe(realm, room)}")
         if not rows:
             print(f"(no room configured; new ones are '{PROFILES['public'].profile}')")
@@ -199,7 +200,9 @@ def manage_rooms(store: Store, args: argparse.Namespace) -> int:
         print("room needs a realm and a room", file=sys.stderr)
         return 1
     try:
-        if args.field and args.value:
+        if args.forget:
+            policies.forget(args.realm, args.room)
+        elif args.field and args.value:
             policies.set_knob(args.realm, args.room, args.field, args.value)
         elif args.field:
             policies.set_profile(args.realm, args.room, args.field)
@@ -239,7 +242,7 @@ def manage(cfg: config.Config, args: argparse.Namespace) -> int:
             return manage_bots(store, args)
 
         if args.what == "room":
-            return manage_rooms(store, args)
+            return manage_rooms(cfg, store, args)
 
         if args.what == "tune":
             return manage_settings(Settings(store, cfg), args)
@@ -698,6 +701,7 @@ def main(argv: list[str] | None = None) -> int:
     # Not "what": that is the subparser's own dest, and it would be overwritten.
     room_cmd.add_argument("field", nargs="?", help="a profile, or a knob to set")
     room_cmd.add_argument("value", nargs="?", help="the knob's value")
+    room_cmd.add_argument("--forget", action="store_true", help="drop back to whatever the config says")
 
     log_cmd = sub.add_parser("log", help="browse what was said")
     log_cmd.add_argument("room", nargs="?", help="transport/#channel; omit to list rooms")

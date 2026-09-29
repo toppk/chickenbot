@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 
 from ..brain import clean_for_irc
-from ..config import IRCConfig
+from ..config import IRCConfig, irc_realm
 from ..events import Event, Kind
 from ..irc import Client, Message
 from ..transport import BAN, DEOP, DEVOICE, KICK, OP, TOPIC, UNBAN, VOICE, Membership, Sink, chunk
@@ -40,7 +40,7 @@ class IRCTransport:
 
     @property
     def realm(self) -> str:
-        return f"irc:{self.cfg.host}"  # one bot could sit on two IRC networks
+        return irc_realm(self.cfg.host)
 
     @property
     def me(self) -> str:

@@ -672,6 +672,21 @@ prefix.
 | `public` (the default) | basic | by name | no | yes | yes |
 | `quiet` | none | by name | no | no | no |
 
+**The toml seeds a room's profile**, because after a reset the bot cannot be
+*told* which room is the partyline -- telling it is itself a partyline command:
+
+```toml
+[irc]
+channels = ["#soup", "#lobby"]
+rooms = { "#soup" = "partyline", "#lobby" = "quiet" }
+```
+
+Inline on purpose: a `[irc.rooms]` header mid-section swallows every key below
+it, which is caught at load but is a miserable way to find out. `.room` in chat
+writes to the database and wins from then on; `.room forget` (or
+`chickenbot room ... --forget`) drops back to the config. `.room` says which of
+the three it is answering from.
+
 Knobs override one field of a profile; setting a profile clears them, because
 a knob set against the old profile is an invisible surprise under the new.
 

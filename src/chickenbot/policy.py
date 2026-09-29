@@ -66,14 +66,23 @@ class Unknown(ValueError):
 
 
 class Policies:
-    def __init__(self, store: Store) -> None:
+    def __init__(self, store: Store, seeds: dict[tuple[str, str], str] | None = None) -> None:
         self.store = store
+        # What the toml says a room is for. Folded on the way in, so "#SOUP"
+        # in the config matches the room as the network spells it. Only
+        # consulted when nothing has been set in chat: the config is where a
+        # room starts, not what it is forever.
+        self.seeds = {(realm, store.fold(realm, room)): p for (realm, room), p in (seeds or {}).items()}
+
+    def seeded(self, realm: str, room: str) -> str:
+        return self.seeds.get((realm, self.store.fold(realm, room)), "")
 
     def of(self, realm: str, room: str) -> Policy:
         """Read every time. One indexed row per message is cheaper than a
         cache that has to be told when `chickenbot room` changed something in
         another process."""
         profile, knobs = self.store.room_policy(realm, room)
+        profile = profile or self.seeded(realm, room)
         settled = Policy(**asdict(PROFILES.get(profile or PUBLIC, PROFILES[PUBLIC])))
         for name, value in knobs.items():
             if name in KNOBS:
@@ -103,7 +112,21 @@ class Policies:
     def describe(self, realm: str, room: str) -> str:
         p = self.of(realm, room)
         flags = " ".join(f"{name}={'on' if getattr(p, name) else 'off'}" for name in FLAGS)
-        return f"{p.profile}: commands={p.commands} address={p.address} {flags}"
+        stored, _knobs = self.store.room_policy(realm, room)
+        source = "" if stored else (" (from the config)" if self.seeded(realm, room) else " (default)")
+        return f"{p.profile}{source}: commands={p.commands} address={p.address} {flags}"
+
+
+def seeds_from(cfg) -> dict[tuple[str, str], str]:
+    """{(realm, room): profile} for every room a transport section names."""
+    from .config import realm_for
+
+    out: dict[tuple[str, str], str] = {}
+    for name, section in cfg.enabled_transports().items():
+        realm = realm_for(cfg, name)
+        for room, profile in (section.rooms or {}).items():
+            out[(realm, room)] = profile
+    return out
 
 
 def _coerce(knob: str, raw: str) -> object:
