@@ -567,6 +567,28 @@ model asked only for wording:
   model as impressions — it is distilled from the log, so it is still other
   people's words.
 
+## Restraint: what it will not do with ops
+
+`restraint.py`. The owner check says who may ask; this says what happens
+however nicely they ask. All arithmetic, no judgement, checked after the owner
+check and before the network sees anything. `guarded()` in commands.py is the
+single place an action reaches a transport -- both the owner's `.kick` and the
+model's `chan_kick` go through it.
+
+- **Never an owner, never itself, never nobody in particular.**
+- **One person per request.** A Context is one request; a second harsh action
+  in the same turn is refused. "Tidy up the channel" is one sentence and a
+  channel is a lot of people.
+- **Six per room per hour**, counted from the `moderation` table, which holds
+  only actions that actually happened -- a refusal from an unopped network is
+  not a spent action.
+- **No channel-wide masks.** `*!*@*` and its spellings are a ban on everyone.
+- op, voice and unban are unrationed: they hand privilege back rather than
+  taking it.
+
+Every action that lands is recorded with who asked for it. That record is the
+budget and the review trail at once.
+
 ## Knowing what it cannot do
 
 Privilege and tools both come and go under the bot's feet, so the prompt

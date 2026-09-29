@@ -157,13 +157,16 @@ def _moderation_tool(action: str, description: str, params: dict) -> None:
     """Registered as chan_<action>; `action` stays the capability name."""
 
     async def run(h: Handler, ctx: Context, args: dict) -> str:
+        from .commands import Refused, guarded
+
         if not ctx.in_channel:
             return "error: that only works in a group"
         target = str(args.get("who") or args.get("text") or "")
         reason = str(args.get("reason", ""))
-        result = await ctx.transport.moderate(action, ctx.channel, target, reason)
-        ctx.remember_action(f"{action} {target}".strip() + (f" ({reason})" if reason else ""), result)
-        return result
+        try:
+            return await guarded(ctx, action, target, reason)
+        except Refused as no:
+            return f"refused: {no}"
 
     name = f"chan_{action}"
     TOOLS[name] = Tool(name, run, True, description, params, frozenset({action}))

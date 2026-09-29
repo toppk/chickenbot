@@ -17,6 +17,7 @@ from .config import Config
 from .dossier import Dossiers
 from .events import Event, Kind
 from .observe import activity, note, note_default
+from .restraint import Refused, Restraint
 from .rhythm import Rhythm
 from .rooms import MAX_CHARS as ROOM_NOTES_MAX
 from .rooms import Rooms
@@ -51,6 +52,9 @@ class Context:
     is_owner: bool
     in_channel: bool
     handler: Handler | None = None
+    # Moderation actions taken while serving this one request. One Context is
+    # one request, whether it came as a command or through the model.
+    moved: int = 0
 
     def say(self, text: str) -> None:
         self.transport.say(self.channel, text)
@@ -189,6 +193,7 @@ class Handler:
         self.welcome = Welcome(store)
         self.rooms = Rooms(store)
         self.settings = Settings(store, cfg)
+        self.restraint = Restraint(store)
         self._writes: set[asyncio.Task] = set()
         self.transports: dict[str, Transport] = {}
         self._asks: dict[str, deque[float]] = defaultdict(deque)
@@ -468,9 +473,39 @@ async def moderate(ctx: Context, action: str, target: str, reason: str = "") -> 
     if not ctx.can(action):
         ctx.say(f"{ctx.transport.name} cannot {action}")
         return
-    result = await ctx.transport.moderate(action, ctx.channel, target, reason)
-    ctx.remember_action(f"{action} {target}".strip() + (f" ({reason})" if reason else ""), result)
+    try:
+        result = await guarded(ctx, action, target, reason)
+    except Refused as no:
+        note(outcome="restrained", action=action, target=target)
+        ctx.say(f"{ctx.nick}: {no}")
+        return
     ctx.say(result)
+
+
+async def guarded(ctx: Context, action: str, target: str, reason: str = "") -> str:
+    """The one place an action reaches the network. Raises Refused."""
+    h = ctx.handler
+    tr = ctx.transport
+    if h is not None:
+        h.restraint.check(
+            realm=tr.realm,
+            room=ctx.channel,
+            action=action,
+            target=target,
+            actor=ctx.account or ctx.nick,
+            me=tr.me,
+            is_owner_target=tr.is_owner(target),
+            spent_this_request=ctx.moved,
+        )
+    result = await tr.moderate(action, ctx.channel, target, reason)
+    ctx.remember_action(f"{action} {target}".strip() + (f" ({reason})" if reason else ""), result)
+    if not result.startswith("error:"):
+        ctx.moved += 1
+    if h is not None and not result.startswith("error:"):
+        h.restraint.note(
+            realm=tr.realm, room=ctx.channel, action=action, target=target, actor=ctx.account or ctx.nick, result=result
+        )
+    return result
 
 
 # -- open commands -------------------------------------------------------

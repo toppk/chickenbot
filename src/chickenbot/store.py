@@ -99,6 +99,20 @@ CREATE TABLE IF NOT EXISTS bot (
     PRIMARY KEY (realm, handle)
 );
 
+-- Every moderation action that actually happened. Both a record to review and
+-- the thing the hourly budget is counted from.
+CREATE TABLE IF NOT EXISTS moderation (
+    id     INTEGER PRIMARY KEY,
+    ts     INTEGER NOT NULL,
+    realm  TEXT NOT NULL,
+    room   TEXT NOT NULL,
+    action TEXT NOT NULL,
+    target TEXT NOT NULL,
+    actor  TEXT NOT NULL DEFAULT '',   -- the account that asked for it
+    result TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS moderation_room ON moderation (realm, room, ts DESC);
+
 -- Behaviour, set at runtime. The toml is the default; a row here overrides it.
 -- Connection details and authority are not in here on purpose -- see
 -- settings.SETTABLE.
@@ -594,6 +608,22 @@ class Store:
             (text, int(time.time())),
         )
         self._keep_revision("soul", "", text, author)
+
+    def note_moderation(self, realm: str, room: str, action: str, target: str, actor: str, result: str) -> None:
+        self._db.execute(
+            "INSERT INTO moderation (ts, realm, room, action, target, actor, result) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (int(time.time()), realm, self.fold(realm, room), action, target, actor, result[:200]),
+        )
+        self._db.commit()
+
+    def moderation_since(self, realm: str, room: str, ts: int) -> list[tuple[int, str, str, str]]:
+        """(ts, action, target, actor) newest first, for one room."""
+        rows = self._db.execute(
+            "SELECT ts, action, target, actor FROM moderation"
+            " WHERE realm = ? AND room = ? AND ts >= ? ORDER BY id DESC",
+            (realm, self.fold(realm, room), ts),
+        ).fetchall()
+        return [(r["ts"], r["action"], r["target"], r["actor"]) for r in rows]
 
     def settings(self) -> dict[str, str]:
         return {r["key"]: r["value"] for r in self._db.execute("SELECT key, value FROM setting ORDER BY key")}
