@@ -269,20 +269,16 @@ class IRCTransport:
         )
 
     async def run(self) -> None:
-        import asyncio
 
-        joiner = asyncio.create_task(self._join_when_ready())
-        try:
-            await self.client.run()
-        finally:
-            joiner.cancel()
+        self.client.on_register = self._join_all
+        await self.client.run()
 
-    async def _join_when_ready(self) -> None:
-        while True:
-            await self.client.ready.wait()
-            for room in self.rooms:
-                self.client.send("JOIN", room)
-            self.client.ready.clear()
+    async def _join_all(self) -> None:
+        """Once per connection, from the client itself. This used to poll the
+        `ready` flag and clear it afterwards, which raced the ISUPPORT line:
+        whether the bot flagged itself as a bot depended on which woke first."""
+        for room in self.rooms:
+            self.client.send("JOIN", room)
 
     async def close(self, reason: str = "") -> None:
         await self.client.close(reason or "bye")

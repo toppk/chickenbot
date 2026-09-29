@@ -260,6 +260,10 @@ class Client:
         self.ready = asyncio.Event()
         self._bot_mode_set = False
         self._bot_check: asyncio.Task | None = None
+        # Called once per connection, when the server says we are registered.
+        # `ready` says whether we are; nothing outside may clear it to mean
+        # "I have handled that" -- doing so silently disabled bot mode.
+        self.on_register: Callable[[], Awaitable[None]] | None = None
         # What the server says our own modes are, from RPL_UMODEIS. Whether the
         # bot flag actually took is otherwise only visible by WHOIS from
         # another client.
@@ -423,6 +427,8 @@ class Client:
                 self.nick = msg.params[0] if msg.params else self.nick
                 self.ready.set()
                 self._claim_bot_mode()
+                if self.on_register is not None:
+                    await self.on_register()
             case "005":
                 self.isupport.update(msg.params[1:-1])
                 self._claim_bot_mode()
@@ -490,6 +496,12 @@ class Client:
         the bot would then sit in the room unflagged with nothing saying so.
         `_confirm_bot_mode` checks a few seconds later and asks again.
         """
+        log.debug(
+            "bot mode check: claimed=%s flag=%r ready=%s",
+            self._bot_mode_set,
+            self.isupport.bot_mode,
+            self.ready.is_set(),
+        )
         if self._bot_mode_set or not self.isupport.bot_mode or not self.ready.is_set():
             return
         self._bot_mode_set = True

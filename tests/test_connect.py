@@ -48,7 +48,7 @@ class ToyServer:
                 self.sasl_payload = line.split(" ", 1)[1]
                 self.send(":toy 903 chickenbot :logged in")
             elif line.startswith("CAP END"):
-                self.send(":toy 005 chickenbot PREFIX=(ov)@+ CHANTYPES=# :are supported")
+                self.send(":toy 005 chickenbot PREFIX=(ov)@+ CHANTYPES=# BOT=B :are supported")
                 self.send(":toy 001 chickenbot :welcome")
                 self.registered.set()
             elif line.startswith("JOIN "):
@@ -230,3 +230,32 @@ async def test_it_signs_off_under_its_own_name(toy, cfg, store):
 
     quit_line = next(line for line in toy.lines if line.startswith("QUIT"))
     assert quit_line == "QUIT :biff signing off"
+
+
+async def test_bot_mode_survives_the_join(toy, cfg, store):
+    """The joiner used to clear the client's `ready` flag after joining, so
+    whether the bot flagged itself depended on which woke first: the joiner or
+    the ISUPPORT line that says the network has a bot mode."""
+    cfg.irc = IRCConfig(enabled=True, host="127.0.0.1", port=toy.port, tls=False, nick="chickenbot", owners=["a"])
+    cfg.irc.channels = ["#chan"]
+
+    async def nowhere(_event):
+        return None
+
+    transport = IRCTransport(cfg.irc, nowhere)
+    transport.client.send_interval = 0.0
+    task = asyncio.create_task(transport.run())
+    try:
+        await asyncio.wait_for(toy.registered.wait(), 5)
+        for _ in range(100):
+            if any(line.startswith("MODE chickenbot") for line in toy.lines):
+                break
+            await asyncio.sleep(0.02)
+        # Checked while still connected: teardown clears it legitimately.
+        assert transport.client.ready.is_set()  # nobody else's to clear
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+    assert "MODE chickenbot +B" in toy.lines
+    assert any(line.startswith("JOIN #chan") for line in toy.lines)

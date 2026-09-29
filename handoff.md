@@ -997,6 +997,17 @@ Outcomes in use: `chat`, `bot-ignored`, `denied`, `ran`, `failed`, `answered`,
 
 ## Gotchas
 
+**`ready` is the client's, and clearing it from outside broke bot mode.** The
+joiner used to wait on `client.ready`, send its JOINs, then clear the flag to
+re-arm itself for the next connection. `ready` also gates `_claim_bot_mode`,
+which fires on 001 (too early -- ISUPPORT has not arrived) and again on 005
+(where the `BOT=B` token appears). Whether the flag was still set at 005
+depended on which task the event loop woke first, so the bot flagged itself as
+a bot on some connections and not others, silently. The client now calls
+`on_register` once per connection and nothing outside it touches `ready`. Found
+by a WHO from another client showing `H` where biff showed `HB`.
+
+
 - **NICK/USER are withheld until SASL finishes.** chonkline sets
   `cx.registered = true` the moment NICK and USER pair up
   (`upstream/chonkline/src/state.rs:814`), deferring only the welcome burst, while
