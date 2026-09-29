@@ -142,3 +142,26 @@ async def test_leaving_is_an_event_too(irc):
 async def test_our_own_arrival_is_not_news(irc):
     await feed(irc, ":chickenbot!u@h JOIN #chan")
     assert irc.seen == []
+
+
+async def test_a_plus_t_room_will_not_be_told_its_topic_was_set(irc):
+    """It used to say "topic set" and let the server refuse it in private."""
+    await feed(irc, ":chickenbot!u@h JOIN #chan")
+    await feed(irc, ":server 324 chickenbot #chan +t")
+    result = await irc.moderate(TOPIC, "#chan", "something new")
+    assert "not opped" in result
+    assert not any(call[0] == "TOPIC" for call in irc.sent)
+
+
+async def test_an_open_room_still_takes_a_topic(irc):
+    await feed(irc, ":chickenbot!u@h JOIN #chan")
+    result = await irc.moderate(TOPIC, "#chan", "something new")
+    assert result == "topic set"
+
+
+async def test_ops_make_a_plus_t_room_writable(irc):
+    await feed(irc, ":chickenbot!u@h JOIN #chan")
+    await feed(irc, ":server 324 chickenbot #chan +t")
+    await feed(irc, ":server 353 chickenbot = #chan :@chickenbot nate")
+    result = await irc.moderate(TOPIC, "#chan", "something new")
+    assert result == "topic set"

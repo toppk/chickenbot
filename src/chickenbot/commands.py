@@ -114,17 +114,40 @@ def compose(h: Handler, ctx: Context, scrollback: str, *, following: bool = Fals
         f"<context>network={ctx.transport.name} room={ctx.channel} kind={where}"
         f" asking={ctx.nick} you={'/'.join(h.wake_words(ctx.transport))} now={now}</context>"
     )
+    # What it can actually do here, right now. Without this the model finds out
+    # by proposing a kick it has no power to perform and relaying the refusal.
+    head_lines = [situation, powers(h, ctx)]
     # Owner-written notes about whoever is here. Trusted, unlike scrollback.
     people = h.dossiers.block(realm=ctx.transport.realm, account=ctx.account, text=f"{ctx.args} {scrollback}")
     # ...and about the room itself, which has a character of its own.
     room = h.rooms.block(ctx.transport.realm, ctx.channel) if ctx.in_channel else ""
-    head = "\n".join(part for part in (situation, room, people) if part)
+    head = "\n".join(part for part in (*head_lines, room, people) if part)
     if scrollback:
         return (
             system,
             f"{head}\n<channel_scrollback>\n{scrollback}\n</channel_scrollback>\n\n{ctx.nick} asks: {ctx.args}",
         )
     return system, f"{head}\n\n{ctx.args}"
+
+
+def powers(h: Handler, ctx: Context) -> str:
+    """Privilege and tools, as they stand this second.
+
+    Both change under the bot's feet: ops are taken away, a tool process
+    stops. Saying so up front is cheaper than a wasted call, and keeps it from
+    promising something it cannot do.
+    """
+    lines = []
+    # getattr: a transport from somewhere else need not answer this.
+    holds = getattr(ctx.transport, "opped", lambda _room: None)(ctx.channel)
+    if ctx.in_channel and holds is False:
+        lines.append(
+            f"You are not opped in {ctx.channel}: kicks, bans and mode changes will be refused, "
+            "and the topic too if the room is +t. Do not offer to do them."
+        )
+    if missing := h.tools_offline():
+        lines.append(f"Tools normally here but offline right now: {', '.join(missing)}. Say so rather than guessing.")
+    return "<powers>\n" + "\n".join(lines) + "\n</powers>" if lines else ""
 
 
 def ago(ts: int) -> str:
@@ -221,6 +244,13 @@ class Handler:
             ctx.transport.realm, ctx.channel, self.cfg.llm.history_lines, since=since, least=HISTORY_FLOOR
         )
         return render_scrollback(recent)
+
+    def tools_offline(self) -> list[str]:
+        """External tools the operator configured a grant for, which nothing
+        has registered. Configured is the closest thing to "expected"."""
+        from .tools import TOOLS
+
+        return sorted(name for name in self.cfg.tools.grants if name.startswith("ext_") and name not in TOOLS)
 
     def known_bot(self, realm: str, nick: str, account: str) -> bool:
         """Told to us, for a network that does not set the bot flag itself.

@@ -36,6 +36,11 @@ class TelegramTransport:
     def is_ignored(self, sender: str) -> bool:
         return self._members.is_ignored(sender)
 
+    def opped(self, room: str) -> bool | None:
+        """Not modelled here: moderation goes through the platform's own
+        permissions, which refuse the call rather than being asked first."""
+        return None
+
     def lines(self, text: str) -> list[str]:
         return chunk(text, 3900, 4)  # Telegram's limit is 4096
 

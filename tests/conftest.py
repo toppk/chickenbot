@@ -14,8 +14,9 @@ class FakeTransport:
     name = "fake"
     me = "chickenbot"
 
-    def __init__(self, *, owners=("alice",), ignored=(), caps=ALL_CAPS) -> None:
+    def __init__(self, *, owners=("alice",), ignored=(), caps=ALL_CAPS, ops=None) -> None:
         self.caps = frozenset(caps)
+        self.ops = ops  # None: the question does not apply here
         self.rooms: list[str] = []
         self.sent: list[tuple[str, str]] = []
         self.actions: list[tuple[str, str, str, str]] = []
@@ -31,6 +32,9 @@ class FakeTransport:
 
     def is_owner(self, account: str) -> bool:
         return self._members.is_owner(account)
+
+    def opped(self, room: str) -> bool | None:
+        return self.ops
 
     def is_ignored(self, sender: str) -> bool:
         return self._members.is_ignored(sender)

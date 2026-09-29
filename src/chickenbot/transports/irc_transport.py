@@ -62,6 +62,9 @@ class IRCTransport:
         for line in self.lines(text):
             self.client.send("PRIVMSG", room, line)
 
+    def opped(self, room: str) -> bool | None:
+        return self.client.has_op(room)
+
     def topic(self, room: str) -> str | None:
         chan = self.client.channels.get(self.fold(room))
         return None if chan is None else chan.topic
@@ -88,6 +91,11 @@ class IRCTransport:
 
     async def moderate(self, action: str, room: str, target: str, reason: str = "") -> str:
         if action == TOPIC:
+            # +t means only ops may set it. Sending anyway earns a 482 that
+            # nobody reads, after telling the channel it was done.
+            chan = self.client.channels.get(self.fold(room))
+            if chan and "t" in chan.modes and not self.client.has_op(room):
+                return f"error: {room} is +t and i am not opped"
             limit = self.client.isupport.topiclen
             self.client.send("TOPIC", room, target[:limit] if limit else target)
             return "topic set"

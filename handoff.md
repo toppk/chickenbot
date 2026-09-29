@@ -567,6 +567,28 @@ model asked only for wording:
   model as impressions — it is distilled from the log, so it is still other
   people's words.
 
+## Knowing what it cannot do
+
+Privilege and tools both come and go under the bot's feet, so the prompt
+carries a `<powers>` block saying what is true this second:
+
+- **Ops.** `Transport.opped(room)` answers true, false, or None where the
+  question does not apply (Signal, Discord, Telegram: the platform refuses the
+  call rather than being asked first). Unopped, the model is told plainly that
+  kicks, bans and modes will be refused, so it does not offer. The tools are
+  still declared -- a refusal at call time remains the backstop.
+- **Tools.** An `ext_` name with a grant in the toml but nothing registered is
+  named as offline. A configured grant is the closest thing to "expected", and
+  the difference between "I can't check GitHub right now" and having no idea
+  GitHub exists is worth the line.
+
+`moderate` refuses rather than lies: kick, ban and mode changes check `has_op`,
+and a topic change checks it too when the channel is `+t`. That last one used
+to report "topic set" and let the server refuse it in private. The 324 reply to
+the `MODE #chan` sent on join is now parsed as well -- a channel that was
+already `+t` before the bot arrived is the ordinary case, and without it the
+modes were never learned at all.
+
 ## Two kinds of context
 
 The conversation and the room are not the same thing, and conflating them is

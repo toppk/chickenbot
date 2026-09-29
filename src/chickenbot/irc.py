@@ -452,6 +452,8 @@ class Client:
                 self._handle_nick(msg)
             case "MODE":
                 self._handle_mode(msg)
+            case "324":  # RPL_CHANNELMODEIS - the answer to the MODE we send on join
+                self._handle_mode(Message(command="MODE", params=list(msg.params[1:])))
             case "433" | "437":
                 self.wanted_nick += "_"
                 self.send("NICK", self.wanted_nick)
@@ -607,6 +609,9 @@ class Client:
                 chan.hosts[key] = source
 
     def _handle_mode(self, msg: Message) -> None:
+        """Both the MODE message and the 324 reply to our own MODE query: a
+        channel that was already +t when we joined is the ordinary case, and
+        without the reply we would never learn it."""
         if len(msg.params) < 2 or not self.isupport.is_channel(msg.target):
             return
         chan = self._channel(msg.target)

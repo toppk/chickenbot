@@ -54,6 +54,11 @@ class Transport(Protocol):
 
     def is_ignored(self, sender: str) -> bool: ...
 
+    def opped(self, room: str) -> bool | None:
+        """Whether we currently hold privilege in this room. None where the
+        question does not apply, which is not the same as no."""
+        return None
+
     def lines(self, text: str) -> list[str]:
         """Presentation and chunking for this network."""
         ...
