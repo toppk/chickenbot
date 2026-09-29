@@ -122,8 +122,9 @@ Running by hand, `--log-file` writes it to a rotating file instead of stdout
 (8 MB × 5), for both the bot and the github tool:
 
 ```bash
-uv run chickenbot -c chickenbot.toml --log-file ~/log/chickenbot.log
-uv run python -m external.github --socket ... --log-file ~/log/github-tool.log
+chickenbot --log-file ~/log/chickenbot.log            # deployed
+chickenbot-github --log-file ~/log/github-tool.log
+uv run chickenbot --log-file ~/log/chickenbot.log     # from the checkout
 ```
 
 `-l trace` adds raw protocol. Turn it on to read the wire, not to run: SASL

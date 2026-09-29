@@ -61,6 +61,33 @@ The chat command is `.tune`, not `.set`, because an addressed line beginning
 with a common verb is somebody talking -- "chickenbot: set the topic" must not
 become a command.
 
+## Deploying
+
+The services run a **built artifact**, not the checkout, so editing the working
+tree cannot change a running bot:
+
+```bash
+cd ~/workspace/chickenbot && ./deploy/deploy.sh
+systemctl --user restart chickenbot@eaccel chickenbot-github@eaccel
+```
+
+`deploy.sh` refuses a dirty tree (`ALLOW_DIRTY=1` overrides), builds both
+wheels, installs them into `~/server/chickenbot/venv` with `--reinstall`
+(versions rarely change between deploys, so uv would otherwise skip the work),
+and writes `~/server/chickenbot/DEPLOYED` with the git revision, the build time
+and the installed versions. It prints the restart commands rather than running
+them: a deploy and a restart are separate decisions. `chickenbot --version`
+says what is installed, and the startup log line carries it too.
+
+The github tool is **its own distribution** (`external/pyproject.toml` ->
+`chickenbot-github-tool`), because a tool is a separate process that knows
+nothing of the bot's internals and packaging them together would make that a
+lie. In the checkout it is `python -m external.github`; installed it is the
+`chickenbot-github` console script, from the package `chickenbot_github`.
+
+Development still runs from the tree with `uv run chickenbot -c ...`; the
+deployed venv is only what systemd starts.
+
 ## Instances
 
 Several bots run side by side -- a hobby domain, a personal one, a work one --
@@ -132,8 +159,9 @@ uv sync                      # anthropic is in the dev group, so tests work bare
 uv run pytest tests -q
 uv run ruff check src tests
 uv run ruff format src tests
-uv run chickenbot -c chickenbot.toml --check-config
+uv run chickenbot -c chickenbot.toml --check-config   # from the checkout
 uv run chickenbot -c chickenbot.toml
+./deploy/deploy.sh                                    # install into the server venv
 ```
 
 ## Design decisions, and why

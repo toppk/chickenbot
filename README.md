@@ -30,6 +30,18 @@ uv sync --extra claude                        # LLM provider
 uv sync --extra signal --extra discord --extra telegram   # the networks you use
 ```
 
+## Running it as a service
+
+The services run what `deploy.sh` installed, not the checkout:
+
+```bash
+./deploy/deploy.sh                      # builds both wheels into ~/server/chickenbot/venv
+systemctl --user restart chickenbot@hobby chickenbot-github@hobby
+```
+
+`deploy/*.service` are systemd user templates; `%i` is the instance name and
+its run directory under `~/server/chickenbot/`.
+
 ## Talking to it
 
 `docs/chatting.md` is the guide for anybody sharing a channel with it:

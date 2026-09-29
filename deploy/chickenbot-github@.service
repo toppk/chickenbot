@@ -12,15 +12,12 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=%h/workspace/chickenbot
-# The venv directly, not `uv run`: uv spawns and waits rather than exec'ing, so
-# it would sit in the process table as a second copy of every instance. The
-# cost is that a dependency change needs `uv sync` by hand, which a service
-# quietly mutating its own venv on restart is no better than.
+# Its own distribution, installed into the same deployed venv.
+WorkingDirectory=%h/server/chickenbot/%i
 # CB_SOCKET_PATH, CB_GITHUB_DB_PATH, CB_INTERVAL and GITHUB_TOKEN, all from one file.
 EnvironmentFile=%h/server/chickenbot/%i/.env
 Environment=CB_INSTANCE=%i
-ExecStart=%h/workspace/chickenbot/.venv/bin/python -m external.github
+ExecStart=%h/server/chickenbot/venv/bin/chickenbot-github
 Restart=always
 RestartSec=10
 
