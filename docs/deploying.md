@@ -71,8 +71,37 @@ from:     /home/toppk/workspace/chickenbot
 versions: chickenbot 0.1.0, chickenbot-github-tool 0.1.0
 ```
 
-**Every clean deploy is tagged and the tag is pushed**, so what ran on a given
-evening can be checked out by name rather than reconstructed from a timestamp.
+## Releases and deploys are different tags
+
+- **`v0.2.0`** is a release: deliberate, rare, and `pyproject.toml`'s `version`
+  must match it. `deploy.sh` refuses to build a release tag that disagrees with
+  the declared version -- a release nobody can install by the name it claims.
+- **`deploy/20260929-013515`** is a deploy marker: automatic, one per deploy,
+  and there will be dozens.
+
+The build stamp comes from `git describe --tags --match 'v*'`, so a version
+says how far from a release it is:
+
+| Where HEAD is | `chickenbot --version` |
+|---|---|
+| exactly on `v0.2.0` | `0.2.0` |
+| three commits past it | `0.2.0+3.g54f0a4d` |
+| with uncommitted changes | `0.2.0+3.g54f0a4d.dirty` |
+| never released | `0.2.0+54f0a4d` |
+
+The suffix is a PEP 440 local version: not a different release, the same
+release plus some local commits, which is exactly what it is. Cutting one:
+
+```bash
+# bump `version` in pyproject.toml and external/pyproject.toml, commit, then
+git tag -a v0.2.0 -m "instances, restraint, room policy, identities, pacing"
+git push origin master v0.2.0
+./deploy/deploy.sh
+```
+
+**Every clean deploy is also tagged and the tag is pushed**, so what ran on a
+given evening can be checked out by name rather than reconstructed from a
+timestamp.
 A dirty build is not tagged: there would be nothing for the tag to point at.
 The revision is also written into the package as `_revision.txt`, which is how
 the running bot can say which commit it is — it has no working tree to ask,

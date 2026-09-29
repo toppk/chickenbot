@@ -12,6 +12,9 @@ VENV="$SERVER/venv"
 
 cd "$SRC"
 revision=$(git rev-parse --short HEAD)
+# Where this sits relative to the last release. `v0.2.0` exactly on one,
+# `v0.2.0-3-g54f0a4d` three commits past, the bare sha if there is no release.
+described=$(git describe --tags --match 'v*' --dirty --always 2>/dev/null || echo "$revision")
 dirty=""
 if ! git diff --quiet || ! git diff --cached --quiet; then
     dirty=" (dirty)"
@@ -21,11 +24,33 @@ if ! git diff --quiet || ! git diff --cached --quiet; then
     fi
 fi
 
-echo "building $revision$dirty"
+# pyproject stays authoritative; a release tag that disagrees with it is a
+# release nobody can install by the name it claims.
+declared=$(sed -n 's/^version = "\(.*\)"/\1/p' "$SRC/pyproject.toml" | head -1)
+case "$described" in
+    v*-*-g*|*dirty*) ;;  # past a release, or not clean: nothing to check
+    v*)
+        if [ "${described#v}" != "$declared" ]; then
+            echo "tag $described disagrees with pyproject version $declared" >&2
+            exit 1
+        fi
+        ;;
+esac
+
+# The stamp is a PEP 440 local version: empty on a release, "3.g54f0a4d" past
+# one, so `version()` reads 0.2.0 or 0.2.0+3.g54f0a4d.
+case "$described" in
+    v*-*-g*) stamp="$(echo "$described" | sed 's/^v[^-]*-\([0-9]*\)-g/\1.g/')" ;;
+    v*)      stamp="" ;;
+    *)       stamp="$described" ;;
+esac
+[ -n "$dirty" ] && stamp="${stamp:+$stamp.}dirty"
+
+echo "building $described$dirty"
 rm -rf "$SRC/dist"
 # Stamped into the package: the running bot has no working tree to ask, and
 # the whole point is that it is not running the working tree.
-echo "$revision$dirty" > "$SRC/src/chickenbot/_revision.txt"
+echo "$stamp" > "$SRC/src/chickenbot/_revision.txt"
 uv build --wheel -o "$SRC/dist" >/dev/null
 (cd "$SRC/external" && uv build --wheel -o "$SRC/dist" >/dev/null)
 
@@ -54,6 +79,7 @@ fi
 
 cat > "$SERVER/DEPLOYED" <<EOF
 revision: $revision$dirty
+release:  $described
 tag:      ${tag:-none}
 built:    $(date --iso-8601=seconds)
 from:     $SRC
