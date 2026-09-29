@@ -64,20 +64,20 @@ cannot be traced to anything. It builds both wheels, installs them into
 `~/server/chickenbot/venv`, and writes `~/server/chickenbot/DEPLOYED`:
 
 ```
-revision: 39af305
-tag:      deploy/20260929-012447
+revision: 57b2157
+release:  v0.2.1
 built:    2026-09-29T00:55:40-04:00
 from:     /home/toppk/workspace/chickenbot
 versions: chickenbot 0.1.0, chickenbot-github-tool 0.1.0
 ```
 
-## Releases and deploys are different tags
+## Releases
 
-- **`v0.2.0`** is a release: deliberate, rare, and `pyproject.toml`'s `version`
-  must match it. `deploy.sh` refuses to build a release tag that disagrees with
-  the declared version -- a release nobody can install by the name it claims.
-- **`deploy/20260929-013515`** is a deploy marker: automatic, one per deploy,
-  and there will be dozens.
+`v0.2.1` is a release: deliberate, rare, and `pyproject.toml`'s `version` must
+match it. `deploy.sh` refuses to build a release tag that disagrees with the
+declared version -- a release nobody can install by the name it claims. It is
+the only kind of tag; a deploy is recorded in `DEPLOYED`, not in git, because
+a tag per deploy is a hundred tags saying what one file already says.
 
 The build stamp comes from `git describe --tags --match 'v*'`, so a version
 says how far from a release it is:
@@ -150,8 +150,8 @@ chickenbot -c <config> activity --since 1 --exclude mode,topic,roster
 There is no rollback command. Check out the revision you want and deploy it:
 
 ```bash
-git tag -l 'deploy/*' | tail -5      # what was deployed, and when
-git checkout deploy/20260929-012447
+git tag -l 'v*'                      # the releases
+git checkout v0.2.0                  # or any revision from DEPLOYED
 ./deploy/deploy.sh
 systemctl --user restart chickenbot@eaccel chickenbot-github@eaccel
 git checkout master

@@ -63,24 +63,9 @@ fi
 uv pip install --python "$VENV/bin/python" --reinstall --quiet \
     "$SRC"/dist/chickenbot-*.whl "$SRC"/dist/chickenbot_github_tool-*.whl
 
-# A tag per deploy, pushed, so what ran on a given evening can be checked out
-# by name rather than reconstructed from a timestamp in DEPLOYED.
-tag="deploy/$(date +%Y%m%d-%H%M%S)"
-if [ -z "$dirty" ]; then
-    git tag -a "$tag" -m "deployed $revision" >/dev/null
-    if git remote get-url origin >/dev/null 2>&1; then
-        git push --quiet origin "$tag" 2>/dev/null && echo "tagged $tag" || echo "tagged $tag (not pushed)"
-    else
-        echo "tagged $tag (no remote)"
-    fi
-else
-    echo "not tagging a dirty build"
-fi
-
 cat > "$SERVER/DEPLOYED" <<EOF
 revision: $revision$dirty
 release:  $described
-tag:      ${tag:-none}
 built:    $(date --iso-8601=seconds)
 from:     $SRC
 versions: $("$VENV/bin/chickenbot" --version)
