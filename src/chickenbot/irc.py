@@ -419,7 +419,9 @@ class Client:
                 self._claim_bot_mode()
             case "221":  # RPL_UMODEIS - what the server says our modes are now
                 self.umodes = {c for c in (msg.params[1] if len(msg.params) > 1 else "") if c.isalpha()}
-                log.info("user modes: +%s", "".join(sorted(self.umodes)) or "none")
+                # Warning, like the startup line: one per connection, and the
+                # answer to "is it flagged as a bot" without a trace capture.
+                log.warning("user modes: +%s", "".join(sorted(self.umodes)) or "none")
             case "353":
                 self._handle_names(msg)
             case "367":  # RPL_BANLIST - <me> <chan> <mask> ...
