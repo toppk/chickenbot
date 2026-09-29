@@ -3,7 +3,7 @@
 # internals. Packaging it together would make that a lie.
 [project]
 name = "chickenbot-github-tool"
-version = "0.2.0"
+version = "0.2.1"
 description = "GitHub activity as an external chickenbot tool"
 requires-python = ">=3.11"
 license = { text = "MIT" }
