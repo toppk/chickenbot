@@ -15,6 +15,7 @@ import contextlib
 import json
 import logging
 import os
+import re
 import signal
 import sys
 import time
@@ -34,6 +35,9 @@ SUBJECTS = "github"  # the realm whose handles chickenbot should send us
 USERS: list[str] = []
 SEARCH_PACE = 2.0  # seconds between searches; the endpoint dislikes bursts
 REFRESH_GAP = 60.0  # a forced refresh this soon after the last one is just quota
+LOOKUP_MEMO = 600.0  # an ad-hoc lookup is remembered this long, against being asked twice
+LOOKUP_MEMOS = 32  # ...and only this many, because it is a memo and not a mirror
+_LOGIN = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]{0,38}")
 REFRESH_BUDGET = 25.0  # give up waiting rather than hold the conversation
 # Nobody needs GitHub at their fingertips. Answers come from the mirror, and a
 # stale mirror is refreshed behind the question rather than in front of it, so
@@ -99,6 +103,21 @@ TOOLS = [
                 },
             },
             "required": [],
+        },
+    },
+    {
+        "name": "github_lookup",
+        "description": (
+            "Look up ANY GitHub user, live, whether or not they are watched here. "
+            "Their recent public activity and their repositories. Use it for somebody "
+            "who is not on the watch list -- the other tools only know the people this "
+            "instance mirrors. It costs an API call or two and is not stored, so for "
+            "watched people the cheaper tools are better."
+        ),
+        "params": {
+            "type": "object",
+            "properties": {"user": {"type": "string", "description": "the GitHub login"}},
+            "required": ["user"],
         },
     },
     {
@@ -171,6 +190,8 @@ class Tool:
         self.users = list(users)
         self.interval = interval
         self._refreshing: asyncio.Task | None = None
+        # Ad-hoc lookups, remembered briefly. A memo, not a mirror.
+        self._looked_up: dict[str, tuple[float, str]] = {}
 
     def watch(self, users: list[str]) -> bool:
         """Replace who we follow. Returns whether it actually changed."""
@@ -345,6 +366,51 @@ class Tool:
             return f"as of {ago(int(time.time()) - min(stamps))} ago"
         return "watched, but nothing fetched yet; ask again in a moment"
 
+    async def github_lookup(self, args: dict) -> str:
+        """Anybody, live, not stored.
+
+        The watch list is about caching and polling, not about who may be asked
+        after. Somebody asked about once is not somebody to start mirroring, so
+        this fetches, answers, and keeps nothing but a short-lived memo against
+        being asked the same thing twice in a row.
+        """
+        user = str(args.get("user") or "").strip().lstrip("@")
+        if not user or not _LOGIN.fullmatch(user):
+            return "error: that is not a github login"
+        now = time.time()
+        if (memo := self._looked_up.get(user.casefold())) and now - memo[0] < LOOKUP_MEMO:
+            return f"{memo[1]} [looked up {ago(int(now - memo[0]))} ago]"
+
+        try:
+            repos = await self.api.repos(user)
+            events = await self.api.events(user)
+        except RuntimeError as exc:
+            return f"error: {exc}"
+        if not repos and not events:
+            return f"nothing public for {user}; either the login is wrong or there is nothing to see"
+
+        answer = self._describe(user, repos, events)
+        self._looked_up[user.casefold()] = (now, answer)
+        if len(self._looked_up) > LOOKUP_MEMOS:
+            oldest = min(self._looked_up, key=lambda k: self._looked_up[k][0])
+            self._looked_up.pop(oldest, None)
+        return f"{answer} [live, not mirrored]"
+
+    def _describe(self, user: str, repos: list[dict], events: list) -> str:
+        busiest = sorted(repos, key=lambda r: (-r["stars"], -r["pushed_at"]))[:3]
+        parts = []
+        if busiest:
+            named = ", ".join(f"{r['name']} ({r['stars']}*)" if r["stars"] else r["name"] for r in busiest)
+            parts.append(f"{len(repos)} repo(s), notably {named}")
+        if events:
+            tally: dict[str, int] = {}
+            for item in events:
+                tally[item.kind] = tally.get(item.kind, 0) + 1
+            recent = ", ".join(f"{n} {kind}" for kind, n in sorted(tally.items(), key=lambda kv: -kv[1]))
+            latest = max(item.ts for item in events)
+            parts.append(f"lately {recent}, last seen {ago(int(time.time() - latest))} ago")
+        return f"{user}: " + "; ".join(parts)
+
     async def github_refresh(self, args: dict) -> str:
         """Go and look now. The other tools answer from the mirror on purpose;
         this is the one that waits."""
@@ -370,6 +436,8 @@ class Tool:
     async def call(self, name: str, args: dict) -> str:
         """Every tool but one answers from the mirror without waiting. The
         exception is `github_refresh`, which is the point of it."""
+        if name == "github_lookup":
+            return await self.github_lookup(args)
         if name == "github_refresh":
             user = str(args.get("user") or "")
             return f"{await self.github_refresh(args)} [{self.age(user)}]"

@@ -757,3 +757,111 @@ def test_the_refresh_tool_is_declared():
     from external.github.__main__ import TOOLS
 
     assert any(t["name"] == "github_refresh" for t in TOOLS)
+
+
+# -- looking up somebody nobody is watching ------------------------------
+
+
+class FakeApi:
+    """Answers like the real one, counting how often it is asked."""
+
+    def __init__(self, repos=None, events=None, error=""):
+        self._repos, self._events, self.error = repos or [], events or [], error
+        self.calls = 0
+
+    async def repos(self, user):
+        self.calls += 1
+        if self.error:
+            raise RuntimeError(self.error)
+        return self._repos
+
+    async def events(self, user):
+        self.calls += 1
+        return self._events
+
+
+def repo(name, stars=0, pushed=None):
+    return {
+        "full_name": f"someone/{name}",
+        "owner": "someone",
+        "name": name,
+        "private": 0,
+        "fork": 0,
+        "archived": 0,
+        "stars": stars,
+        "open_issues": 0,
+        "pushed_at": pushed or int(time.time()),
+        "description": "",
+    }
+
+
+def event(kind="commit", when=None):
+    return Item(id="e1", kind=kind, actor="someone", repo="someone/thing", ts=when or int(time.time()))
+
+
+async def test_anybody_can_be_looked_up_watched_or_not(tmp_path):
+    store = Store(tmp_path / "g.db")
+    tool = Tool(store, FakeApi([repo("thing", stars=12)], [event()]), ["toppk"])
+    answer = await tool.call("github_lookup", {"user": "stranger"})
+    assert "stranger:" in answer and "thing (12*)" in answer
+    assert "live, not mirrored" in answer
+    store.close()
+
+
+async def test_a_lookup_is_not_a_reason_to_start_watching(tmp_path):
+    """The watch list is about caching and polling, not about who may be asked
+    after."""
+    store = Store(tmp_path / "g.db")
+    tool = Tool(store, FakeApi([repo("thing")], [event()]), ["toppk"])
+    await tool.call("github_lookup", {"user": "stranger"})
+    assert tool.users == ["toppk"]
+    assert store.repos() == []  # nothing mirrored
+    store.close()
+
+
+async def test_asking_twice_in_a_row_does_not_fetch_twice(tmp_path):
+    store = Store(tmp_path / "g.db")
+    api = FakeApi([repo("thing")], [event()])
+    tool = Tool(store, api, [])
+    await tool.call("github_lookup", {"user": "stranger"})
+    first = api.calls
+    again = await tool.call("github_lookup", {"user": "STRANGER"})
+    assert api.calls == first  # folded, and remembered
+    assert "looked up" in again
+    store.close()
+
+
+async def test_a_login_that_does_not_exist_says_so(tmp_path):
+    store = Store(tmp_path / "g.db")
+    tool = Tool(store, FakeApi([], []), [])
+    assert "nothing public for ghost" in await tool.call("github_lookup", {"user": "ghost"})
+    store.close()
+
+
+@pytest.mark.parametrize("bad", ["", "not a login", "-nope", "a" * 40, "../etc/passwd"])
+async def test_nonsense_never_reaches_the_api(tmp_path, bad):
+    store = Store(tmp_path / "g.db")
+    api = FakeApi()
+    tool = Tool(store, api, [])
+    assert "not a github login" in await tool.call("github_lookup", {"user": bad})
+    assert api.calls == 0
+    store.close()
+
+
+async def test_an_at_sign_is_forgiven(tmp_path):
+    """People paste @handle and urls; neither is a login."""
+    store = Store(tmp_path / "g.db")
+    tool = Tool(store, FakeApi([repo("thing")], []), [])
+    assert "stranger:" in await tool.call("github_lookup", {"user": "@stranger"})
+    store.close()
+
+
+async def test_a_rate_limit_is_reported_not_raised(tmp_path):
+    store = Store(tmp_path / "g.db")
+    tool = Tool(store, FakeApi(error="github rate limit reached"), [])
+    assert "rate limit" in await tool.call("github_lookup", {"user": "stranger"})
+    store.close()
+
+
+def test_the_lookup_tool_is_declared():
+    assert any(t["name"] == "github_lookup" for t in TOOLS)

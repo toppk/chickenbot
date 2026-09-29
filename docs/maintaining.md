@@ -155,6 +155,14 @@ IRCv3 bot mode and the platform flags are honoured automatically; this is for
 the ones that do not flag themselves. On IRC `+B` is a mode a client sets on
 itself, so no amount of ops lets chickenbot set it for somebody else.
 
+## Who the github tool watches
+
+The watch list is the *mirror*: the people it polls, caches and can answer
+about deeply and cheaply. It comes from the identities linked to a GitHub
+handle, so `who … --alias github/x` adds somebody to it and `--unlink` removes
+them. It is not a list of who may be asked about — `ext_github_lookup` answers
+for anybody, live, and stores nothing.
+
 ## Day-to-day, in the partyline
 
 Most of the above has a chat equivalent for an owner, in the room configured

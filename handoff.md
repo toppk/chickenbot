@@ -864,6 +864,13 @@ is a separate message and IRC paces sends at `send_interval`.
 
 ## External tools
 
+**The watch list is about caching, not about who may be asked after.**
+`ext_github_lookup` answers for any login, live, and stores nothing -- somebody
+asked about once is not somebody to start mirroring. It keeps a ten-minute memo
+against being asked twice in a row, validates the login before spending a
+request, and is granted open because reading a public profile is not a
+privilege. The mirrored tools stay cheaper and deeper for the watched people.
+
 **Tools cache; they do not prefetch.** `ext_github_refresh` is the one that
 goes and looks now -- for "has it landed yet" -- and it waits rather than
 answering from the mirror. It is owner-only (unlisted in `grants`), refuses a
