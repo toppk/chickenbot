@@ -45,6 +45,9 @@ SETTABLE = (
     "llm.follow_seconds",
     "llm.pause_seconds",
     "llm.max_silences",
+    # Not a credential and not authority: whether it flags itself as a bot
+    # changes only whether other bots deign to talk to it.
+    "irc.bot_mode",
     "github.summarize",
     "github.max_per_poll",
 )

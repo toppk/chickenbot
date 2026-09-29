@@ -938,6 +938,31 @@ async def cmd_bot(h: Handler, ctx: Context) -> None:
     )
 
 
+@command("botmode", owner=True, tier=ALL, usage="botmode [on|off]", blurb="flag myself as a bot, or not")
+async def cmd_botmode(h: Handler, ctx: Context) -> None:
+    """A user mode is self-only, so `/mode chickenbot -B` from somebody else's
+    client is refused by the server. This is the bot asking on its own behalf."""
+    client = getattr(ctx.transport, "client", None)
+    flag = client.isupport.bot_mode if client else ""
+    if client is None or not flag:
+        ctx.say(f"{ctx.nick}: this network has no bot mode")
+        return
+    want = ctx.args.strip().lower()
+    if not want:
+        ctx.say(f"{ctx.nick}: +{flag} is {'set' if flag in client.umodes else 'not set'}")
+        return
+    if want not in ("on", "off"):
+        ctx.say(f"usage: {h.cfg.prefix}botmode [on|off]")
+        return
+
+    on = want == "on"
+    h.settings.set("irc.bot_mode", "true" if on else "false", author=ctx.account or ctx.nick)
+    client.claim_bot_mode = on
+    client.send("MODE", client.nick, ("+" if on else "-") + flag)
+    client.send("MODE", client.nick)  # and make the server say what took
+    ctx.say(f"{ctx.nick}: asked the server for {'+' if on else '-'}{flag}; it sticks across restarts")
+
+
 @command("spend", owner=True, tier=ALL, blurb="what i have cost")
 async def cmd_spend(h: Handler, ctx: Context) -> None:
     from .spend import report

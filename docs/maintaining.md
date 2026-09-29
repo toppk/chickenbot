@@ -152,7 +152,10 @@ chickenbot -c <config> bot irc:irc.chonkbase.net eggbot --forget
 ```
 
 IRCv3 bot mode and the platform flags are honoured automatically; this is for
-the ones that do not flag themselves. On IRC `+B` is a mode a client sets on
+the ones that do not flag themselves. Whether chickenbot flags *itself* is
+`.botmode on|off` in the partyline, or `irc.bot_mode` in the toml — a user
+mode is self-only, so `/mode chickenbot -B` from your own client is refused by
+the server. On IRC `+B` is a mode a client sets on
 itself, so no amount of ops lets chickenbot set it for somebody else.
 
 ## Who the github tool watches

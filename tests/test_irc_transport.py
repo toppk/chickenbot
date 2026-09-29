@@ -223,3 +223,69 @@ async def test_an_action_is_still_ignored(irc):
 async def test_the_gecos_carries_the_version(irc):
     assert irc.client.realname.startswith("chickenbot 0")
     assert irc.client.version.startswith("chickenbot 0")
+
+
+async def test_botmode_off_asks_the_server_itself(irc, cfg, store):
+    """A user mode is self-only: `/mode chickenbot -B` from another client is
+    refused, so the bot has to ask on its own behalf."""
+    from chickenbot.commands import COMMANDS, Context, Handler
+
+    await feed(irc, ":toy 005 chickenbot BOT=B :are supported")
+    h = Handler(cfg, store, None, None)
+    c = Context(
+        handler=h,
+        transport=irc,
+        nick="alice",
+        account="alice",
+        channel="#chan",
+        args="off",
+        is_owner=True,
+        in_channel=True,
+    )
+    irc.sent.clear()
+    await COMMANDS["botmode"].run(h, c)
+    assert ("MODE", "chickenbot", "-B") in irc.sent
+    assert store.settings()["irc.bot_mode"] == "False"
+    assert irc.client.claim_bot_mode is False
+
+
+async def test_botmode_on_puts_it_back(irc, cfg, store):
+    from chickenbot.commands import COMMANDS, Context, Handler
+
+    await feed(irc, ":toy 005 chickenbot BOT=B :are supported")
+    h = Handler(cfg, store, None, None)
+    c = Context(
+        handler=h,
+        transport=irc,
+        nick="alice",
+        account="alice",
+        channel="#chan",
+        args="on",
+        is_owner=True,
+        in_channel=True,
+    )
+    irc.sent.clear()
+    await COMMANDS["botmode"].run(h, c)
+    assert ("MODE", "chickenbot", "+B") in irc.sent
+    assert store.settings()["irc.bot_mode"] == "True"
+
+
+async def test_botmode_reports_what_the_server_said(irc, cfg, store):
+    from chickenbot.commands import COMMANDS, Context, Handler
+
+    await feed(irc, ":toy 005 chickenbot BOT=B :are supported")
+    await feed(irc, ":toy 221 chickenbot +B :bot")
+    h = Handler(cfg, store, None, None)
+    c = Context(
+        handler=h,
+        transport=irc,
+        nick="alice",
+        account="alice",
+        channel="#chan",
+        args="",
+        is_owner=True,
+        in_channel=True,
+    )
+    await COMMANDS["botmode"].run(h, c)
+    said = next(c[2] for c in reversed(irc.sent) if c[0] == "PRIVMSG")
+    assert "+B is set" in said
