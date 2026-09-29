@@ -705,15 +705,21 @@ def from_instance(*parts: str) -> str:
 
 def versions() -> str:
     """What is actually installed, which is not always what the checkout says."""
-    from importlib.metadata import PackageNotFoundError, version
+    from . import revision
 
-    out = []
-    for dist in ("chickenbot", "chickenbot-github-tool"):
-        try:
-            out.append(f"{dist} {version(dist)}")
-        except PackageNotFoundError:
-            out.append(f"{dist} (not installed)")
+    out = [f"chickenbot {_installed('chickenbot')}+{revision()}"]
+    out.append(f"chickenbot-github-tool {_installed('chickenbot-github-tool')}")
     return ", ".join(out)
+
+
+def _installed(dist: str) -> str:
+    from importlib.metadata import PackageNotFoundError
+    from importlib.metadata import version as installed
+
+    try:
+        return installed(dist)
+    except PackageNotFoundError:
+        return "(not installed)"
 
 
 def log_handlers(path: str) -> list[logging.Handler] | None:
