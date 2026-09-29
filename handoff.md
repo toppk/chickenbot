@@ -535,6 +535,26 @@ is left:
 - xAI is still accepted but its live-search parameters were never implemented,
   so `provider = "xai"` answers without searching.
 
+### Filed upstream against chonkline — all fixed (2026-09-29)
+
+`#37`-`#42` are closed by chonkline `600bceb`: NickServ SET PASSWORD, reserved
+service nicks, founder ops on identify, **SASL PLAIN accepted while capability
+negotiation is still open**, and LIST/WHO/NAMES queued as one write with
+SAFELIST and ELIST=M advertised. `#44` stops a banned user speaking.
+
+The SASL fix means holding NICK/USER until authentication finishes is no
+longer necessary *on chonkbase*. It is kept anyway: it is correct everywhere,
+and a server that registers the connection the moment NICK and USER pair up
+still answers 907 without it.
+
+Newly advertised and now requested: `userhost-in-names` (NAMES carries
+`nick!user@host`, so a ban mask is known for somebody who has not spoken since
+we joined -- `i do not know X'"'"'s host` was a real refusal) and `away-notify`
+(the roster marks who is present but not about). `batch` and
+`labeled-response` are offered and deliberately not requested: they are worth
+having when something correlates replies to its own requests, and nothing
+here does.
+
 ### Filed upstream against chonkline — all three fixed (2026-09-26)
 
 Issues [#33](https://github.com/iconidentify/chonkline/issues/33) (casemapping),

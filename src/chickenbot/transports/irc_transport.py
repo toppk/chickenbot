@@ -98,7 +98,8 @@ class IRCTransport:
         if chan is None:
             return []
         return sorted(
-            (nick, self.client.account_of(nick), "".join(sorted(modes))) for nick, modes in chan.members.items()
+            (nick, self.client.account_of(nick), "".join(sorted(modes)) + ("a" if self.client.is_away(nick) else ""))
+            for nick, modes in chan.members.items()
         )
 
     def opped(self, room: str) -> bool | None:

@@ -198,7 +198,8 @@ def who_is_here(ctx: Context) -> tuple[list[str], list[str]]:
     is in it without asking anybody, and so should the bot.
     """
     roster = getattr(ctx.transport, "roster", lambda _room: [])(ctx.channel)
-    return [nick for nick, _account, _modes in roster], [n for n, _a, modes in roster if "o" in modes]
+    here = [f"{nick} (away)" if "a" in modes else nick for nick, _account, modes in roster]
+    return here, [n for n, _a, modes in roster if "o" in modes]
 
 
 def powers(h: Handler, ctx: Context) -> str:

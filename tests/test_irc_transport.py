@@ -289,3 +289,27 @@ async def test_botmode_reports_what_the_server_said(irc, cfg, store):
     await COMMANDS["botmode"].run(h, c)
     said = next(c[2] for c in reversed(irc.sent) if c[0] == "PRIVMSG")
     assert "+B is set" in said
+
+
+async def test_names_carries_the_host_when_the_server_sends_it(irc):
+    """userhost-in-names: a ban mask is then known for somebody who has not
+    spoken since we joined."""
+    await feed(irc, ":chickenbot!u@h JOIN #chan")
+    await feed(irc, ":server 353 chickenbot = #chan :@chrisk!chrisk@chonk.example nate!n@elsewhere")
+    assert irc.client.channels["#chan"].host("chrisk") == "chonk.example"
+    assert irc._mask("#chan", "nate") == "*!*@elsewhere"
+
+
+async def test_a_plain_names_list_is_still_understood(irc):
+    await feed(irc, ":server 353 chickenbot = #chan :@chrisk nate")
+    assert set(irc.client.channels["#chan"].members) == {"chrisk", "nate"}
+
+
+async def test_away_is_tracked_and_shown_in_the_roster(irc):
+    await feed(irc, ":server 353 chickenbot = #chan :chrisk nate")
+    await feed(irc, ":chrisk!u@h AWAY :making tea")
+    assert irc.client.is_away("chrisk")
+    assert ("chrisk", "", "a") in irc.roster("#chan")
+
+    await feed(irc, ":chrisk!u@h AWAY")
+    assert not irc.client.is_away("chrisk")

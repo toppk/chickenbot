@@ -33,6 +33,11 @@ WANTED_CAPS = frozenset(
         "extended-join",
         "server-time",
         "multi-prefix",
+        # NAMES carries nick!user@host, so a ban mask is known for everyone in
+        # the room rather than only for whoever has spoken since we joined.
+        "userhost-in-names",
+        # Who is actually about, rather than merely connected.
+        "away-notify",
         "chghost",
         "sasl",
     }
@@ -283,6 +288,8 @@ class Client:
         # bot flag actually took is otherwise only visible by WHOIS from
         # another client.
         self.umodes: set[str] = set()
+        # Folded nicks the server has told us are away.
+        self.away: set[str] = set()
         self.handler: Handler | None = None
 
         self._reader: asyncio.StreamReader | None = None
@@ -324,6 +331,13 @@ class Client:
     def account_of(self, nick: str) -> str:
         """The sender's services account, learned from extended-join/ACCOUNT/WHOIS."""
         return self.accounts.get(self.fold(nick), "")
+
+    def _set_away(self, nick: str, away: bool) -> None:
+        key = self.fold(nick)
+        self.away.add(key) if away else self.away.discard(key)
+
+    def is_away(self, nick: str) -> bool:
+        return self.fold(nick) in self.away
 
     def _learn_account(self, nick: str, account: str) -> None:
         key = self.fold(nick)
@@ -368,6 +382,7 @@ class Client:
         self._bot_mode_set = False
         self._registered_sent = False
         self.umodes = set()
+        self.away.clear()
         self.nick = self.wanted_nick
         drain = asyncio.create_task(self._drain_outbox())
         try:
@@ -504,6 +519,12 @@ class Client:
                 self.accounts.pop(self.fold(msg.nick), None)
             case "CHGHOST":
                 self._handle_chghost(msg)
+            case "AWAY":
+                # away-notify: present but not about. A reason means gone, no
+                # parameter at all means back. `text` is no use here -- it
+                # wants two params, and AWAY carries one or none.
+                if msg.source:
+                    self._set_away(msg.nick, bool(msg.params and msg.params[0].strip()))
             case "ACCOUNT":
                 self._learn_account(msg.nick, msg.params[0] if msg.params else "*")
             case "330":  # RPL_WHOISACCOUNT - <me> <nick> <account> :is logged in as
@@ -645,8 +666,14 @@ class Client:
             while entry and entry[0] in char_to_mode:
                 modes.add(char_to_mode[entry[0]])
                 entry = entry[1:]
-            if entry:
-                chan.add(entry.split("!", 1)[0], modes)
+            if not entry:
+                continue
+            nick = entry.split("!", 1)[0]
+            chan.add(nick, modes)
+            # userhost-in-names: the full source, so a ban mask is known for
+            # somebody who has not spoken since we joined.
+            if "@" in entry:
+                chan.hosts[chan.fold(nick)] = entry
 
     def _handle_join(self, msg: Message) -> None:
         name = msg.target
