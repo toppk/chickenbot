@@ -123,16 +123,20 @@ def test_a_person_with_no_notes_stays_out_of_the_prompt(handler, store):
 
 
 async def test_joining_is_one_line_in_the_record(handler, store):
-    tr = room_of(handler, [("chrisk", "chrisk", "o"), ("nate", "", ""), ("chickenbot", "chickenbot", "")])
+    """One row, not two: dispatch opens the activity for the event and this
+    adds to it."""
+    from chickenbot.events import Event, Kind
     from chickenbot.observe import set_sink
 
+    tr = room_of(handler, [("chrisk", "chrisk", "o"), ("nate", "", ""), ("chickenbot", "chickenbot", "")])
     set_sink(store.record_activity)
     try:
-        handler.identities.note_join(tr, "#chan")
+        await handler.dispatch(Event(kind=Kind.ROSTER, transport=tr, room="#chan", sender=tr.me, account="", text=""))
     finally:
         set_sink(None)
-    row = store.activity(kind="roster")[0]
-    assert row["outcome"] == "recorded" and row["room"] == "#chan"
+    rows = store.activity(kind="roster")
+    assert len(rows) == 1
+    assert rows[0]["outcome"] == "recorded" and rows[0]["room"] == "#chan"
 
 
 async def test_the_end_of_names_is_what_triggers_it(irc):  # noqa: F811

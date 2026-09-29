@@ -18,7 +18,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from .observe import activity, note
+from .observe import note
 from .transport import Transport
 
 log = logging.getLogger(__name__)
@@ -65,19 +65,22 @@ class Identities:
     def note_join(self, tr: Transport, room: str) -> None:
         """On walking in: what the room looked like, as one line in the record.
 
+        Dispatch already opened the activity for this event, so this adds
+        fields to it rather than starting a second one.
+
         The roster itself is not kept -- it is a snapshot of a minute, and the
-        membership table is the part that lasts.
+        membership table is the part that lasts. Most accounts are not known
+        yet either: WHOIS answers arrive after the names do, and the sweep
+        picks them up.
         """
         roster = tr.roster(room)
-        named = [nick for nick, _account, _modes in roster]
         ops = [nick for nick, _account, modes in roster if "o" in modes]
         known = [nick for nick, account, _modes in roster if account]
-        with activity(kind="roster", realm=tr.realm, room=room, nick=tr.me, account="-"):
-            fresh = self.note_room(tr, room)
-            note(
-                outcome="recorded",
-                here=len(named),
-                identified=len(known),
-                ops=",".join(ops) or "-",
-                new=fresh,
-            )
+        fresh = self.note_room(tr, room)
+        note(
+            outcome="recorded",
+            here=len(roster),
+            identified=len(known),
+            ops=",".join(ops) or "-",
+            new=fresh,
+        )
