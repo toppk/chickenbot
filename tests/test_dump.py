@@ -116,3 +116,12 @@ async def test_a_long_dump_is_truncated_not_flooded(handler, transport, monkeypa
     said = await dump(handler, transport, "tools")
     assert len(said) == 3
     assert said[-1].startswith("... and ")
+
+
+async def test_the_comms_dump_says_whether_the_bot_flag_took(irc):  # noqa: F811
+    await feed(irc, ":toy 005 chickenbot BOT=B :are supported")
+    assert "NOT flagged as a bot" in irc.describe()[0]
+
+    await feed(irc, ":toy 221 chickenbot +B :bot")
+    assert "flagged as a bot" in irc.describe()[0]
+    assert "NOT flagged" not in irc.describe()[0]

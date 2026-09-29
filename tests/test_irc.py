@@ -220,3 +220,18 @@ def test_topiclen_is_parsed():
     assert sup.topiclen == 0
     sup.update(["TOPICLEN=390"])
     assert sup.topiclen == 390
+
+
+async def test_the_server_says_which_modes_took():
+    """`MODE nick +B` is a request; RPL_UMODEIS is the answer. Without keeping
+    it, whether the bot flag took is only visible by WHOIS from elsewhere."""
+    client = _client()
+    await client._handle_protocol(parse(":toy 001 chickenbot :welcome"))
+    await client._handle_protocol(parse(":toy 005 chickenbot BOT=B :are supported"))
+    await client._handle_protocol(parse(":toy 221 chickenbot +B :bot"))
+    assert client.umodes == {"B"}
+
+
+async def test_modes_start_empty_and_clear_on_reconnect():
+    client = _client()
+    assert client.umodes == set()

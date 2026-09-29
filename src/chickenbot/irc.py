@@ -251,6 +251,10 @@ class Client:
         self.accounts: dict[str, str] = {}
         self.ready = asyncio.Event()
         self._bot_mode_set = False
+        # What the server says our own modes are, from RPL_UMODEIS. Whether the
+        # bot flag actually took is otherwise only visible by WHOIS from
+        # another client.
+        self.umodes: set[str] = set()
         self.handler: Handler | None = None
 
         self._reader: asyncio.StreamReader | None = None
@@ -335,6 +339,7 @@ class Client:
         self._pending_caps.clear()
         self._bot_mode_set = False
         self._registered_sent = False
+        self.umodes = set()
         self.nick = self.wanted_nick
         drain = asyncio.create_task(self._drain_outbox())
         try:
@@ -412,6 +417,9 @@ class Client:
             case "005":
                 self.isupport.update(msg.params[1:-1])
                 self._claim_bot_mode()
+            case "221":  # RPL_UMODEIS - what the server says our modes are now
+                self.umodes = {c for c in (msg.params[1] if len(msg.params) > 1 else "") if c.isalpha()}
+                log.info("user modes: +%s", "".join(sorted(self.umodes)) or "none")
             case "353":
                 self._handle_names(msg)
             case "367":  # RPL_BANLIST - <me> <chan> <mask> ...

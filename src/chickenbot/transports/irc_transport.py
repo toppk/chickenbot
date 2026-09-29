@@ -79,7 +79,11 @@ class IRCTransport:
         return None if chan is None else chan.topic
 
     def describe(self) -> list[str]:
-        out = []
+        flagged = self.client.isupport.bot_mode and self.client.isupport.bot_mode in self.client.umodes
+        out = [
+            f"me: {self.me} +{''.join(sorted(self.client.umodes)) or 'none'}"
+            + (", flagged as a bot" if flagged else ", NOT flagged as a bot")
+        ]
         for chan in self.client.channels.values():
             ops = sorted(n for n, m in chan.members.items() if "o" in m)
             bits = [f"{len(chan.members)} here"]
