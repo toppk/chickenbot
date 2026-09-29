@@ -593,6 +593,16 @@ class Store:
         )
         self._db.commit()
 
+    def seen_account(self, realm: str, account: str) -> bool:
+        """Has this services account ever spoken in a room we are in? The
+        cheapest honest answer to "do we know this person at all"."""
+        if not account:
+            return False
+        row = self._db.execute(
+            "SELECT 1 FROM chatlog WHERE realm = ? AND account = ? COLLATE NOCASE LIMIT 1", (realm, account)
+        ).fetchone()
+        return row is not None
+
     def last_human_line(self, realm: str, room: str) -> int:
         """When a person last said anything here, 0 if never. The bot's own
         lines do not count: talking to itself is not a lively room."""

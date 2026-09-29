@@ -198,6 +198,10 @@ class Config:
     log_level: str = "info"  # trace | debug | info | warn | error
     log_file: str = ""  # empty: stdout, for journald to keep
     chatlog_days: int = 365
+    # Who may talk to the bot privately: owners | known | anyone. A direct
+    # message has no room policy behind it and no witnesses, so the default is
+    # the narrow one.
+    direct: str = "owners"
     irc: IRCConfig = field(default_factory=IRCConfig)
     signal: SignalConfig = field(default_factory=SignalConfig)
     discord: DiscordConfig = field(default_factory=DiscordConfig)

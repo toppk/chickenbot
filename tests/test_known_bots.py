@@ -99,3 +99,83 @@ def test_the_cli_needs_a_realm_to_mark(tmp_path, store):
 
 def test_an_empty_list_says_what_is_automatic(tmp_path, store):
     assert "bot mode" in cli(tmp_path, store, "bot")[1]
+
+
+# -- told in chat, not only at the command line -------------------------
+
+
+def chat_ctx(handler, *, args="", owner=True):
+    from chickenbot.commands import Context
+
+    return Context(
+        handler=handler,
+        transport=FakeTransport(),
+        nick="alice",
+        account="alice",
+        channel="#chan",
+        args=args,
+        is_owner=owner,
+        in_channel=True,
+    )
+
+
+async def test_an_owner_can_say_it_in_the_channel(handler, store):
+    from chickenbot.commands import COMMANDS
+
+    c = chat_ctx(handler, args="eggbot")
+    await COMMANDS["bot"].run(handler, c)
+    assert store.is_bot("fake", "eggbot")
+    assert "eggbot is a bot" in c.transport.sent[-1][1]
+
+
+async def test_it_can_be_taken_back_in_the_channel(handler, store):
+    from chickenbot.commands import COMMANDS
+
+    store.mark_bot("fake", "eggbot")
+    c = chat_ctx(handler, args="forget eggbot")
+    await COMMANDS["bot"].run(handler, c)
+    assert not store.is_bot("fake", "eggbot")
+
+
+async def test_marking_is_partyline_work(handler):
+    from chickenbot.commands import COMMANDS
+
+    assert COMMANDS["bot"].owner is True and COMMANDS["bot"].tier == "all"
+
+
+async def test_the_model_can_record_it_when_told(handler, store):
+    from chickenbot.tools import ToolBox
+
+    result = await ToolBox(handler, chat_ctx(handler)).run("who_is_bot", {"handle": "eggbot"})
+    assert "eggbot is a bot" in result
+    assert store.is_bot("fake", "eggbot")
+
+
+async def test_the_model_cannot_silence_an_owner(handler, store):
+    from chickenbot.tools import ToolBox
+
+    result = await ToolBox(handler, chat_ctx(handler)).run("who_is_bot", {"handle": "alice"})
+    assert "owner" in result and not store.is_bot("fake", "alice")
+
+
+async def test_the_model_cannot_silence_the_bot_itself(handler, store):
+    from chickenbot.tools import ToolBox
+
+    result = await ToolBox(handler, chat_ctx(handler)).run("who_is_bot", {"handle": "chickenbot"})
+    assert "myself" in result and not store.is_bot("fake", "chickenbot")
+
+
+async def test_only_an_owner_may_tell_it(handler):
+    from chickenbot.tools import ToolBox
+
+    box = ToolBox(handler, chat_ctx(handler, owner=False))
+    assert "owner-only" in await box.run("who_is_bot", {"handle": "eggbot"})
+    assert "who_is_bot" not in [s["function"]["name"] for s in box.schemas]
+
+
+async def test_taking_it_back_through_the_model(handler, store):
+    from chickenbot.tools import ToolBox
+
+    store.mark_bot("fake", "eggbot")
+    result = await ToolBox(handler, chat_ctx(handler)).run("who_is_bot", {"handle": "eggbot", "forget": True})
+    assert "no longer marked" in result and not store.is_bot("fake", "eggbot")

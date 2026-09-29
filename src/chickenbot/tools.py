@@ -333,6 +333,41 @@ async def tool_self_activity(h: Handler, ctx: Context, args: dict) -> str:
 
 
 @tool(
+    "who_is_bot",
+    owner=True,
+    description=(
+        "Record that a nick or account is another bot, when someone says so -- "
+        "'eggbot is a bot', 'ignore eggbot, it's automated'. Afterwards its messages "
+        "are logged and never answered. Only for networks whose bots do not flag "
+        "themselves; a bot that sets the IRC +B mode is already recognised. "
+        "Owner-only: it decides who the bot stops listening to."
+    ),
+    params={
+        "type": "object",
+        "properties": {
+            "handle": {"type": "string", "description": "the nick or services account"},
+            "forget": {"type": "boolean", "description": "true if they are not a bot after all"},
+        },
+        "required": ["handle"],
+    },
+)
+async def tool_who_is_bot(h: Handler, ctx: Context, args: dict) -> str:
+    handle = str(args.get("handle", "")).strip()
+    realm = ctx.transport.realm
+    if not handle:
+        return "error: which nick or account?"
+    if ctx.transport.fold(handle) == ctx.transport.fold(ctx.transport.me):
+        return "error: i am not going to stop listening to myself"
+    if ctx.transport.is_owner(handle):
+        return f"error: {handle} is an owner here; marking them a bot would silence them"
+    if args.get("forget"):
+        return "no longer marked as a bot" if h.store.forget_bot(realm, handle) else f"{handle} was not marked"
+    if not h.store.mark_bot(realm, handle, ctx.account or ctx.nick):
+        return f"{handle} was already known to be a bot"
+    return f"noted: {handle} is a bot on {realm}, and will not be answered"
+
+
+@tool(
     "chan_state",
     description=(
         "Who is in this room, what modes are set, and the current ban list. "

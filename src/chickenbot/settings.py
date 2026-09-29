@@ -27,6 +27,7 @@ log = logging.getLogger(__name__)
 # Dotted paths into Config. Anything not named here cannot be set at runtime.
 SETTABLE = (
     "prefix",
+    "direct",
     "chatlog_days",
     "llm.enabled",
     "llm.model",

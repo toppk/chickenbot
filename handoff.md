@@ -502,6 +502,25 @@ Deliberately not asked for, because chickenbot uses none of them: `WHOX`,
 `chathistory`, `echo-message`, `labeled-response`, `batch`, `multiline`, `setname`,
 `MONITOR`, `standard-replies`. Keep it that way — asks should track real need.
 
+## Who may talk to it privately
+
+A direct message has no room policy behind it and no witnesses. `direct` is a
+setting (`chickenbot tune direct known`), and the default is the narrow one:
+
+- `owners` (default) -- the services accounts in the config.
+- `known` -- those, plus anyone whose account has spoken in a room the bot
+  sits in.
+- `anyone` -- what it says.
+
+An unauthenticated sender is nobody in every mode but `anyone`, because the
+owner check is on the services account. Being turned away is explained once an
+hour per sender: silence reads as broken, and a reply to every message is a
+flood waiting for someone to aim it. A marked bot gets nothing at all.
+
+Note that an owner in a direct message reaches the *whole* command set --
+room policies gate rooms, and a DM is not one. That is the point of the narrow
+default.
+
 ## Bots that will not say so
 
 IRCv3 bot mode and the platform flags (Discord, Telegram) are honoured
@@ -513,6 +532,13 @@ chickenbot bot irc:irc.chonkbase.net eggbot   # nick or services account
 chickenbot bot                                 # list them
 chickenbot bot irc:irc.chonkbase.net eggbot --forget
 ```
+
+It can also be said in the partyline -- `.bot eggbot`, `.bot forget eggbot` --
+or simply mentioned to it: "eggbot is a bot" reaches the `who_is_bot` tool,
+which is owner-gated and refuses to mark an owner or the bot itself. On IRC
+`+B` is a user mode a client sets on itself; no amount of ops lets one client
+set it on another (chonkline applies MODE to the sender's own record), so
+remembering it here is the only thing that works.
 
 Marked handles are folded per the network's casemapping, checked against both
 the nick and the account, and never shared between realms. What they say is

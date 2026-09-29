@@ -170,9 +170,9 @@ async def test_a_watch_belongs_to_one_room_on_one_network(handler, store):
 
 async def test_direct_message_needs_no_prefix(cfg, transport, store):
     handler = Handler(cfg, store, StubProvider("hi"), None)
-    await send(handler, transport, "uptime", room="nate", is_group=False)
+    await send(handler, transport, "uptime", room="alice", account="alice", is_group=False)
     assert "up " in transport.said()[0]
-    assert transport.sent[0][0] == "nate"
+    assert transport.sent[0][0] == "alice"
 
 
 async def test_unknown_prefixed_command_is_silent(handler, transport):
@@ -239,7 +239,7 @@ async def test_the_prompt_says_which_network_and_room_it_is_in(cfg, transport, s
 async def test_a_direct_message_says_so(cfg, transport, store):
     provider = StubProvider()
     handler = Handler(cfg, store, provider, None)
-    await send(handler, transport, "hello there", room="nate", is_group=False)
+    await send(handler, transport, "hello there", room="alice", account="alice", is_group=False)
     assert "kind=direct message" in provider.prompts[-1]
 
 
