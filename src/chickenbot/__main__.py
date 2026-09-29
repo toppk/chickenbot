@@ -117,6 +117,7 @@ async def run(cfg: config.Config) -> int:
     tasks = [asyncio.create_task(supervise(tr), name=f"tr:{name}") for name, tr in transports.items()]
     tasks.append(asyncio.create_task(prune_daily(store, cfg.chatlog_days), name="prune"))
     tasks.append(asyncio.create_task(scheduler.run(), name="scheduler"))
+    tasks.append(asyncio.create_task(handler.identities.run(), name="identities"))
     if cfg.tools.enabled:
         tool_server = ToolServer(cfg.tools, transports, handler.dispatch, subjects=store.handles)
         handler.tool_server = tool_server

@@ -36,6 +36,11 @@ class TelegramTransport:
     def is_ignored(self, sender: str) -> bool:
         return self._members.is_ignored(sender)
 
+    def roster(self, room: str) -> list[tuple[str, str, str]]:
+        """Not modelled here: membership comes from the platform, and the bot
+        learns who is about from who speaks."""
+        return []
+
     def opped(self, room: str) -> bool | None:
         """Not modelled here: moderation goes through the platform's own
         permissions, which refuse the call rather than being asked first."""

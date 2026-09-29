@@ -54,6 +54,11 @@ class Transport(Protocol):
 
     def is_ignored(self, sender: str) -> bool: ...
 
+    def roster(self, room: str) -> list[tuple[str, str, str]]:
+        """(nick, account, modes) for everyone in the room, as far as the
+        network has said. An empty account means nobody vouched for them."""
+        return []
+
     def opped(self, room: str) -> bool | None:
         """Whether we currently hold privilege in this room. None where the
         question does not apply, which is not the same as no."""

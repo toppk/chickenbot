@@ -71,6 +71,18 @@ CREATE TABLE IF NOT EXISTS alias (
 );
 CREATE INDEX IF NOT EXISTS alias_handle ON alias (handle COLLATE NOCASE);
 
+-- Which identity sits in which room. A realm has many rooms, and somebody
+-- being in one says nothing about another: this is what tells them apart.
+CREATE TABLE IF NOT EXISTS membership (
+    realm      TEXT NOT NULL,
+    room       TEXT NOT NULL,
+    person_id  INTEGER NOT NULL REFERENCES person(id) ON DELETE CASCADE,
+    nick       TEXT NOT NULL DEFAULT '',   -- the last one they used there
+    first_seen INTEGER NOT NULL,
+    last_seen  INTEGER NOT NULL,
+    PRIMARY KEY (realm, room, person_id)
+);
+
 -- What a room is like. A channel has a character of its own -- how formal it
 -- is, what the running jokes are, what not to touch -- and that shapes how the
 -- bot behaves there quite apart from who is in it.
@@ -796,6 +808,54 @@ class Store:
         ).fetchone()
         return (int(row["days"] or 0), int(row["lines"] or 0)) if row else (0, 0)
 
+    def note_identity(self, realm: str, account: str, source: str = "services") -> int | None:
+        """The person behind a services account, created if this is the first
+        we have seen of them. Only ever called for an account the network
+        vouched for: an unauthenticated nick is nobody, and making a record of
+        it would be making one up."""
+        if not account:
+            return None
+        existing = self.person_id(realm, account)
+        if existing is not None:
+            return existing
+        return self.set_person(realm, account, "", author=source)
+
+    def note_member(self, realm: str, room: str, person_id: int, nick: str) -> bool:
+        """True the first time this person is seen in this room. An upsert's
+        rowcount cannot tell an insert from an update, so ask first."""
+        now = int(time.time())
+        room = self.fold(realm, room)
+        seen = self._db.execute(
+            "SELECT 1 FROM membership WHERE realm = ? AND room = ? AND person_id = ?", (realm, room, person_id)
+        ).fetchone()
+        self._db.execute(
+            "INSERT INTO membership (realm, room, person_id, nick, first_seen, last_seen)"
+            " VALUES (?, ?, ?, ?, ?, ?)"
+            " ON CONFLICT(realm, room, person_id) DO UPDATE SET nick = excluded.nick,"
+            " last_seen = excluded.last_seen",
+            (realm, room, person_id, nick, now, now),
+        )
+        self._db.commit()
+        return seen is None
+
+    def members(self, realm: str, room: str) -> list[tuple[int, str, int, int]]:
+        """(person_id, nick, first_seen, last_seen), longest-standing first."""
+        rows = self._db.execute(
+            "SELECT person_id, nick, first_seen, last_seen FROM membership"
+            " WHERE realm = ? AND room = ? ORDER BY first_seen",
+            (realm, self.fold(realm, room)),
+        ).fetchall()
+        return [(r["person_id"], r["nick"], r["first_seen"], r["last_seen"]) for r in rows]
+
+    def rooms_of(self, realm: str, person_id: int) -> list[str]:
+        """Which rooms this identity sits in. Being in one says nothing about
+        another, which is the whole point of recording it per room."""
+        rows = self._db.execute(
+            "SELECT room FROM membership WHERE realm = ? AND person_id = ? ORDER BY room",
+            (realm, person_id),
+        ).fetchall()
+        return [r["room"] for r in rows]
+
     def person_id(self, realm: str, handle: str) -> int | None:
         row = self._db.execute(
             "SELECT person_id FROM alias WHERE realm = ? AND handle = ? COLLATE NOCASE", (realm, handle)
@@ -865,7 +925,11 @@ class Store:
                 (notes, json.dumps(facts or {}), int(time.time())),
             )
             pid = int(cur.lastrowid or 0)
-            self._db.execute("INSERT INTO alias (realm, handle, person_id) VALUES (?, ?, ?)", (realm, handle, pid))
+            # The first handle is sourced like any other: whoever vouched for it.
+            self._db.execute(
+                "INSERT INTO alias (realm, handle, person_id, source, added_at) VALUES (?, ?, ?, ?, ?)",
+                (realm, handle, pid, author, int(time.time())),
+            )
         else:
             if facts is None:
                 self._db.execute(

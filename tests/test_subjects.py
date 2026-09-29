@@ -226,7 +226,7 @@ async def test_linking_an_unknown_person_is_refused(cfg, store, transport):
     result = await box(handler, transport, account="alice", is_owner=True).run(
         "who_link_other", {"person": "nobody", "realm": "github", "handle": "x"}
     )
-    assert "do not know anyone called nobody" in result
+    assert "i do not know who nobody is" in result
 
 
 async def test_an_ambiguous_person_is_refused_rather_than_guessed(cfg, store, transport):

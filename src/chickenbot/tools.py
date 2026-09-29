@@ -477,11 +477,14 @@ async def tool_who_link_other(h: Handler, ctx: Context, args: dict) -> str:
         return "error: need person, realm and handle, e.g. person=chrisk realm=github handle=iconidentify"
 
     found = h.store.whois(person)
-    if not found:
-        return f"error: i do not know anyone called {person}"
     if len(found) > 1:
         return f"error: {person} is ambiguous; {len(found)} people answer to it"
-    target = found[0]
+    target = found[0] if found else _identify_here(h, ctx, person)
+    if target is None:
+        return (
+            f"error: i do not know who {person} is. i record identities the network vouches for, "
+            "so they need to be here and logged in to services"
+        )
 
     existing = h.store.person_id(realm, handle)
     if existing == target:
@@ -492,6 +495,21 @@ async def tool_who_link_other(h: Handler, ctx: Context, args: dict) -> str:
         h.aliases_changed(realm)
         return f"recorded: {person} is {handle} on {realm}"
     return "error: could not record that"
+
+
+def _identify_here(h: Handler, ctx: Context, nick: str) -> int | None:
+    """The person behind a nick in this room, if the network vouches for them.
+
+    Somebody saying "chrisk is X on github" about a chrisk standing right
+    there is an ordinary thing to say. Somebody saying it about a name nobody
+    here has ever used is a typo or a story, and either way there is nothing
+    to attach it to.
+    """
+    tr = ctx.transport
+    for present, account, _modes in tr.roster(ctx.channel):
+        if tr.fold(present) == tr.fold(nick) and account:
+            return h.store.note_identity(tr.realm, account, source=ctx.account or "chat")
+    return None
 
 
 NICKNAME_MIN = 2

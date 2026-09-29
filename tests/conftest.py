@@ -14,9 +14,10 @@ class FakeTransport:
     name = "fake"
     me = "chickenbot"
 
-    def __init__(self, *, owners=("alice",), ignored=(), caps=ALL_CAPS, ops=None) -> None:
+    def __init__(self, *, owners=("alice",), ignored=(), caps=ALL_CAPS, ops=None, here=()) -> None:
         self.caps = frozenset(caps)
         self.ops = ops  # None: the question does not apply here
+        self.here = list(here)  # (nick, account, modes), as a roster reports it
         self.rooms: list[str] = []
         self.sent: list[tuple[str, str]] = []
         self.actions: list[tuple[str, str, str, str]] = []
@@ -32,6 +33,9 @@ class FakeTransport:
 
     def is_owner(self, account: str) -> bool:
         return self._members.is_owner(account)
+
+    def roster(self, room: str) -> list[tuple[str, str, str]]:
+        return list(self.here)
 
     def opped(self, room: str) -> bool | None:
         return self.ops

@@ -16,6 +16,7 @@ from .brain import Provider, ProviderError
 from .config import Config
 from .dossier import Dossiers
 from .events import Event, Kind
+from .identity import Identities
 from .observe import activity, note, note_default
 from .policy import ALL, BASIC, EITHER, NAME, NONE, PREFIX, Policies, rooms_from
 from .restraint import Refused, Restraint
@@ -215,6 +216,7 @@ class Handler:
         self.rooms = Rooms(store)
         self.settings = Settings(store, cfg)
         self.restraint = Restraint(store)
+        self.identities = Identities(self)
         self.policies = Policies(store, rooms_from(cfg))
         self._writes: set[asyncio.Task] = set()
         self.transports: dict[str, Transport] = {}
@@ -238,6 +240,8 @@ class Handler:
                 await self._run_scheduled(event)
             elif event.kind is Kind.MODE:
                 await self._handle_change(event)
+            elif event.kind is Kind.ROSTER:
+                self.identities.note_join(event.transport, event.room)
             elif event.kind is Kind.TOPIC:
                 await self._handle_topic(event)
             elif event.kind in (Kind.ARRIVAL, Kind.DEPARTURE):

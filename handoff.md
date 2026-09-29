@@ -596,6 +596,32 @@ Note that an owner in a direct message reaches the *whole* command set --
 room policies gate rooms, and a DM is not one. That is the point of the narrow
 default.
 
+## Identities, not nicks
+
+`identity.py`. A nick is a label somebody is using this minute; a services
+account is a person the network vouched for. The bot records the second and
+ignores the first -- an unauthenticated nick gets no record, because a record
+of it would be a record of nothing that would later look like knowledge.
+
+- **On walking in**, the end of NAMES raises `Kind.ROSTER`, which writes one
+  activity row (`kind=roster`: how many were there, how many identified, who
+  held ops) and records every identified person. The roster itself is not
+  kept: it is a snapshot of a minute, and `membership` is the part that lasts.
+- **Every five minutes** a sweep does the same, because accounts arrive by
+  WHOIS after a join and one pass sees an incomplete picture.
+- **`membership`** is `(realm, room, person_id, nick, first_seen, last_seen)`.
+  Per room on purpose: a realm has many rooms and sitting in one says nothing
+  about another. `store.rooms_of` answers which rooms an identity is in.
+- An auto-recorded person has empty notes, and `Dossiers` drops people with
+  nothing written about them, so the prompt is unaffected. `alias.source` says
+  `services` for these, against an owner's account for an asserted one.
+
+This is what makes `who_link_other` work on somebody who has never been
+written up: "chrisk is iconidentify on github" resolves chrisk against the
+roster, records the identity the network vouches for, and attaches the handle.
+A name nobody in the room uses, or one whose owner is not identified, is still
+refused -- there is nothing to attach it to.
+
 ## Bots that will not say so
 
 IRCv3 bot mode and the platform flags (Discord, Telegram) are honoured

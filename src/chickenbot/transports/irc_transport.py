@@ -62,6 +62,14 @@ class IRCTransport:
         for line in self.lines(text):
             self.client.send("PRIVMSG", room, line)
 
+    def roster(self, room: str) -> list[tuple[str, str, str]]:
+        chan = self.client.channels.get(self.fold(room))
+        if chan is None:
+            return []
+        return sorted(
+            (nick, self.client.account_of(nick), "".join(sorted(modes))) for nick, modes in chan.members.items()
+        )
+
     def opped(self, room: str) -> bool | None:
         return self.client.has_op(room)
 
@@ -129,6 +137,12 @@ class IRCTransport:
             return
         if msg.command == "TOPIC" and msg.source:
             await self._on_topic(msg.target, msg.text, msg.nick)
+            return
+        if msg.command == "366" and len(msg.params) >= 2:
+            # End of NAMES: the roster is as complete as it gets on arrival.
+            await self.sink(
+                Event(kind=Kind.ROSTER, transport=self, room=msg.params[1], sender=self.me, account="", text="")
+            )
             return
         if msg.command == "332" and len(msg.params) >= 3:
             # As found on joining: no one set it just now, it was already there.
