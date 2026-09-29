@@ -191,9 +191,6 @@ class Config:
     # Other names the bot answers to, alongside its nick on each network.
     # "cb: what's up" should work as well as "chickenbot: what's up".
     nicknames: list[str] = field(default_factory=list)
-    # Everything the bot writes about itself and the people it talks to. Its own
-    # soul instance, participant dossiers, exported conversations. Gitignored.
-    data_dir: str = "data"
     db_path: str = "chickenbot.db"
     log_level: str = "info"  # trace | debug | info | warn | error
     log_file: str = ""  # empty: stdout, for journald to keep
@@ -243,6 +240,8 @@ def load(path: str | Path) -> Config:
     moved = {"nick", "username", "realname", "owners", "channels", "ignore_nicks", "casemapping"}
     if "server" in data or moved & set(data):
         raise ConfigError("[server] is now [irc], and nick, channels and owners moved into it too")
+    if "data_dir" in data:
+        raise ConfigError("data_dir is gone; a run directory has conf/, data/, cache/ and run/ (see `chickenbot init`)")
 
     top = {k: v for k, v in data.items() if not isinstance(v, dict)}
     unknown = set(top) - set(Config.__dataclass_fields__)
@@ -276,10 +275,6 @@ def load(path: str | Path) -> Config:
     providers = {"claude", "openrouter", "xai", "none"}
     if cfg.llm.provider not in providers:
         raise ConfigError(f"llm.provider must be one of {', '.join(sorted(providers))} (got {cfg.llm.provider!r})")
-    data = Path(cfg.data_dir)
-    if not data.is_absolute():
-        data = (path.parent / data).resolve()
-    cfg.data_dir = str(data)
     sock = Path(cfg.tools.socket)
     if not sock.is_absolute():
         cfg.tools.socket = str((path.parent / sock).resolve())

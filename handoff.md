@@ -94,8 +94,21 @@ Several bots run side by side -- a hobby domain, a personal one, a work one --
 and each owns everything it touches. Paths in the toml resolve against the
 toml, so a run directory is self-contained:
 
+A run directory separates what cannot be rebuilt from what can:
+
+```
+~/server/chickenbot/<instance>/
+  conf/    chickenbot.toml and the .env beside it
+  data/    chickenbot.db -- soul, people, rooms, chat log, activity, moderation
+  cache/   github-tool.db -- somebody else's data, mirrored; delete it freely
+  run/     chickenbot-tools.sock
+```
+
+A backup is `conf/` and `data/`. `cache/` refills itself and `run/` dies with
+the process. `data_dir` in the toml is gone; it was never read.
+
 ```bash
-chickenbot init ~/server/chickenbot/hobby     # config, .env (0600), db, soul
+chickenbot init ~/server/chickenbot/hobby     # the layout, .env (0600), db, soul
 chickenbot init ~/server/chickenbot/work --soul my-soul.md
 chickenbot -c ~/server/chickenbot/work/chickenbot.toml --check-config
 systemctl --user enable --now chickenbot@hobby chickenbot-github@hobby

@@ -25,23 +25,24 @@ def test_a_run_directory_has_everything_an_instance_owns(tmp_path):
     run = tmp_path / "hobby"
     code, out = init(str(run))
     assert code == 0
-    assert (run / "chickenbot.toml").is_file()
-    assert (run / ".env").is_file()
-    assert (run / "chickenbot.db").is_file()
+    assert (run / "conf" / "chickenbot.toml").is_file()
+    assert (run / "conf" / ".env").is_file()
+    assert (run / "data" / "chickenbot.db").is_file()
+    assert (run / "cache").is_dir() and (run / "run").is_dir()
     assert "hobby" in out
 
 
 def test_the_secrets_file_is_not_world_readable(tmp_path):
     run = tmp_path / "hobby"
     init(str(run))
-    assert (run / ".env").stat().st_mode & 0o077 == 0
+    assert (run / "conf" / ".env").stat().st_mode & 0o077 == 0
 
 
 def test_the_soul_is_loaded_at_setup_not_first_run(tmp_path):
     """So it can be edited before the bot ever says anything."""
     run = tmp_path / "hobby"
     init(str(run))
-    store = Store(str(run / "chickenbot.db"))
+    store = Store(str(run / "data" / "chickenbot.db"))
     try:
         assert "chickenbot" in store.soul().lower()
     finally:
@@ -53,7 +54,7 @@ def test_a_soul_can_be_supplied(tmp_path):
     mine.write_text("# Who this is\n\nTerse. Works here.\n")
     run = tmp_path / "work"
     init(str(run), "--soul", str(mine))
-    store = Store(str(run / "chickenbot.db"))
+    store = Store(str(run / "data" / "chickenbot.db"))
     try:
         assert store.soul() == "# Who this is\n\nTerse. Works here."
     finally:
@@ -67,25 +68,25 @@ def test_a_missing_soul_file_is_reported(tmp_path):
 def test_it_will_not_quietly_overwrite_an_instance(tmp_path):
     run = tmp_path / "hobby"
     init(str(run))
-    (run / "chickenbot.toml").write_text("# mine\n")
+    (run / "conf" / "chickenbot.toml").write_text("# mine\n")
     assert init(str(run))[0] == 1
-    assert (run / "chickenbot.toml").read_text() == "# mine\n"
+    assert (run / "conf" / "chickenbot.toml").read_text() == "# mine\n"
 
 
 def test_force_overwrites(tmp_path):
     run = tmp_path / "hobby"
     init(str(run))
-    (run / "chickenbot.toml").write_text("# mine\n")
+    (run / "conf" / "chickenbot.toml").write_text("# mine\n")
     assert init(str(run), "--force")[0] == 0
-    assert "prefix" in (run / "chickenbot.toml").read_text()
+    assert "prefix" in (run / "conf" / "chickenbot.toml").read_text()
 
 
 def test_existing_secrets_are_left_alone(tmp_path):
     run = tmp_path / "hobby"
     init(str(run))
-    (run / ".env").write_text("OPENROUTER_API_KEY=real\n")
+    (run / "conf" / ".env").write_text("OPENROUTER_API_KEY=real\n")
     init(str(run), "--force")
-    assert (run / ".env").read_text() == "OPENROUTER_API_KEY=real\n"
+    assert (run / "conf" / ".env").read_text() == "OPENROUTER_API_KEY=real\n"
 
 
 def test_the_config_it_writes_needs_an_owner_before_it_will_run(tmp_path):
@@ -95,7 +96,7 @@ def test_the_config_it_writes_needs_an_owner_before_it_will_run(tmp_path):
     run = tmp_path / "hobby"
     init(str(run))
     with pytest.raises(config.ConfigError, match="owners"):
-        config.load(str(run / "chickenbot.toml"))
+        config.load(str(run / "conf" / "chickenbot.toml"))
 
 
 def test_the_config_it_writes_is_valid_once_filled_in(tmp_path):
@@ -103,20 +104,20 @@ def test_the_config_it_writes_is_valid_once_filled_in(tmp_path):
 
     run = tmp_path / "hobby"
     init(str(run))
-    toml = run / "chickenbot.toml"
+    toml = run / "conf" / "chickenbot.toml"
     toml.write_text(toml.read_text().replace("owners = []", 'owners = ["someone"]'))
     cfg = config.load(str(toml))
-    # Paths resolve against the run directory, so instances cannot collide.
-    assert cfg.db_path.startswith(str(run))
-    assert cfg.tools.socket.startswith(str(run))
-    assert cfg.data_dir.startswith(str(run))
+    # Paths resolve against the config, so instances cannot collide, and the
+    # durable half is separated from the rebuildable half.
+    assert cfg.db_path == f"{run}/data/chickenbot.db"
+    assert cfg.tools.socket == f"{run}/run/chickenbot-tools.sock"
 
 
 def test_the_env_it_writes_points_at_this_instance(tmp_path):
     """So the systemd unit carries nothing but the program name."""
     run = tmp_path / "hobby"
     init(str(run))
-    env = (run / ".env").read_text()
-    assert f"CB_CONFIG_PATH={run}/chickenbot.toml" in env
-    assert f"CB_SOCKET_PATH={run}/chickenbot-tools.sock" in env
-    assert f"CB_GITHUB_DB_PATH={run}/github-tool.db" in env
+    env = (run / "conf" / ".env").read_text()
+    assert f"CB_CONFIG_PATH={run}/conf/chickenbot.toml" in env
+    assert f"CB_SOCKET_PATH={run}/run/chickenbot-tools.sock" in env
+    assert f"CB_GITHUB_DB_PATH={run}/cache/github-tool.db" in env

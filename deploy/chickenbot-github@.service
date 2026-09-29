@@ -15,7 +15,7 @@ Type=simple
 # Its own distribution, installed into the same deployed venv.
 WorkingDirectory=%h/server/chickenbot/%i
 # CB_SOCKET_PATH, CB_GITHUB_DB_PATH, CB_INTERVAL and GITHUB_TOKEN, all from one file.
-EnvironmentFile=%h/server/chickenbot/%i/.env
+EnvironmentFile=%h/server/chickenbot/%i/conf/.env
 Environment=CB_INSTANCE=%i
 ExecStart=%h/server/chickenbot/venv/bin/chickenbot-github
 Restart=always

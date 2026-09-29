@@ -533,11 +533,20 @@ CHICKENBOT_SASL_PASSWORD=
 
 # Where this instance keeps its things. The systemd units read this file, so
 # the command lines carry nothing but the program name.
-CB_CONFIG_PATH={run}/chickenbot.toml
-CB_SOCKET_PATH={run}/chickenbot-tools.sock
-CB_GITHUB_DB_PATH={run}/github-tool.db
+CB_CONFIG_PATH={run}/conf/chickenbot.toml
+CB_SOCKET_PATH={run}/run/chickenbot-tools.sock
+CB_GITHUB_DB_PATH={run}/cache/github-tool.db
 CB_INTERVAL=900
 """
+
+# What each part of a run directory is for, which is also what a backup should
+# and should not bother with.
+LAYOUT = {
+    "conf": "the config and the .env beside it",
+    "data": "what cannot be rebuilt: the soul, people, rooms, the log, the record",
+    "cache": "what can: an external tool's mirror of somebody else's data",
+    "run": "the tool socket, and anything else that dies with the process",
+}
 
 
 def instantiate(args: argparse.Namespace) -> int:
@@ -547,8 +556,9 @@ def instantiate(args: argparse.Namespace) -> int:
     from .soul import TEMPLATE as SOUL_TEMPLATE
 
     run = Path(args.into).expanduser()
-    run.mkdir(parents=True, exist_ok=True)
-    toml = run / "chickenbot.toml"
+    for part in LAYOUT:
+        (run / part).mkdir(parents=True, exist_ok=True)
+    toml = run / "conf" / "chickenbot.toml"
     if toml.exists() and not args.force:
         print(f"{toml} exists already; --force overwrites it", file=sys.stderr)
         return 1
@@ -558,7 +568,7 @@ def instantiate(args: argparse.Namespace) -> int:
         return 1
     toml.write_text(starter.read_text(encoding="utf-8"), encoding="utf-8")
 
-    env = run / ".env"
+    env = run / "conf" / ".env"
     if not env.exists():
         env.write_text(ENV_TEMPLATE.format(run=run), encoding="utf-8")
         env.chmod(0o600)
@@ -569,7 +579,7 @@ def instantiate(args: argparse.Namespace) -> int:
     if not source.is_file():
         print(f"missing {source}", file=sys.stderr)
         return 1
-    store = Store(str(run / "chickenbot.db"))
+    store = Store(str(run / "data" / "chickenbot.db"))
     try:
         if store.soul() and not args.force:
             print("soul already set; leaving it alone")

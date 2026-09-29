@@ -21,7 +21,8 @@ Type=simple
 # exec'ing and would sit in the process table as a second copy per instance.
 WorkingDirectory=%h/server/chickenbot/%i
 # CB_CONFIG_PATH and the secrets both live here; `chickenbot init` writes it.
-EnvironmentFile=%h/server/chickenbot/%i/.env
+# The run directory is conf/ data/ cache/ run/ -- see `chickenbot init`.
+EnvironmentFile=%h/server/chickenbot/%i/conf/.env
 Environment=CB_INSTANCE=%i
 ExecStart=%h/server/chickenbot/venv/bin/chickenbot
 Restart=always
