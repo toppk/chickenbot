@@ -294,3 +294,44 @@ async def test_scrollback_lines_carry_their_age(cfg, transport, store):
     await send(handler, transport, "!ask what did i mean")
     scrollback = provider.prompts[-1]
     assert "[30m ago] <toppk> make it so" in scrollback
+
+
+# -- naming the right person -------------------------------------------
+
+
+async def test_a_reply_that_already_names_somebody_is_left_alone(cfg, store):
+    """Asked to pass a message on, it addresses them itself; prefixing that
+    with the asker gives "toppk: biff: ..." and names the wrong person first."""
+    tr = FakeTransport(here=[("biff", "biff", ""), ("toppk", "toppk", "")])
+    handler = Handler(cfg, store, StubProvider("biff: toppk would like a drawing"), None)
+    await handler.dispatch(tr.envelope("chickenbot: ask biff to draw", sender="toppk", account="toppk"))
+    assert tr.sent[-1][1] == "biff: toppk would like a drawing"
+
+
+async def test_an_ordinary_answer_still_names_the_asker(cfg, store):
+    tr = FakeTransport(here=[("nate", "nate", "")])
+    handler = Handler(cfg, store, StubProvider("42"), None)
+    await handler.dispatch(tr.envelope("chickenbot: what is six by seven"))
+    assert tr.sent[-1][1] == "nate: 42"
+
+
+async def test_a_sentence_that_opens_with_a_colon_is_not_an_address(cfg, store):
+    """ "note:" opens a sentence, not a conversation."""
+    tr = FakeTransport(here=[("nate", "nate", "")])
+    handler = Handler(cfg, store, StubProvider("note: the printer is still broken"), None)
+    await handler.dispatch(tr.envelope("chickenbot: how is the printer"))
+    assert tr.sent[-1][1].startswith("nate: note:")
+
+
+async def test_naming_somebody_who_is_not_here_is_not_an_address(cfg, store):
+    tr = FakeTransport(here=[("nate", "nate", "")])
+    handler = Handler(cfg, store, StubProvider("mallory: hello"), None)
+    await handler.dispatch(tr.envelope("chickenbot: greet mallory for me"))
+    assert tr.sent[-1][1].startswith("nate: mallory:")
+
+
+async def test_addressing_the_asker_is_not_doubled(cfg, store):
+    tr = FakeTransport(here=[("nate", "nate", "")])
+    handler = Handler(cfg, store, StubProvider("nate: 42"), None)
+    await handler.dispatch(tr.envelope("chickenbot: what is six by seven"))
+    assert tr.sent[-1][1] == "nate: 42"

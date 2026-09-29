@@ -151,6 +151,20 @@ def compose(h: Handler, ctx: Context, scrollback: str, *, following: bool = Fals
     return system, f"{head}\n\n{ctx.args}"
 
 
+def addressed_to_somebody(ctx: Context, answer: str) -> bool:
+    """Whether the reply already opens by naming someone in the room.
+
+    Only names actually present count: "note:" and "warning:" open a sentence,
+    not a conversation, and prefixing those with the asker is right.
+    """
+    head, sep, _rest = answer.partition(":")
+    if not sep or " " in head.strip():
+        return False
+    here, _ops = who_is_here(ctx)
+    named = ctx.transport.fold(head.strip())
+    return named in {ctx.transport.fold(n) for n in [*here, ctx.nick]}
+
+
 def _model(h: Handler) -> str:
     """What is answering. It was asked directly and had to say it could not
     tell, while every activity row it can read carries the answer."""
@@ -165,11 +179,8 @@ def who_is_here(ctx: Context) -> tuple[list[str], list[str]]:
     Learned on joining, from NAMES. A person walking into a room can see who
     is in it without asking anybody, and so should the bot.
     """
-    client = getattr(ctx.transport, "client", None)
-    chan = client.channels.get(ctx.transport.fold(ctx.channel)) if client else None
-    if chan is None:
-        return [], []
-    return sorted(chan.members), sorted(n for n, modes in chan.members.items() if "o" in modes)
+    roster = getattr(ctx.transport, "roster", lambda _room: [])(ctx.channel)
+    return [nick for nick, _account, _modes in roster], [n for n, _a, modes in roster if "o" in modes]
 
 
 def powers(h: Handler, ctx: Context) -> str:
@@ -763,7 +774,10 @@ async def cmd_ask(h: Handler, ctx: Context, *, following: bool = False) -> None:
         return
     answer = answer.removeprefix(f"{ctx.nick}:").strip() or answer
     note(outcome="answered")
-    ctx.say(f"{ctx.nick}: {answer}")
+    # Asked to pass something on, it addresses the other person itself. Adding
+    # the asker's name in front of that gives "toppk: biff: ...", which names
+    # the wrong person first.
+    ctx.say(answer if addressed_to_somebody(ctx, answer) else f"{ctx.nick}: {answer}")
 
 
 @command("watching", blurb="repos watched here")
