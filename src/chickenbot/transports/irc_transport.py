@@ -127,6 +127,13 @@ class IRCTransport:
         if msg.command in ("JOIN", "PART") and msg.source:
             await self._on_coming_and_going(msg)
             return
+        if msg.command == "TOPIC" and msg.source:
+            await self._on_topic(msg.target, msg.text, msg.nick)
+            return
+        if msg.command == "332" and len(msg.params) >= 3:
+            # As found on joining: no one set it just now, it was already there.
+            await self._on_topic(msg.params[1], msg.params[2], "")
+            return
         if msg.command != "PRIVMSG" or not msg.source:
             return
         if self.fold(msg.nick) == self.fold(self.me):
@@ -171,6 +178,19 @@ class IRCTransport:
                 # extended-join carries the account on the JOIN itself; "*" is nobody.
                 account=self._joined_as(msg) or self.client.account_of(msg.nick),
                 text=msg.source,
+            )
+        )
+
+    async def _on_topic(self, room: str, topic: str, who: str) -> None:
+        room = self.client.isupport.channel_of(room) or room
+        await self.sink(
+            Event(
+                kind=Kind.TOPIC,
+                transport=self,
+                room=room,
+                sender=who,
+                account=self.client.account_of(who) if who else "",
+                text=topic,
             )
         )
 

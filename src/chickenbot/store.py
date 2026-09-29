@@ -101,6 +101,19 @@ CREATE TABLE IF NOT EXISTS bot (
     PRIMARY KEY (realm, handle)
 );
 
+-- What a room's topic has been. The topic is often the room's oldest joke, so
+-- knowing what it was before somebody -- possibly the bot -- changed it is the
+-- difference between restoring it and inventing a new one.
+CREATE TABLE IF NOT EXISTS topic_log (
+    id    INTEGER PRIMARY KEY,
+    ts    INTEGER NOT NULL,
+    realm TEXT NOT NULL,
+    room  TEXT NOT NULL,
+    topic TEXT NOT NULL,
+    who   TEXT NOT NULL DEFAULT ''     -- '' means it was already there when we arrived
+);
+CREATE INDEX IF NOT EXISTS topic_log_room ON topic_log (realm, room, id DESC);
+
 -- Every moderation action that actually happened. Both a record to review and
 -- the thing the hourly budget is counted from.
 CREATE TABLE IF NOT EXISTS moderation (
@@ -613,6 +626,30 @@ class Store:
             (text, int(time.time())),
         )
         self._keep_revision("soul", "", text, author)
+
+    def note_topic(self, realm: str, room: str, topic: str, who: str = "") -> bool:
+        """True when this is a change. Seeing the same topic again on every
+        reconnect is not history."""
+        room = self.fold(realm, room)
+        row = self._db.execute(
+            "SELECT topic FROM topic_log WHERE realm = ? AND room = ? ORDER BY id DESC LIMIT 1", (realm, room)
+        ).fetchone()
+        if row is not None and row["topic"] == topic:
+            return False
+        self._db.execute(
+            "INSERT INTO topic_log (ts, realm, room, topic, who) VALUES (?, ?, ?, ?, ?)",
+            (int(time.time()), realm, room, topic[:400], who),
+        )
+        self._db.commit()
+        return True
+
+    def topics(self, realm: str, room: str, limit: int = 10) -> list[tuple[int, str, str]]:
+        """(ts, topic, who) newest first."""
+        rows = self._db.execute(
+            "SELECT ts, topic, who FROM topic_log WHERE realm = ? AND room = ? ORDER BY id DESC LIMIT ?",
+            (realm, self.fold(realm, room), limit),
+        ).fetchall()
+        return [(r["ts"], r["topic"], r["who"]) for r in rows]
 
     def note_moderation(self, realm: str, room: str, action: str, target: str, actor: str, result: str) -> None:
         self._db.execute(

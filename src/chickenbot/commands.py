@@ -128,7 +128,7 @@ def compose(h: Handler, ctx: Context, scrollback: str, *, following: bool = Fals
     # Owner-written notes about whoever is here. Trusted, unlike scrollback.
     people = h.dossiers.block(realm=ctx.transport.realm, account=ctx.account, text=f"{ctx.args} {scrollback}")
     # ...and about the room itself, which has a character of its own.
-    room = h.rooms.block(ctx.transport.realm, ctx.channel) if ctx.in_channel else ""
+    room = h.rooms.block(ctx.transport.realm, ctx.channel, ops_in(ctx)) if ctx.in_channel else ""
     head = "\n".join(part for part in (*head_lines, room, people) if part)
     if scrollback:
         return (
@@ -136,6 +136,13 @@ def compose(h: Handler, ctx: Context, scrollback: str, *, following: bool = Fals
             f"{head}\n<channel_scrollback>\n{scrollback}\n</channel_scrollback>\n\n{ctx.nick} asks: {ctx.args}",
         )
     return system, f"{head}\n\n{ctx.args}"
+
+
+def ops_in(ctx: Context) -> list[str]:
+    """Who runs this room, where the network models that at all."""
+    client = getattr(ctx.transport, "client", None)
+    chan = client.channels.get(ctx.transport.fold(ctx.channel)) if client else None
+    return sorted(n for n, modes in chan.members.items() if "o" in modes) if chan else []
 
 
 def powers(h: Handler, ctx: Context) -> str:
@@ -220,6 +227,8 @@ class Handler:
                 await self._run_scheduled(event)
             elif event.kind is Kind.MODE:
                 await self._handle_change(event)
+            elif event.kind is Kind.TOPIC:
+                await self._handle_topic(event)
             elif event.kind in (Kind.ARRIVAL, Kind.DEPARTURE):
                 await self._handle_presence(event)
             elif event.kind is Kind.FEED:
@@ -345,6 +354,12 @@ class Handler:
         )
         with activity(kind="follow", realm=tr.realm, room=room, nick=nick, account=account or "-"):
             await cmd_ask(self, ctx, following=True)
+
+    async def _handle_topic(self, event: Event) -> None:
+        """A topic is a fact about the room worth keeping, not a line of chat.
+        Recorded whoever set it, including the bot."""
+        changed = self.store.note_topic(event.transport.realm, event.room, event.text, event.sender)
+        note(outcome="recorded" if changed else "unchanged", who=event.sender or "as-found")
 
     async def _handle_presence(self, event: Event) -> None:
         """Somebody came or went. Regulars get a hello, once a day; everyone
@@ -741,6 +756,8 @@ async def cmd_vibe(h: Handler, ctx: Context) -> None:
     realm = ctx.transport.realm
     if not ctx.args:
         ctx.say(f"{ctx.channel}: {h.rooms.describe(realm, ctx.channel)}")
+        for line in h.rooms.facts(realm, ctx.channel, ops_in(ctx)).splitlines():
+            ctx.say(f"  {line.strip()}")
         for label, body in (
             ("noted", h.rooms.notes(realm, ctx.channel)),
             ("seen", h.rooms.observed(realm, ctx.channel)),

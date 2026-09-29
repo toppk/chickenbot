@@ -22,6 +22,7 @@ class Kind(StrEnum):
     MODE = "mode"  # a room's modes changed, including bans
     ARRIVAL = "arrival"  # somebody joined a room we are in
     DEPARTURE = "departure"  # ...or left it
+    TOPIC = "topic"  # a room's topic was set, or found on joining
 
 
 @dataclass(frozen=True, slots=True)

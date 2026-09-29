@@ -14,12 +14,14 @@ understanding should not have to wait, but licence to act on it should.
 from __future__ import annotations
 
 import logging
+import time
 
 from .store import Store
 
 log = logging.getLogger(__name__)
 
 MAX_CHARS = 1200
+TOPIC_HISTORY = 3  # the current one and what it displaced
 
 GUEST, MEMBER, FIXTURE = "guest", "member", "fixture"
 # (standing, days seen, lines heard). Both, and chatter is the binding one: a
@@ -71,13 +73,31 @@ class Rooms:
         """Whether the bot knows this room well enough to do anything unbidden."""
         return self.standing(realm, room) != GUEST
 
-    def block(self, realm: str, room: str) -> str:
+    def facts(self, realm: str, room: str, ops: list[str] | None = None) -> str:
+        """Plain facts about the place: who runs it, and what the topic has
+        been. A topic the bot changed and cannot remember changing is how a
+        running joke gets quietly lost."""
+        lines = []
+        if ops:
+            lines.append(f"ops here: {', '.join(ops)}")
+        history = self.store.topics(realm, room, limit=TOPIC_HISTORY)
+        if history:
+            when, topic, who = history[0]
+            hand = who or "already set when you arrived"
+            lines.append(f'topic: "{topic}" ({hand}, {_ago(when)})')
+            for when, topic, who in history[1:]:
+                lines.append(f'  was: "{topic}" ({who or "as found"}, {_ago(when)})')
+        return "\n".join(lines)
+
+    def block(self, realm: str, room: str, ops: list[str] | None = None) -> str:
         """Trusted, unlike scrollback: this is what the owners have written down
         about the place, plus what sitting in it has established."""
         standing = self.standing(realm, room)
         days, lines = self.store.tenure(realm, room)
         parts = [f"{room} on {realm}: you are a {standing} here ({days}d, {lines} lines heard)."]
         parts.append(MANNER[standing])
+        if facts := self.facts(realm, room, ops):
+            parts.append(facts)
         if notes := self.notes(realm, room):
             parts.append(notes)
         if observed := self.observed(realm, room):
@@ -91,3 +111,11 @@ class Rooms:
         days, lines = self.store.tenure(realm, room)
         note = (self.notes(realm, room) or self.observed(realm, room)).replace("\n", " ")
         return f"{self.standing(realm, room)} ({days}d, {lines} lines)" + (f": {note[:120]}" if note else "")
+
+
+def _ago(ts: int) -> str:
+    seconds = max(0, int(time.time()) - ts)
+    for unit, size in (("d", 86400), ("h", 3600), ("m", 60)):
+        if seconds >= size:
+            return f"{seconds // size}{unit} ago"
+    return "just now"

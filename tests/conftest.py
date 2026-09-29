@@ -70,8 +70,20 @@ class FakeTransport:
         return [text for _room, text in self.sent]
 
     def envelope(
-        self, text, *, sender="nate", account="nate", room="#chan", is_group=True, is_bot=False, kind=Kind.MESSAGE, **kw
+        self,
+        text,
+        *,
+        sender="nate",
+        account="nate",
+        room="#chan",
+        is_group=True,
+        is_bot=False,
+        kind=Kind.MESSAGE,
+        kind_topic=False,
+        **kw,
     ):
+        if kind_topic:  # a topic, not a line of chat
+            kind = Kind.TOPIC
         return Event(
             kind=kind,
             transport=self,
