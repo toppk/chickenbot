@@ -199,10 +199,10 @@ def manage_rooms(store: Store, args: argparse.Namespace) -> int:
         print("room needs a realm and a room", file=sys.stderr)
         return 1
     try:
-        if args.what and args.value:
-            policies.set_knob(args.realm, args.room, args.what, args.value)
-        elif args.what:
-            policies.set_profile(args.realm, args.room, args.what)
+        if args.field and args.value:
+            policies.set_knob(args.realm, args.room, args.field, args.value)
+        elif args.field:
+            policies.set_profile(args.realm, args.room, args.field)
     except Unknown as exc:
         print(str(exc), file=sys.stderr)
         return 1
@@ -660,7 +660,8 @@ def main(argv: list[str] | None = None) -> int:
     room_cmd = sub.add_parser("room", help="what the bot is in a room: profile and knobs")
     room_cmd.add_argument("realm", nargs="?", help="e.g. irc:irc.chonkbase.net; omit to list")
     room_cmd.add_argument("room", nargs="?")
-    room_cmd.add_argument("what", nargs="?", help="a profile, or a knob to set")
+    # Not "what": that is the subparser's own dest, and it would be overwritten.
+    room_cmd.add_argument("field", nargs="?", help="a profile, or a knob to set")
     room_cmd.add_argument("value", nargs="?", help="the knob's value")
 
     log_cmd = sub.add_parser("log", help="browse what was said")

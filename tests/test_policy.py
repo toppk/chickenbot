@@ -181,3 +181,14 @@ def test_commands_none_is_recoverable(store):
     assert policies.of("fake", "#here").allows(BASIC) is False
     policies.set_profile("fake", "#here", PARTYLINE)  # from the CLI or another room
     assert policies.of("fake", "#here").allows(ALL) is True
+
+
+def test_the_room_cli_does_not_collide_with_the_subcommand(tmp_path, store):
+    """`room` takes a positional that must not be named after the subparser's
+    own dest, or argparse overwrites which subcommand was asked for."""
+    from chickenbot.__main__ import main
+
+    toml = tmp_path / "c.toml"
+    toml.write_text(f'db_path = "{store.path}"\n[irc]\nenabled = true\nhost = "x"\nowners = ["a"]\n')
+    assert main(["-c", str(toml), "room", "irc:host", "#soup", "partyline"]) == 0
+    assert Policies(store).of("irc:host", "#soup").profile == PARTYLINE
