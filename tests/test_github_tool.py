@@ -937,3 +937,95 @@ async def test_a_long_description_is_trimmed(tmp_path):
     assert "x" * DESCRIPTION in answer
     assert "x" * (DESCRIPTION + 1) not in answer
     store.close()
+
+
+def _repo_row(name, **over):
+    row = {
+        "full_name": f"someone/{name}",
+        "owner": "someone",
+        "name": name,
+        "private": 0,
+        "fork": 0,
+        "archived": 0,
+        "stars": 0,
+        "open_issues": 0,
+        "pushed_at": int(time.time()),
+        "description": "",
+    }
+    return row | over
+
+
+async def test_a_fork_is_marked_as_one(tmp_path):
+    """ "Ten repos" counted four forks of other people's projects as if they
+    were all theirs, because the column was mirrored and never rendered."""
+    store = Store(tmp_path / "g.db")
+    store.save_repo(_repo_row("aurora-linux", fork=1, description="Linux kernel source tree"))
+    answer = await Tool(store, None, ["someone"]).call("github_repos", {"user": "someone"})
+    assert "(fork, 0 stars" in answer
+    store.close()
+
+
+async def test_an_archived_repo_is_marked_too(tmp_path):
+    store = Store(tmp_path / "g.db")
+    store.save_repo(_repo_row("old", archived=1))
+    assert "archived" in await Tool(store, None, ["someone"]).call("github_repos", {"user": "someone"})
+    store.close()
+
+
+async def test_their_own_work_carries_no_marks(tmp_path):
+    store = Store(tmp_path / "g.db")
+    store.save_repo(_repo_row("theirs", stars=76))
+    answer = await Tool(store, None, ["someone"]).call("github_repos", {"user": "someone"})
+    assert "(76 stars" in answer and "fork" not in answer
+    store.close()
+
+
+def _item_row(number, **over):
+    now = int(time.time())
+    row = {
+        "id": f"someone/thing#{number}",
+        "kind": "issue",
+        "repo": "someone/thing",
+        "repo_owner": "someone",
+        "number": number,
+        "author": "asker",
+        "title": "does this work",
+        "url": "",
+        "draft": 0,
+        "comments": 0,
+        "created_at": now - 90 * 86400,
+        "updated_at": now - 86400,
+    }
+    return row | over
+
+
+async def test_an_unanswered_question_says_so(tmp_path):
+    """`updated_at` alone cannot tell a question nobody answered from a thread
+    that ran and went quiet."""
+    store = Store(tmp_path / "g.db")
+    store.save_item(_item_row(1, comments=0))
+    assert "no replies" in await Tool(store, None, ["someone"]).call("github_pending", {})
+    store.close()
+
+
+async def test_a_discussed_one_counts_the_replies(tmp_path):
+    store = Store(tmp_path / "g.db")
+    store.save_item(_item_row(2, comments=8))
+    assert "8 comments" in await Tool(store, None, ["someone"]).call("github_pending", {})
+    store.close()
+
+
+async def test_one_reply_is_singular(tmp_path):
+    store = Store(tmp_path / "g.db")
+    store.save_item(_item_row(3, comments=1))
+    answer = await Tool(store, None, ["someone"]).call("github_pending", {})
+    assert "1 comment," in answer or "1 comment)" in answer
+    store.close()
+
+
+async def test_how_long_it_has_been_open_is_shown(tmp_path):
+    store = Store(tmp_path / "g.db")
+    store.save_item(_item_row(4))
+    answer = await Tool(store, None, ["someone"]).call("github_pending", {})
+    assert "open 90d" in answer  # and last touched a day ago
+    store.close()

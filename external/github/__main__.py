@@ -48,7 +48,19 @@ RANGES = {"hour": 3600, "day": 86400, "week": 604800, "month": 2592000, "all": 0
 
 
 def _age(row, now: int) -> str:
-    return f"{ago(now - row['updated_at'])} ago" if row["updated_at"] else "?"
+    """Opened, last touched, and answered or not.
+
+    `updated_at` alone cannot tell a question nobody ever answered from a
+    thread that ran and went quiet, and both look the same in a tending view.
+    """
+    if not row["updated_at"]:
+        return "?"
+    parts = [f"{ago(now - row['updated_at'])} ago"]
+    if row["created_at"] and row["created_at"] < row["updated_at"]:
+        parts.append(f"open {ago(now - row['created_at'])}")
+    comments = row["comments"]
+    parts.append("no replies" if not comments else f"{comments} comment{'s' if comments > 1 else ''}")
+    return ", ".join(parts)
 
 
 TOOLS = [
@@ -306,12 +318,19 @@ class Tool:
             return "no repositories mirrored yet"
         limit = max(1, min(int(args.get("limit") or 10), 25))
         now = int(time.time())
-        return " | ".join(
-            f"{r['full_name']} ({r['stars']} stars, {r['open_issues']} open,"
-            f" pushed {ago(now - r['pushed_at'])} ago)"
-            + (f": {r['description'][:DESCRIPTION]}" if r["description"] else "")
-            for r in rows[:limit]
-        )
+        return " | ".join(self._repo(r, now) for r in rows[:limit])
+
+    @staticmethod
+    def _repo(r, now: int) -> str:
+        """A fork of somebody else's project is not their work, and an archived
+        one is not their current work. Both were mirrored and never said, so
+        "ten repos" counted four forks as if they were all theirs."""
+        marks = [m for m, on in (("fork", r["fork"]), ("archived", r["archived"])) if on]
+        marks.append(f"{r['stars']} stars")
+        marks.append(f"{r['open_issues']} open")
+        marks.append(f"pushed {ago(now - r['pushed_at'])} ago")
+        described = f": {r['description'][:DESCRIPTION]}" if r["description"] else ""
+        return f"{r['full_name']} ({', '.join(marks)}){described}"
 
     def _items(self, rows, now: int, *, whose: str) -> str:
         if not rows:
@@ -322,6 +341,9 @@ class Tool:
             f" ({_age(r, now)})"
             for r in rows
         )
+
+    # How long it has been open, how long since anyone touched it, and whether
+    # anyone answered. One number cannot tell a live thread from a drive-by.
 
     def github_pending(self, args: dict) -> str:
         limit = max(1, min(int(args.get("limit") or 10), 25))
