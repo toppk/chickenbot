@@ -374,14 +374,16 @@ class Handler:
             log.exception("command %s failed", cmd.name)
             ctx.say(f"{ctx.nick}: that broke, sorry")
 
-    async def _follow_up(self, key: str, held: list[tuple[str, str, str]]) -> None:
-        """A pause in a conversation we are part of. Ask once; it may decline."""
+    async def _follow_up(self, key: str, held: list[tuple[str, str, str, bool]]) -> None:
+        """A pause in a conversation we are part of. Ask once; it may decline,
+        unless somebody actually put a question to it."""
         spot = self._rooms.get(key)
         if spot is None or self.provider is None:
             return
         tr, room = spot
-        nick, account, _text = held[-1]
-        lines = "\n".join(f"<{who}> {what}" for who, _acct, what in held)
+        asked = [line for line in held if line[3]]
+        nick, account = (asked[-1][0], asked[-1][1]) if asked else (held[-1][0], held[-1][1])
+        lines = "\n".join(f"<{who}> {what}" for who, _acct, what, _to_me in held)
         ctx = Context(
             handler=self,
             transport=tr,
@@ -393,7 +395,10 @@ class Handler:
             in_channel=True,
         )
         with activity(kind="follow", realm=tr.realm, room=room, nick=nick, account=account or "-"):
-            await cmd_ask(self, ctx, following=True)
+            note(asked=len(asked), held=len(held))
+            # Silence is for a conversation it was merely party to. A question
+            # put to it directly gets an answer.
+            await cmd_ask(self, ctx, following=not asked)
 
     async def _handle_topic(self, event: Event) -> None:
         """A topic is a fact about the room worth keeping, not a line of chat.
@@ -473,7 +478,8 @@ class Handler:
 
         cmd = COMMANDS.get(name.lower().removeprefix(self.cfg.prefix))
         ctx = self._context(event, args.strip())
-        # Being addressed at all opens or renews the engagement.
+        # Asked before engaging, because engaging is what makes it true.
+        mid_conversation = self.cfg.llm.follow and env.is_group and self.attention.engaged(key)
         if self.cfg.llm.follow and env.is_group:
             self.attention.engage(key, env.sender)
 
@@ -482,6 +488,13 @@ class Handler:
             # Logged as `ask` like the typed command, so the same work reads the
             # same way however it arrived.
             if not env.text.startswith(self.cfg.prefix):
+                if mid_conversation:
+                    # Already talking. Questions arriving on top of each other
+                    # are one exchange, and deserve one answer rather than a
+                    # reply apiece.
+                    note(outcome="holding")
+                    self.attention.hold(key, env.sender, env.account, body, addressed=True)
+                    return
                 ctx.args = body
                 note(command="ask", owner=ctx.is_owner)
                 await cmd_ask(self, ctx)

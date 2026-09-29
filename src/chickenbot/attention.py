@@ -37,14 +37,14 @@ class Engagement:
     # lines are followed: being spoken to by one person is not an invitation
     # to join everybody else's conversation.
     who: str = ""
-    pending: list[tuple[str, str, str]] = field(default_factory=list)  # nick, account, text
+    pending: list[tuple[str, str, str, bool]] = field(default_factory=list)  # nick, account, text, addressed
     silences: int = 0
     timer: asyncio.Task | None = None
 
-    def add(self, nick: str, account: str, text: str) -> None:
-        self.pending.append((nick, account, text))
+    def add(self, nick: str, account: str, text: str, addressed: bool = False) -> None:
+        self.pending.append((nick, account, text, addressed))
 
-    def take(self) -> list[tuple[str, str, str]]:
+    def take(self) -> list[tuple[str, str, str, bool]]:
         held, self.pending = self.pending, []
         return held
 
@@ -56,7 +56,7 @@ class Attention:
         follow_seconds: int = 60,
         pause_seconds: float = 5.0,
         max_silences: int = 3,
-        on_ready: Callable[[str, list[tuple[str, str, str]]], Awaitable[None]] | None = None,
+        on_ready: Callable[[str, list[tuple[str, str, str, bool]]], Awaitable[None]] | None = None,
     ) -> None:
         self.follow_seconds = follow_seconds
         self.pause_seconds = pause_seconds
@@ -109,12 +109,17 @@ class Attention:
 
     # -- buffering ---------------------------------------------------------
 
-    def hold(self, key: str, nick: str, account: str, text: str) -> None:
-        """Keep the line and wait for a pause before deciding anything."""
+    def hold(self, key: str, nick: str, account: str, text: str, addressed: bool = False) -> None:
+        """Keep the line and wait for a pause before deciding anything.
+
+        `addressed` marks a question put to the bot directly. A burst of those
+        is a press conference: the answer is one considered reply to the lot,
+        not one reply per shout.
+        """
         spot = self.rooms.get(key)
         if spot is None:
             return
-        spot.add(nick, account, text)
+        spot.add(nick, account, text, addressed)
         if spot.timer is not None:
             spot.timer.cancel()
         spot.timer = asyncio.create_task(self._wait_then_fire(key))

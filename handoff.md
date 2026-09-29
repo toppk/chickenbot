@@ -807,6 +807,18 @@ how a bot ends up answering something from yesterday evening.
 
 ## Attention
 
+**A burst of questions is one exchange.** The first thing said to it is
+answered at once; anything arriving while that engagement is open is held and
+answered together after the pause. Four questions in a minute earned four
+separate replies before this, which is the press-conference failure: working
+through the shouts instead of taking a pause. A held line that was *addressed*
+removes the option of silence -- that is for a conversation it was merely
+party to, not for somebody asking it something.
+
+`llm.reply_lines` (2) caps how many messages one reply may become. It is
+handed to the transport at build time, because how long a reply runs is
+behaviour rather than a property of the network.
+
 **Who it follows depends on where it is.** In its own room, being drawn in
 means listening to everybody -- that is the point. In a room it was invited
 into and has no standing in yet, it follows only the person who spoke to it:

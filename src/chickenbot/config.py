@@ -172,6 +172,9 @@ class LLMConfig:
     # OpenRouter keeps a conversation on one model/provider when it is given a
     # stable id. Harmless elsewhere, but off is one less unknown field.
     session_stickiness: bool = True
+    # Messages one reply may become. Two is a remark; four is a monologue
+    # delivered to a room that asked a question.
+    reply_lines: int = 2
     history_lines: int = 20  # the most scrollback to hand over
     history_minutes: int = 180  # ...and how far back of it still counts as the conversation
     per_user_per_min: int = 4

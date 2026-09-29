@@ -142,6 +142,7 @@ async def test_an_ask_logs_the_same_either_way(cfg, transport, store, caplog):
     """`.ask foo` and `chickenbot: foo` are the same work; they should read alike."""
     from .test_commands import StubProvider
 
+    cfg.llm.follow = False  # both answered outright, rather than one batched
     handler = Handler(cfg, store, StubProvider("42"), None)
     with caplog.at_level(logging.INFO):
         await send(handler, transport, "!ask what is six by seven")

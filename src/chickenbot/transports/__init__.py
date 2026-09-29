@@ -7,6 +7,14 @@ from ..transport import Sink, Transport
 
 
 def build(cfg: Config, name: str, sink: Sink) -> Transport:
+    """How long a reply may run is behaviour, not a property of the network,
+    so it is handed down rather than configured per transport."""
+    transport = _make(cfg, name, sink)
+    transport.reply_lines = cfg.llm.reply_lines
+    return transport
+
+
+def _make(cfg: Config, name: str, sink: Sink) -> Transport:
     if name == "irc":
         from .irc_transport import IRCTransport
 

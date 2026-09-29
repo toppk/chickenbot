@@ -101,6 +101,7 @@ async def test_seen_and_history_read_the_log(handler, transport, store):
 
 
 async def test_ask_is_reached_by_prefix_and_by_address(cfg, transport, store):
+    cfg.llm.follow = False  # one question at a time; pacing is test_pacing.py
     provider = StubProvider("a quine prints itself")
     handler = Handler(cfg, store, provider, None)
 
@@ -256,7 +257,7 @@ async def test_the_bot_remembers_what_it_said(cfg, transport, store):
 
 
 async def test_a_follow_up_sees_the_previous_exchange(cfg, transport, store):
-
+    cfg.llm.follow = False  # asked twice, answered twice; pacing is tested apart
     provider = StubProvider("42")
     handler = Handler(cfg, store, provider, None)
     await send(handler, transport, "chickenbot: what is six by seven")

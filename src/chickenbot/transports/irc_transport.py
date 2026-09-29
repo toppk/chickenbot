@@ -17,6 +17,7 @@ MODES = {OP: "+o", DEOP: "-o", VOICE: "+v", DEVOICE: "-v", BAN: "+b", UNBAN: "-b
 
 class IRCTransport:
     name = "irc"
+    reply_lines = 4  # replaced at build time from [llm] reply_lines
     caps = frozenset({OP, DEOP, VOICE, DEVOICE, KICK, BAN, UNBAN, TOPIC})
 
     def __init__(self, cfg: IRCConfig, sink: Sink) -> None:
@@ -56,7 +57,7 @@ class IRCTransport:
         return self._members.is_ignored(sender)
 
     def lines(self, text: str) -> list[str]:
-        return chunk(clean_for_irc(text), 400, 4)
+        return chunk(clean_for_irc(text), 400, self.reply_lines)
 
     def say(self, room: str, text: str) -> None:
         for line in self.lines(text):

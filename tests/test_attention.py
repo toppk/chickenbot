@@ -88,7 +88,7 @@ async def test_a_burst_becomes_one_batch():
     await settle()
 
     assert len(fired) == 1
-    assert [text for _n, _a, text in fired[0]] == ["one", "two", "three"]
+    assert [text for _n, _a, text, _to_me in fired[0]] == ["one", "two", "three"]
 
 
 # -- through the handler -------------------------------------------------
