@@ -342,3 +342,24 @@ async def test_the_limit_can_be_turned_off():
     for _ in range(50):
         await client._wait_for_room_to_speak()
     assert client._spoken == deque()
+
+
+async def test_bot_mode_can_be_declined():
+    """Only the bot can change its own user modes, so turning it off has to
+    happen here rather than from somebody else's client."""
+    client = _client()
+    client.claim_bot_mode = False
+    await client._handle_protocol(parse(":toy 001 chickenbot :welcome"))
+    sent: list[tuple] = []
+    client.send = lambda *args: sent.append(args)
+    await client._handle_protocol(parse(":toy 005 chickenbot BOT=B :are supported"))
+    assert ("MODE", "chickenbot", "-B") in sent
+    assert ("MODE", "chickenbot", "+B") not in sent
+
+
+async def test_declining_is_not_retried():
+    client = _client()
+    client.claim_bot_mode = False
+    await client._handle_protocol(parse(":toy 001 chickenbot :welcome"))
+    await client._handle_protocol(parse(":toy 005 chickenbot BOT=B :are supported"))
+    assert client._bot_check is None  # nothing to confirm

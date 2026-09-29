@@ -77,6 +77,10 @@ class IRCConfig:
     # Empty honours the network's CASEMAPPING; set it when the server advertises
     # a mapping it does not actually implement.
     casemapping: str = ""
+    # Flag itself as a bot where the network offers it, so other bots leave it
+    # alone. Off means they will talk to it -- and it still ignores them, so
+    # the conversation only runs one way.
+    bot_mode: bool = True
     # Stay under the network's flood protection. eggbot's defaults allow six
     # channel messages in ten seconds and kick on the seventh, counted per
     # nick!user@host across every channel, so these are ours with a margin.

@@ -50,6 +50,7 @@ class IRCTransport:
             sasl_user=cfg.sasl_user,
             sasl_password=cfg.sasl_password,
             casemapping=cfg.casemapping,
+            claim_bot_mode=cfg.bot_mode,
             flood_messages=cfg.flood_messages,
             flood_seconds=cfg.flood_seconds,
         )

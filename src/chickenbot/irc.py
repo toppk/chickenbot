@@ -237,6 +237,7 @@ class Client:
         sasl_user: str = "",
         sasl_password: str = "",
         send_interval: float = 0.6,
+        claim_bot_mode: bool = True,
         flood_messages: int = 5,
         flood_seconds: float = 10.0,
         whois_limit: int = 30,
@@ -257,6 +258,7 @@ class Client:
         self.sasl_user = sasl_user
         self.sasl_password = sasl_password
         self.send_interval = send_interval
+        self.claim_bot_mode = claim_bot_mode
         self.flood_messages = flood_messages
         self.flood_seconds = flood_seconds
         # When each of the last few messages went out. Registration, joins and
@@ -539,6 +541,15 @@ class Client:
             self.ready.is_set(),
         )
         if self._bot_mode_set or not self.isupport.bot_mode or not self.ready.is_set():
+            return
+        if not self.claim_bot_mode:
+            # Asked not to. Say so out loud rather than leaving it to whoever
+            # wonders why WHO shows no B: user modes do not survive a
+            # reconnect, so -B is belt and braces for a server that keeps them.
+            self._bot_mode_set = True
+            self.send("MODE", self.nick, "-" + self.isupport.bot_mode)
+            self.send("MODE", self.nick)
+            log.warning("not claiming bot mode: irc.bot_mode is off")
             return
         self._bot_mode_set = True
         self.send("MODE", self.nick, "+" + self.isupport.bot_mode)
