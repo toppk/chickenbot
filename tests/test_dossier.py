@@ -23,16 +23,16 @@ def test_the_asker_is_always_included(people):
 
 def test_someone_named_in_the_conversation_is_included(people):
     found = people.relevant(realm="irc.chonkbase.net", account="toppk", text="what is chrisk working on")
-    assert any("Runs chickenbot" in body for body in found.values())  # the asker
-    assert any("iconidentify" in body for body in found.values())  # the person named
+    assert any("Runs chickenbot" in notes for notes, _seen in found.values())  # the asker
+    assert any("iconidentify" in notes for notes, _seen in found.values())  # the person named
 
 
 def test_any_handle_finds_the_same_person(people):
     """Asking about iconidentify must find the notes filed under chrisk."""
     by_github = people.relevant(realm="irc.chonkbase.net", text="who is iconidentify")
-    assert list(by_github.values()) == ["GitHub: iconidentify"]
+    assert [notes for notes, _seen in by_github.values()] == ["GitHub: iconidentify"]
     by_irc = people.relevant(realm="irc.chonkbase.net", text="who is chrisk")
-    assert "GitHub: iconidentify" in by_irc.values()
+    assert "GitHub: iconidentify" in [notes for notes, _seen in by_irc.values()]
 
 
 def test_the_entry_is_headed_with_every_handle(people):
@@ -59,7 +59,7 @@ def test_a_bare_handle_can_match_more_than_one_person(people):
     """Two unlinked chrisks: the model gets both and can say so."""
     found = people.relevant(realm="telegram", text="ask chrisk")
     assert len(found) == 2
-    assert any("different chrisk" in b for b in found.values())
+    assert any("different chrisk" in notes for notes, _seen in found.values())
 
 
 def test_a_name_inside_another_word_does_not_count(people):

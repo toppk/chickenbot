@@ -988,6 +988,38 @@ async def cmd_bot(h: Handler, ctx: Context) -> None:
     )
 
 
+@command("who", owner=True, tier=ALL, usage="who <nick> [notes]", blurb="what i know about somebody")
+async def cmd_who(h: Handler, ctx: Context) -> None:
+    """Both halves, marked. What owners wrote is trusted; what the bot noticed
+    by reading the day back is not, and saying which is which is the point."""
+    realm = ctx.transport.realm
+    handle, _, notes = ctx.args.partition(" ")
+    if not handle:
+        ctx.say(f"usage: {h.cfg.prefix}who <nick> [notes]")
+        return
+
+    found = h.store.whois(handle) or ([pid] if (pid := h.store.person_id(realm, handle)) else [])
+    if not found:
+        ctx.say(f"{ctx.nick}: i have nothing on {handle}")
+        return
+    if len(found) > 1:
+        ctx.say(f"{ctx.nick}: {handle} is ambiguous; {len(found)} people answer to it")
+        return
+    person = found[0]
+
+    if notes.strip():
+        h.store.set_person(realm, handle, notes.strip(), author=ctx.account or ctx.nick)
+        ctx.say(f"{ctx.nick}: noted about {handle}")
+        return
+
+    ctx.say(f"{ctx.nick}: {h.dossiers.label(person)}")
+    for label, body in (("noted", h.store.person_notes(person)), ("noticed", h.store.person_observed(person))):
+        for line in body.splitlines()[:MAX_DUMP_LINES]:
+            ctx.say(f"  {label}: {line}")
+    if not h.store.person_notes(person) and not h.store.person_observed(person):
+        ctx.say("  (nothing written down yet)")
+
+
 @command("botmode", owner=True, tier=ALL, usage="botmode [on|off]", blurb="flag myself as a bot, or not")
 async def cmd_botmode(h: Handler, ctx: Context) -> None:
     """A user mode is self-only, so `/mode chickenbot -B` from somebody else's

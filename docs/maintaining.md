@@ -77,6 +77,11 @@ the same as having something to say about them.
 `--forget` drops the person entirely. Neither can remove somebody's last
 handle, which would leave a record nothing answers to.
 
+Both halves are visible from the partyline with `.who <nick>`, which also
+writes the trusted half. `chickenbot remember <realm>/#room --days 7` reads
+past days and files what they said about people, for a room the bot sat in
+before it kept notes.
+
 ## A room
 
 Two halves, kept apart.

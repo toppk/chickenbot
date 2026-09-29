@@ -17,6 +17,7 @@ from pathlib import Path
 
 from . import brain, config
 from .barfly import Barfly
+from .bartender import Bartender
 from .commands import Handler
 from .observe import TRACE, set_sink
 from .scheduler import Scheduler
@@ -129,6 +130,7 @@ async def run(cfg: config.Config) -> int:
         # to know when that room is awake.
         tasks.append(asyncio.create_task(Barfly(handler).run(), name="barfly"))
         tasks.append(asyncio.create_task(VibeCheck(handler).run(), name="vibe"))
+        tasks.append(asyncio.create_task(Bartender(handler).run(), name="bartender"))
 
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
@@ -183,6 +185,40 @@ def manage_settings(settings: Settings, args: argparse.Namespace) -> int:
     except ValueError as exc:
         print(f"bad value: {exc}", file=sys.stderr)
         return 1
+
+
+def backfill_notes(cfg: config.Config, store: Store, args: argparse.Namespace) -> int:
+    """The daily pass, pointed at days that have already gone by.
+
+    For a room the bot has been sitting in without keeping notes -- somebody
+    said something worth remembering last week and nothing wrote it down.
+    """
+    from .bartender import Bartender
+    from .commands import Handler
+
+    realm, _, room = (args.room or "").partition("/")
+    if not room:
+        print("remember needs realm/#room, as `log` lists them", file=sys.stderr)
+        return 1
+    provider = brain.build(cfg.llm)
+    if provider is None:
+        print("no model is configured", file=sys.stderr)
+        return 1
+
+    handler = Handler(cfg, store, provider, None)
+    transport = _Preview(realm, cfg.irc.nick)
+    transport.rooms = [room]
+
+    async def go() -> list[str]:
+        try:
+            return await Bartender(handler).backfill(transport, room, max(1, args.days))
+        finally:
+            await handler.drain()
+            await provider.aclose()
+
+    for line in asyncio.run(go()):
+        print(line)
+    return 0
 
 
 def show_spend(cfg: config.Config, store: Store) -> int:
@@ -299,6 +335,9 @@ def manage(cfg: config.Config, args: argparse.Namespace) -> int:
     """Read and write what the bot knows, without a running bot."""
     store = Store(cfg.db_path)
     try:
+        if args.what == "remember":
+            return backfill_notes(cfg, store, args)
+
         if args.what == "spend":
             return show_spend(cfg, store)
 
@@ -431,6 +470,7 @@ class _Preview:
     def __init__(self, realm: str, me: str) -> None:
         self.realm = realm
         self.me = me
+        self.rooms: list[str] = []
 
     def is_owner(self, account: str) -> bool:
         return False
@@ -789,6 +829,10 @@ def main(argv: list[str] | None = None) -> int:
 
     room_cmd = sub.add_parser("room", help="what each room is for, as the config declares it")
     room_cmd.add_argument("realm", nargs="?", help="e.g. irc:irc.chonkbase.net; omit for every one")
+
+    remember = sub.add_parser("remember", help="read past days back and note what they said about people")
+    remember.add_argument("room", help="realm/#room, as `log` lists them")
+    remember.add_argument("--days", type=int, default=7, help="how many days back (default 7)")
 
     sub.add_parser("spend", help="what the model has cost, ours and the provider's")
 

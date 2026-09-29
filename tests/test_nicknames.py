@@ -97,7 +97,7 @@ def test_a_nickname_is_just_another_alias(store):
     people = Dossiers(store)
     for name in ("chris", "chrisk", "iconidentify"):
         found = people.relevant(realm="irc:host", text=f"what is {name} up to")
-        assert list(found.values()) == ["runs the server"], name
+        assert [notes for notes, _seen in found.values()] == ["runs the server"], name
 
 
 def test_the_heading_shows_every_name(store):

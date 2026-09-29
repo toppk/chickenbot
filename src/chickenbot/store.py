@@ -52,9 +52,14 @@ CREATE TABLE IF NOT EXISTS soul (
 -- chonkbase is iconidentify on GitHub, and a question about either should find
 -- the same notes. `facts` is json so the decision engine can use it without
 -- reading prose.
+-- `notes` is written by owners and trusted. `observed` is what the bot has
+-- noticed about somebody from the room, written by a model reading the day
+-- back, and is not trusted -- it is distilled from what people said, which
+-- includes what they said about each other.
 CREATE TABLE IF NOT EXISTS person (
     id         INTEGER PRIMARY KEY,
     notes      TEXT NOT NULL DEFAULT '',
+    observed   TEXT NOT NULL DEFAULT '',
     facts      TEXT NOT NULL DEFAULT '{}',
     updated_at INTEGER NOT NULL
 );
@@ -323,6 +328,8 @@ class Store:
             self._db.execute("ALTER TABLE room ADD COLUMN observed TEXT NOT NULL DEFAULT ''")
             self._db.execute("ALTER TABLE room ADD COLUMN checked_at INTEGER NOT NULL DEFAULT 0")
         person_cols = {r["name"] for r in self._db.execute("PRAGMA table_info(person)")}
+        if person_cols and "observed" not in person_cols:
+            self._db.execute("ALTER TABLE person ADD COLUMN observed TEXT NOT NULL DEFAULT ''")
         if person_cols and "id" not in person_cols:
             # person(realm, account, notes) becomes person(id, notes) + alias.
             old = self._db.execute("SELECT realm, account, notes, updated_at FROM person").fetchall()
@@ -704,8 +711,25 @@ class Store:
         ).fetchall()
         return [(r["ts"], r["action"], r["target"], r["actor"]) for r in rows]
 
+    def setting_int(self, kind: str, key: str) -> int:
+        """A timestamp a periodic pass keeps for itself, keyed by what and where."""
+        row = self._db.execute("SELECT value FROM setting WHERE key = ?", (f"{kind}:{key}",)).fetchone()
+        return int(row["value"]) if row and row["value"].isdigit() else 0
+
+    def note_setting_int(self, kind: str, key: str, value: int) -> None:
+        self._db.execute(
+            "INSERT INTO setting (key, value, author, updated_at) VALUES (?, ?, 'internal', ?)"
+            " ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+            (f"{kind}:{key}", str(value), value),
+        )
+        self._db.commit()
+
     def settings(self) -> dict[str, str]:
-        return {r["key"]: r["value"] for r in self._db.execute("SELECT key, value FROM setting ORDER BY key")}
+        # Internal bookkeeping is not a setting anybody tuned.
+        return {
+            r["key"]: r["value"]
+            for r in self._db.execute("SELECT key, value FROM setting WHERE author != 'internal' ORDER BY key")
+        }
 
     def set_setting(self, key: str, value: str, author: str = "cli") -> None:
         self._db.execute(
@@ -880,6 +904,33 @@ class Store:
     def person_notes(self, person_id: int) -> str:
         row = self._db.execute("SELECT notes FROM person WHERE id = ?", (person_id,)).fetchone()
         return row["notes"] if row else ""
+
+    def person_observed(self, person_id: int) -> str:
+        row = self._db.execute("SELECT observed FROM person WHERE id = ?", (person_id,)).fetchone()
+        return row["observed"] if row else ""
+
+    def set_person_observed(self, person_id: int, text: str) -> None:
+        """What the bot noticed, kept apart from what owners wrote."""
+        self._db.execute(
+            "UPDATE person SET observed = ?, updated_at = ? WHERE id = ?", (text, int(time.time()), person_id)
+        )
+        self._keep_revision("person-observed", str(person_id), text, "bartender")
+
+    def spoke_on(self, realm: str, room: str, day: str = "", since: int = 0) -> list[str]:
+        """Accounts that said something in this room, identified only: a nick
+        nobody vouched for is nobody to keep notes about."""
+        sql = (
+            "SELECT DISTINCT account FROM chatlog WHERE realm = ? AND channel = ?"
+            " AND account != '' AND kind IN ('privmsg', 'command')"
+        )
+        args: list = [realm, self.fold(realm, room)]
+        if day:
+            sql += " AND date(ts, 'unixepoch', 'localtime') = ?"
+            args.append(day)
+        if since:
+            sql += " AND ts >= ?"
+            args.append(since)
+        return [r["account"] for r in self._db.execute(sql, args)]
 
     def person_facts(self, person_id: int) -> dict:
         row = self._db.execute("SELECT facts FROM person WHERE id = ?", (person_id,)).fetchone()

@@ -579,6 +579,35 @@ and the credit limit **for that key**, which is why each instance gets its own
 key. A provider that cannot report spend raises and the local tally still
 prints. Nothing logs or prints the key itself.
 
+## Bartender mode: remembering people
+
+`bartender.py`, daily, per room. It reads the last day back *after the fact*
+and writes short notes on the regulars: what they are working on, what they
+care about, what they said they were struggling with. Asking the chat to
+answer a question *and* decide what is worth remembering about everybody in
+the room makes it worse at both, so this is a separate pass with its own model
+call.
+
+- **Only identified people.** A nick nobody vouched for is nobody to keep
+  notes about, and `spoke_on` filters to accounts.
+- **Two halves, as for a room.** `person.notes` is what owners wrote and is
+  trusted; `person.observed` is what the bot noticed and is not -- it is
+  distilled from what people said, including what they said about each other.
+  The prompt marks it `(noticed, not established: ...)`.
+- **Only what it would say to their face.** The prompt forbids health, money,
+  relationships, anything they did not volunteer, speculation about mood
+  beyond what they said, and any rule about how the bot should treat them.
+- **The point is kindness.** The soul says to use it to ask how the thing they
+  were fighting with went, and to give somebody having a bad week an easier
+  ride -- never to quote the notes back at them.
+- Lines naming somebody it was not asked about are dropped, so the model
+  cannot invent a person or file a note against a stranger.
+
+`.who <nick>` reads both halves in the partyline and writes the trusted one.
+`chickenbot remember <realm>/#room --days 7` runs the same pass over days
+already gone by, one day at a time -- a fortnight in one call is a summary of
+a fortnight, not a memory of the people in it.
+
 ## Documentation
 
 - `docs/deploying.md` -- installing, instances, deploying, rolling back,
