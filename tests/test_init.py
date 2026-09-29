@@ -113,11 +113,10 @@ def test_the_config_it_writes_is_valid_once_filled_in(tmp_path):
     assert cfg.tools.socket == f"{run}/run/chickenbot-tools.sock"
 
 
-def test_the_env_it_writes_points_at_this_instance(tmp_path):
-    """So the systemd unit carries nothing but the program name."""
+def test_the_env_it_writes_holds_secrets_not_paths(tmp_path):
+    """Paths hang off CB_INSTANCE_DIR, which the unit sets from %i."""
     run = tmp_path / "hobby"
     init(str(run))
     env = (run / "conf" / ".env").read_text()
-    assert f"CB_CONFIG_PATH={run}/conf/chickenbot.toml" in env
-    assert f"CB_SOCKET_PATH={run}/run/chickenbot-tools.sock" in env
-    assert f"CB_GITHUB_DB_PATH={run}/cache/github-tool.db" in env
+    assert "OPENROUTER_API_KEY=" in env
+    assert "CB_CONFIG_PATH" not in env and "CB_SOCKET_PATH" not in env

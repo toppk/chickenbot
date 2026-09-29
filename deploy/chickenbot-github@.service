@@ -16,7 +16,7 @@ Type=simple
 WorkingDirectory=%h/server/chickenbot/%i
 # CB_SOCKET_PATH, CB_GITHUB_DB_PATH, CB_INTERVAL and GITHUB_TOKEN, all from one file.
 EnvironmentFile=%h/server/chickenbot/%i/conf/.env
-Environment=CB_INSTANCE=%i
+Environment=CB_INSTANCE=%i CB_INSTANCE_DIR=%h/server/chickenbot/%i
 ExecStart=%h/server/chickenbot/venv/bin/chickenbot-github
 Restart=always
 RestartSec=10

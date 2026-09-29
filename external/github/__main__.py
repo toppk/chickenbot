@@ -439,6 +439,16 @@ async def run(args: argparse.Namespace) -> int:
     return 0
 
 
+def from_instance(*parts: str) -> str:
+    """A path inside CB_INSTANCE_DIR, or "" when it is not set.
+
+    One variable rather than one per file: the systemd unit knows the instance
+    directory from %i, and everything an instance owns hangs off it.
+    """
+    base = os.environ.get("CB_INSTANCE_DIR", "").strip()
+    return str(Path(base).expanduser().joinpath(*parts)) if base else ""
+
+
 def name_process(role: str) -> str:
     """Make `ps` legible when several instances run side by side.
 
@@ -460,10 +470,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="github-tool")
     parser.add_argument(
         "--socket",
-        default=os.environ.get("CB_SOCKET_PATH", ""),
-        help="chickenbot tool socket; defaults to $CB_SOCKET_PATH, omit to poll only",
+        default=os.environ.get("CB_SOCKET_PATH") or from_instance("run", "chickenbot-tools.sock"),
+        help="chickenbot tool socket; defaults to $CB_INSTANCE_DIR/run/chickenbot-tools.sock",
     )
-    parser.add_argument("--db", default=os.environ.get("CB_GITHUB_DB_PATH", "github-tool.db"))
+    parser.add_argument(
+        "--db",
+        default=os.environ.get("CB_GITHUB_DB_PATH") or from_instance("cache", "github-tool.db") or "github-tool.db",
+    )
     parser.add_argument("--env", default=".env", help="file to read GITHUB_TOKEN from")
     parser.add_argument(
         "--users", nargs="*", default=USERS, help="only for running detached; chickenbot supplies these"

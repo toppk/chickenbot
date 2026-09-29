@@ -119,15 +119,16 @@ templates: `%i` is both the unit instance and the run directory under
 `~/server/chickenbot/`. Neither `ExecStart` carries an argument -- the paths
 come from the run directory's `.env`, which `init` writes:
 
-| Variable | Read by | Instead of |
+| Variable | Set by | Gives |
 |---|---|---|
-| `CB_CONFIG_PATH` | chickenbot | `-c` |
-| `CB_SOCKET_PATH` | github tool | `--socket` |
-| `CB_GITHUB_DB_PATH` | github tool | `--db` |
-| `CB_INTERVAL` | github tool | `--interval` |
-| `CB_INSTANCE` | both | (set by the unit from `%i`) |
+| `CB_INSTANCE_DIR` | the unit, from `%i` | `conf/chickenbot.toml`, `run/chickenbot-tools.sock`, `cache/github-tool.db` |
+| `CB_INSTANCE` | the unit, from `%i` | the name in `ps` |
+| `CB_INTERVAL` | the instance's `.env` | the github tool's refresh interval |
 
-A command-line argument still wins over the environment. `CB_INSTANCE` only
+One variable rather than one per file, because the layout is fixed and the
+unit already knows the instance. `CB_CONFIG_PATH`, `CB_SOCKET_PATH` and
+`CB_GITHUB_DB_PATH` are still honoured for a path outside the layout, and a
+command-line argument beats both. The `.env` holds secrets and knobs, no paths. `CB_INSTANCE` only
 names the process, so `ps` reads `chickenbot[eaccel-main]` and
 `chickenbot[eaccel-github]`.
 

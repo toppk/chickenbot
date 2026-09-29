@@ -531,11 +531,8 @@ OPENROUTER_API_KEY=
 GITHUB_TOKEN=
 CHICKENBOT_SASL_PASSWORD=
 
-# Where this instance keeps its things. The systemd units read this file, so
-# the command lines carry nothing but the program name.
-CB_CONFIG_PATH={run}/conf/chickenbot.toml
-CB_SOCKET_PATH={run}/run/chickenbot-tools.sock
-CB_GITHUB_DB_PATH={run}/cache/github-tool.db
+# The systemd unit sets CB_INSTANCE_DIR, and conf/, data/, cache/ and run/ hang
+# off it, so nothing here needs a path. Knobs still belong here.
 CB_INTERVAL=900
 """
 
@@ -613,6 +610,16 @@ def name_process(role: str) -> str:
     return title
 
 
+def from_instance(*parts: str) -> str:
+    """A path inside CB_INSTANCE_DIR, or "" when it is not set.
+
+    One variable rather than one per file: the systemd unit knows the instance
+    directory from %i, and everything an instance owns hangs off it.
+    """
+    base = os.environ.get("CB_INSTANCE_DIR", "").strip()
+    return str(Path(base).expanduser().joinpath(*parts)) if base else ""
+
+
 def versions() -> str:
     """What is actually installed, which is not always what the checkout says."""
     from importlib.metadata import PackageNotFoundError, version
@@ -642,8 +649,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "-c",
         "--config",
-        default=os.environ.get("CB_CONFIG_PATH", "chickenbot.toml"),
-        help="config file; defaults to $CB_CONFIG_PATH",
+        default=os.environ.get("CB_CONFIG_PATH") or from_instance("conf", "chickenbot.toml") or "chickenbot.toml",
+        help="config file; defaults to $CB_INSTANCE_DIR/conf/chickenbot.toml",
     )
     parser.add_argument("--check-config", action="store_true", help="validate the config and exit")
     parser.add_argument("--version", action="store_true", help="what is installed, and exit")

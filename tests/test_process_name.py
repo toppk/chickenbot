@@ -7,7 +7,14 @@ from chickenbot.__main__ import main, name_process
 
 @pytest.fixture(autouse=True)
 def clean_env(monkeypatch):
-    for key in ("CB_INSTANCE", "CB_CONFIG_PATH", "CB_SOCKET_PATH", "CB_GITHUB_DB_PATH", "CB_INTERVAL"):
+    for key in (
+        "CB_INSTANCE",
+        "CB_INSTANCE_DIR",
+        "CB_CONFIG_PATH",
+        "CB_SOCKET_PATH",
+        "CB_GITHUB_DB_PATH",
+        "CB_INTERVAL",
+    ):
         monkeypatch.delenv(key, raising=False)
 
 
@@ -54,3 +61,40 @@ def test_the_tool_command_line_still_wins(monkeypatch):
     monkeypatch.setenv("CB_SOCKET_PATH", "/run/one.sock")
     args = build_parser().parse_args(["--socket", "/run/two.sock"])
     assert args.socket == "/run/two.sock"
+
+
+# -- one variable, everything under it ----------------------------------
+
+
+def test_the_instance_directory_gives_the_config(monkeypatch, tmp_path, capsys):
+    run = tmp_path / "hobby"
+    (run / "conf").mkdir(parents=True)
+    (run / "conf" / "chickenbot.toml").write_text('[irc]\nenabled = true\nhost = "x"\nowners = ["a"]\n')
+    monkeypatch.setenv("CB_INSTANCE_DIR", str(run))
+    assert main(["--check-config"]) == 0
+    assert "irc" in capsys.readouterr().out
+
+
+def test_the_instance_directory_gives_the_tools_paths(monkeypatch, tmp_path):
+    from external.github.__main__ import build_parser
+
+    monkeypatch.setenv("CB_INSTANCE_DIR", str(tmp_path / "hobby"))
+    args = build_parser().parse_args([])
+    assert args.socket == str(tmp_path / "hobby" / "run" / "chickenbot-tools.sock")
+    assert args.db == str(tmp_path / "hobby" / "cache" / "github-tool.db")
+
+
+def test_a_specific_variable_still_overrides_it(monkeypatch, tmp_path):
+    from external.github.__main__ import build_parser
+
+    monkeypatch.setenv("CB_INSTANCE_DIR", str(tmp_path / "hobby"))
+    monkeypatch.setenv("CB_SOCKET_PATH", "/run/elsewhere.sock")
+    assert build_parser().parse_args([]).socket == "/run/elsewhere.sock"
+
+
+def test_without_it_the_bare_defaults_apply(monkeypatch):
+    from external.github.__main__ import build_parser
+
+    args = build_parser().parse_args([])
+    assert args.socket == "" and args.db == "github-tool.db"
+    assert main(["--check-config"]) == 1  # no chickenbot.toml in the working directory

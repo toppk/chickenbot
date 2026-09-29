@@ -23,7 +23,7 @@ WorkingDirectory=%h/server/chickenbot/%i
 # CB_CONFIG_PATH and the secrets both live here; `chickenbot init` writes it.
 # The run directory is conf/ data/ cache/ run/ -- see `chickenbot init`.
 EnvironmentFile=%h/server/chickenbot/%i/conf/.env
-Environment=CB_INSTANCE=%i
+Environment=CB_INSTANCE=%i CB_INSTANCE_DIR=%h/server/chickenbot/%i
 ExecStart=%h/server/chickenbot/venv/bin/chickenbot
 Restart=always
 RestartSec=5
