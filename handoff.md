@@ -654,6 +654,20 @@ remembering it here is the only thing that works.
 Marked handles are folded per the network's casemapping, checked against both
 the nick and the account, and never shared between realms.
 
+**`<silent>` is intercepted on every path, not only a followed one.** It said
+the word out loud when somebody asked a third party about it. The sentinel had
+not even been explained in that prompt -- `FOLLOW_NOTE` is only attached to a
+followed conversation -- so it had picked the token up from another bot saying
+it in the scrollback a minute earlier. Nothing was obeyed, but a protocol token
+of ours reached the model through another bot's output, which is the shape to
+remember now that two of them share a room.
+
+**Scrollback says how far the network vouches for a speaker.** `<chrisk>` is
+an account that matched the nick, `<nate_away (nate)>` is the same person under
+another name, `<mallory (unidentified)>` is nobody the network vouched for, and
+`<biff (bot, unidentified)>` is both. The model could not otherwise tell a
+claim worth weighing from one worth nothing.
+
 **What a bot says is read, marked, and never acted on.** Its lines are logged
 as `kind=bot` and appear in the scrollback as `<biff (bot)>`. They were
 excluded from the scrollback at first, which meant a room containing another

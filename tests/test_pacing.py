@@ -199,3 +199,31 @@ def test_an_unclosed_fence_is_treated_as_prose(cfg):
 
 def test_ordinary_prose_is_unaffected(cfg):
     assert irc_transport(cfg).lines("just a sentence") == ["just a sentence"]
+
+
+async def test_the_silence_word_never_reaches_the_room(cfg, store):
+    """It said "<silent>" out loud when somebody asked a third party about it:
+    only a followed conversation checked for the sentinel."""
+    from chickenbot.attention import SILENT
+    from chickenbot.commands import Handler
+
+    from .conftest import FakeTransport
+    from .test_commands import StubProvider
+
+    tr = FakeTransport()
+    h = Handler(cfg, store, StubProvider(SILENT), None)
+    await h.dispatch(tr.envelope("biff what is your iq compared to chickenbot's"))
+    assert tr.sent == []
+
+
+async def test_silence_in_a_followed_conversation_still_counts(cfg, store):
+    from chickenbot.attention import SILENT
+    from chickenbot.commands import Handler
+
+    from .conftest import FakeTransport
+    from .test_commands import StubProvider
+
+    tr = FakeTransport()
+    h = Handler(cfg, store, StubProvider(SILENT), None)
+    await h.dispatch(tr.envelope("chickenbot: hello"))
+    assert tr.sent == []

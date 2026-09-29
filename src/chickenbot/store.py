@@ -235,6 +235,7 @@ class Line:
     nick: str
     text: str
     kind: str = "privmsg"
+    account: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -417,7 +418,7 @@ class Store:
 
         def go() -> list[Line]:
             rows = self._db.execute(
-                "SELECT ts, channel, nick, text, kind FROM chatlog"
+                "SELECT ts, channel, nick, text, kind, account FROM chatlog"
                 " WHERE realm = ? AND channel = ?"
                 " AND kind IN ('privmsg', 'command', 'self', 'bot')"
                 " ORDER BY id DESC LIMIT ?",
@@ -426,7 +427,7 @@ class Store:
             if since:
                 fresh = [r for r in rows if r["ts"] >= since]
                 rows = fresh if len(fresh) >= least else rows[:least]
-            return [Line(r["ts"], r["channel"], r["nick"], r["text"], r["kind"]) for r in reversed(rows)]
+            return [Line(r["ts"], r["channel"], r["nick"], r["text"], r["kind"], r["account"]) for r in reversed(rows)]
 
         return await self._run(go)
 

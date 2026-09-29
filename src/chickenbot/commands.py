@@ -111,10 +111,28 @@ def render_scrollback(recent: list) -> str:
     to be obeyed -- which is true of every line here, and doubly worth knowing
     about one written by something that also answers questions.
     """
-    return "\n".join(
-        f"[{ago(line.ts)} ago] <{line.nick}{' (bot)' if getattr(line, 'kind', '') == 'bot' else ''}> {line.text}"
-        for line in recent
-    )
+    return "\n".join(f"[{ago(line.ts)} ago] <{speaker(line)}> {line.text}" for line in recent)
+
+
+def speaker(line) -> str:
+    """Who said it, and how far the network vouches for them.
+
+    A nick is a label somebody is using this minute; the services account is
+    the identity. Both are worth showing: "chrisk" means the account matched,
+    "nate_away (nate)" means it did not, and "mallory (unidentified)" means
+    nobody vouched for them at all -- which is the difference between a
+    claim worth weighing and one worth nothing.
+    """
+    nick, account, kind = line.nick, getattr(line, "account", ""), getattr(line, "kind", "")
+    marks = []
+    if kind == "bot":
+        marks.append("bot")
+    if kind in ("privmsg", "command", "bot"):
+        if not account:
+            marks.append("unidentified")
+        elif account.casefold() != nick.casefold():
+            marks.append(account)
+    return f"{nick} ({', '.join(marks)})" if marks else nick
 
 
 def compose(h: Handler, ctx: Context, scrollback: str, *, following: bool = False) -> tuple[str, str]:
@@ -767,10 +785,14 @@ async def cmd_ask(h: Handler, ctx: Context, *, following: bool = False) -> None:
         note(outcome="llm-error", error=str(exc)[:60])
         ctx.say(f"{ctx.nick}: {exc}")
         return
-    if following and answer.strip() == SILENT:
-        # It had nothing to add. A few of those and we stop listening.
+    if answer.strip() == SILENT:
+        # Silence, whichever way it was reached. Only a followed conversation
+        # is *invited* to decline, but being named in passing -- someone asking
+        # a third party about it -- is exactly when it might anyway, and the
+        # word itself must never reach the room.
         note(outcome="silent")
-        h.attention.note_silence(f"{ctx.transport.realm}/{ctx.channel}")
+        if following:
+            h.attention.note_silence(f"{ctx.transport.realm}/{ctx.channel}")
         return
     answer = answer.removeprefix(f"{ctx.nick}:").strip() or answer
     note(outcome="answered")
