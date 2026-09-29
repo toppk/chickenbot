@@ -208,3 +208,25 @@ async def test_sasl_completes_before_nick_and_user_are_sent(cfg, store):
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
         server.close()
+
+
+async def test_it_signs_off_under_its_own_name(toy, cfg, store):
+    """An instance called biff quits as biff. "chickenbot" is the program's
+    name, not the bot's, and every instance shares it."""
+    cfg.irc = IRCConfig(enabled=True, host="127.0.0.1", port=toy.port, tls=False, nick="biff", owners=["alice"])
+    transport = IRCTransport(cfg.irc, None)
+    transport.client.send_interval = 0.0
+    task = asyncio.create_task(transport.run())
+    try:
+        await asyncio.wait_for(toy.registered.wait(), 5)
+        await transport.close(f"{transport.me} signing off")
+        for _ in range(50):
+            if any(line.startswith("QUIT") for line in toy.lines):
+                break
+            await asyncio.sleep(0.01)
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+    quit_line = next(line for line in toy.lines if line.startswith("QUIT"))
+    assert quit_line == "QUIT :biff signing off"

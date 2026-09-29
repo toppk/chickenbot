@@ -143,7 +143,9 @@ async def run(cfg: config.Config) -> int:
     await handler.drain()  # let the last few log writes land
     for tr in transports.values():
         with contextlib.suppress(Exception):  # going away regardless
-            await tr.close("chickenbot signing off")
+            # Its own name: an instance called biff does not sign off as
+            # chickenbot, which is the program rather than the bot.
+            await tr.close(f"{tr.me} signing off")
     for task in tasks:
         task.cancel()
     await asyncio.gather(*tasks, return_exceptions=True)
@@ -426,7 +428,7 @@ class _Preview:
     name = "irc"
     caps = frozenset()
 
-    def __init__(self, realm: str, me: str = "chickenbot") -> None:
+    def __init__(self, realm: str, me: str) -> None:
         self.realm = realm
         self.me = me
 
@@ -451,7 +453,7 @@ def show_prompt(cfg: config.Config, args: argparse.Namespace) -> int:
             print("give a room, e.g. " + (f"{rooms[0][0]}/{rooms[0][1]}" if rooms else "irc:host/#channel"))
             return 1
         handler = Handler(cfg, store, None, None)
-        transport = _Preview(realm)
+        transport = _Preview(realm, cfg.irc.nick)
         ctx = Context(
             handler=handler,
             transport=transport,
