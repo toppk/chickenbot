@@ -430,6 +430,7 @@ def show_activity(cfg: config.Config, args: argparse.Namespace) -> int:
             command=args.command or "",
             kind=args.kind or "",
             room=args.room or "",
+            exclude=[k.strip() for k in (args.exclude or "").split(",")],
             limit=args.limit,
         )
         if args.json:
@@ -723,6 +724,11 @@ def main(argv: list[str] | None = None) -> int:
     act.add_argument("--outcome", help="e.g. answered, denied, llm-error, tool-loop")
     act.add_argument("--kind", help="e.g. message, barfly, vibe, arrival, scheduled")
     act.add_argument("--room", help="one channel, e.g. #soup")
+    act.add_argument(
+        "--exclude",
+        metavar="KINDS",
+        help="kinds to leave out, e.g. mode,topic,roster -- the bookkeeping a restart produces",
+    )
     act.add_argument("--command", help="e.g. ask, topic")
     act.add_argument("--cost", action="store_true", help="just the model spend")
     act.add_argument("--json", action="store_true", help="one object per line, for something other than a person")

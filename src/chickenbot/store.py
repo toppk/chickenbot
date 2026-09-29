@@ -479,6 +479,7 @@ class Store:
         command: str = "",
         kind: str = "",
         room: str = "",
+        exclude: Iterable[str] = (),
         limit: int = 50,
     ) -> list[dict]:
         sql = "SELECT * FROM activity WHERE ts >= ?"
@@ -486,6 +487,9 @@ class Store:
         if kind:
             sql += " AND kind = ?"
             args.append(kind)
+        if kinds := [k for k in exclude if k]:
+            sql += f" AND kind NOT IN ({', '.join('?' * len(kinds))})"
+            args += kinds
         if room:
             sql += " AND room = ? COLLATE NOCASE"
             args.append(room)

@@ -148,3 +148,29 @@ def test_no_log_file_leaves_logging_on_stdout():
     from chickenbot.__main__ import log_handlers
 
     assert log_handlers("") is None
+
+
+async def test_excluding_the_bookkeeping_a_restart_produces(recorded, store):
+    """Joining writes mode, topic and roster rows every time. Reading for
+    behaviour means not wading through eight restarts' worth."""
+    handler, tr = recorded
+    await handler.dispatch(tr.envelope("chatter"))
+    for kind in ("mode", "topic", "roster"):
+        store.record_activity({"ts": int(time.time()), "kind": kind, "room": "#chan", "outcome": "observed"})
+
+    assert len(store.activity()) == 4
+    kinds = [r["kind"] for r in store.activity(exclude=["mode", "topic", "roster"])]
+    assert kinds == ["message"]
+
+
+async def test_excluding_nothing_leaves_everything(recorded, store):
+    handler, tr = recorded
+    await handler.dispatch(tr.envelope("chatter"))
+    assert len(store.activity(exclude=[])) == 1
+    assert len(store.activity(exclude=[""])) == 1  # an empty --exclude is not a filter
+
+
+def test_the_cli_takes_the_exclude_flag(tmp_path):
+    code, out = cli(tmp_path, "activity", "--exclude", "mode,topic")
+    assert code == 0
+    assert "nothing recorded" in out
