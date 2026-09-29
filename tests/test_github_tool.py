@@ -160,7 +160,7 @@ def test_repos_reports_stars_and_recency(gh):
         }
     )
     out = gh.github_repos({"user": "toppk"})
-    assert out == "toppk/chickenbot (3 stars, 2 open, pushed 1h ago)"  # call() adds the age
+    assert out == "toppk/chickenbot (3 stars, 2 open, pushed 1h ago): d"  # call() adds the age
 
 
 def test_declared_schemas_are_valid_for_the_protocol(gh):
@@ -865,3 +865,75 @@ async def test_a_rate_limit_is_reported_not_raised(tmp_path):
 
 def test_the_lookup_tool_is_declared():
     assert any(t["name"] == "github_lookup" for t in TOOLS)
+
+
+async def test_repos_say_what_they_are(tmp_path):
+    """The description was mirrored from the first commit and never shown, so
+    it could say a repo had 76 stars and not what it was for."""
+    store = Store(tmp_path / "g.db")
+    store.save_repo(
+        {
+            "full_name": "someone/chonkstep",
+            "owner": "someone",
+            "name": "chonkstep",
+            "private": 0,
+            "fork": 0,
+            "archived": 0,
+            "stars": 76,
+            "open_issues": 73,
+            "pushed_at": int(time.time()),
+            "description": "A traditional floating compositor for Omarchy",
+        }
+    )
+    tool = Tool(store, None, ["someone"])
+    answer = await tool.call("github_repos", {"user": "someone"})
+    assert "A traditional floating compositor" in answer
+    assert "76 stars" in answer
+    store.close()
+
+
+async def test_a_repo_with_no_description_says_nothing_extra(tmp_path):
+    store = Store(tmp_path / "g.db")
+    store.save_repo(
+        {
+            "full_name": "someone/quiet",
+            "owner": "someone",
+            "name": "quiet",
+            "private": 0,
+            "fork": 0,
+            "archived": 0,
+            "stars": 0,
+            "open_issues": 0,
+            "pushed_at": int(time.time()),
+            "description": "",
+        }
+    )
+    tool = Tool(store, None, ["someone"])
+    answer = await tool.call("github_repos", {"user": "someone"})
+    assert "someone/quiet (0 stars" in answer and ":" not in answer.split("[")[0].split("(")[1]
+    store.close()
+
+
+async def test_a_long_description_is_trimmed(tmp_path):
+    from external.github.__main__ import DESCRIPTION
+
+    store = Store(tmp_path / "g.db")
+    store.save_repo(
+        {
+            "full_name": "someone/wordy",
+            "owner": "someone",
+            "name": "wordy",
+            "private": 0,
+            "fork": 0,
+            "archived": 0,
+            "stars": 1,
+            "open_issues": 0,
+            "pushed_at": int(time.time()),
+            "description": "x" * 400,
+        }
+    )
+    tool = Tool(store, None, ["someone"])
+    answer = await tool.call("github_repos", {"user": "someone"})
+    assert "x" * DESCRIPTION in answer
+    assert "x" * (DESCRIPTION + 1) not in answer
+    store.close()

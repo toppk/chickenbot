@@ -34,6 +34,7 @@ SUBJECTS = "github"  # the realm whose handles chickenbot should send us
 # it actually talks to. A list in two places is a list that disagrees with itself.
 USERS: list[str] = []
 SEARCH_PACE = 2.0  # seconds between searches; the endpoint dislikes bursts
+DESCRIPTION = 90  # enough to say what a repo is, not enough to fill the context
 REFRESH_GAP = 60.0  # a forced refresh this soon after the last one is just quota
 LOOKUP_MEMO = 600.0  # an ad-hoc lookup is remembered this long, against being asked twice
 LOOKUP_MEMOS = 32  # ...and only this many, because it is a memo and not a mirror
@@ -297,13 +298,18 @@ class Tool:
         )
 
     def github_repos(self, args: dict) -> str:
+        """What each repository is, not only how busy it is. The description
+        was mirrored from the first commit and never shown, so the bot could
+        say a repo had 76 stars and not what it was for."""
         rows = self.store.repos(str(args.get("user") or ""))
         if not rows:
             return "no repositories mirrored yet"
         limit = max(1, min(int(args.get("limit") or 10), 25))
         now = int(time.time())
         return " | ".join(
-            f"{r['full_name']} ({r['stars']} stars, {r['open_issues']} open, pushed {ago(now - r['pushed_at'])} ago)"
+            f"{r['full_name']} ({r['stars']} stars, {r['open_issues']} open,"
+            f" pushed {ago(now - r['pushed_at'])} ago)"
+            + (f": {r['description'][:DESCRIPTION]}" if r["description"] else "")
             for r in rows[:limit]
         )
 
