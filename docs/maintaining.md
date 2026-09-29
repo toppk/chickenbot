@@ -143,6 +143,14 @@ Owners, tool grants, hosts and credentials are deliberately not settable — a
 runtime command that could grant authority would be an escalation through the
 very channel that authority gates. See `docs/authority.md`.
 
+## Banning
+
+`.ban <nick>` bans that connection alone. `.ban <nick> --host` bans everyone
+behind the address -- right when the address is the problem, wrong for one
+misbehaving client, because a cloaked host is shared: `chrisk`, `chrisk_` and
+`biff` have appeared on chonkbase under one cloak. Either form tells you who
+else the mask catches.
+
 ## Other bots
 
 ```bash

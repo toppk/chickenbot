@@ -878,12 +878,25 @@ async def cmd_kick(h: Handler, ctx: Context) -> None:
     await moderate(ctx, KICK, who, reason.strip() or f"requested by {ctx.nick}")
 
 
-@command("ban", owner=True, tier=ALL, usage="ban <nick>", blurb="ban someone")
+@command("ban", owner=True, tier=ALL, usage="ban <nick> [--host]", blurb="ban someone")
 async def cmd_ban(h: Handler, ctx: Context) -> None:
-    if not ctx.args:
-        ctx.say(f"usage: {h.cfg.prefix}ban <nick>")
+    """Narrow by default. `--host` bans everyone behind the address, which on
+    a cloaking network is several unrelated people -- right for a malicious
+    host, wrong for a bot that has come loose."""
+    words = ctx.args.split()
+    wide = "--host" in words
+    target = next((w for w in words if not w.startswith("--")), "")
+    if not target:
+        ctx.say(f"usage: {h.cfg.prefix}ban <nick> [--host]")
         return
-    await moderate(ctx, BAN, ctx.args.split(" ")[0])
+
+    tr = ctx.transport
+    mask = getattr(tr, "mask_for", lambda *_a, **_k: "")(ctx.channel, target, wide) or target
+    caught = getattr(tr, "covers", lambda *_a: [])(ctx.channel, mask)
+    others = [n for n in caught if tr.fold(n) != tr.fold(target)]
+    await moderate(ctx, BAN, mask)
+    if others:
+        ctx.say(f"that mask also catches {', '.join(others)}")
 
 
 @command("unban", owner=True, tier=ALL, usage="unban <mask>", blurb="lift a ban")

@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 
 from .observe import note_many
 from .rooms import GUEST
-from .transport import TOPIC
+from .transport import BAN, TOPIC
 
 if TYPE_CHECKING:  # commands imports us, so this stays a type-only edge
     from .commands import Context, Handler
@@ -174,10 +174,17 @@ def _moderation_tool(action: str, description: str, params: dict) -> None:
             return "error: that only works in a group"
         target = str(args.get("who") or args.get("text") or "")
         reason = str(args.get("reason", ""))
+        if action == BAN and target and "@" not in target:
+            wide = bool(args.get("host"))
+            target = getattr(ctx.transport, "mask_for", lambda *_a, **_k: "")(ctx.channel, target, wide) or target
         try:
-            return await guarded(ctx, action, target, reason)
+            result = await guarded(ctx, action, target, reason)
         except Refused as no:
             return f"refused: {no}"
+        caught = getattr(ctx.transport, "covers", lambda *_a: [])(ctx.channel, target)
+        if action == BAN and len(caught) > 1:
+            return f"{result} -- that mask catches {', '.join(caught)}"
+        return result
 
     name = f"chan_{action}"
     TOOLS[name] = Tool(name, run, True, description, params, frozenset({action}))
@@ -192,7 +199,21 @@ for _action, _desc in (
     _moderation_tool(_action, _desc, _WHO)
 
 _moderation_tool("kick", "Remove someone from this room. They can rejoin.", _WHO_WHY)
-_moderation_tool("ban", "Ban someone from this room. Takes a nick or a mask.", _WHO_WHY)
+_moderation_tool(
+    "ban",
+    "Ban someone from this room. By default it bans that connection alone. Set `host` "
+    "only when the address itself is the problem -- a cloaked network gives several "
+    "unrelated people the same host, so a host ban can catch bystanders.",
+    {
+        "type": "object",
+        "properties": {
+            "who": {"type": "string"},
+            "reason": {"type": "string"},
+            "host": {"type": "boolean", "description": "ban the whole address, not just them"},
+        },
+        "required": ["who"],
+    },
+)
 _moderation_tool("unban", "Lift a ban. Takes the exact mask from the ban list.", _WHO)
 
 

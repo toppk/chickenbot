@@ -13,6 +13,7 @@ from chickenbot.restraint import PER_HOUR, Refused
 from chickenbot.tools import ToolBox
 
 from .conftest import FakeTransport
+from .test_irc_transport import irc  # noqa: F401 - fixture
 
 
 @pytest.fixture
@@ -157,3 +158,90 @@ async def test_what_happened_is_kept_for_review(handler, store):
     await guarded(ctx(handler), "kick", "nate")
     rows = store.moderation_since("fake", "#chan", 0)
     assert [(r[1], r[2], r[3]) for r in rows] == [("kick", "nate", "alice")]
+
+
+# -- how wide a ban is, which a cloak makes non-obvious -----------------
+
+
+@pytest.fixture
+def room(irc):  # noqa: F811
+    """chrisk, chrisk_ and biff behind one cloaked address; nate elsewhere."""
+    return irc
+
+
+async def _fill(irc, feed):  # noqa: F811
+    await feed(irc, ":chickenbot!u@h JOIN #chan")
+    await feed(irc, ":server 353 chickenbot = #chan :@chickenbot!c@bot.host chrisk!chrisk@8ff135c4.users.example")
+    await feed(irc, ":server 353 chickenbot = #chan :biff!biff@8ff135c4.users.example nate!n@elsewhere.example")
+    await feed(irc, ":server 366 chickenbot #chan :End")
+
+
+async def test_a_ban_is_that_connection_alone(room):
+    from .test_irc_transport import feed
+
+    await _fill(room, feed)
+    assert room.mask_for("#chan", "biff") == "biff!biff@8ff135c4.users.example"
+
+
+async def test_the_wide_form_is_the_whole_address(room):
+    from .test_irc_transport import feed
+
+    await _fill(room, feed)
+    assert room.mask_for("#chan", "biff", wide=True) == "*!*@8ff135c4.users.example"
+
+
+async def test_who_a_mask_catches_is_answerable(room):
+    """A cloak is shared by everyone behind one address, so a specific-looking
+    mask is not always specific."""
+    from .test_irc_transport import feed
+
+    await _fill(room, feed)
+    assert room.covers("#chan", "*!*@8ff135c4.users.example") == ["biff", "chrisk"]
+    assert room.covers("#chan", "biff!biff@8ff135c4.users.example") == ["biff"]
+    assert room.covers("#chan", "*!*@elsewhere.example") == ["nate"]
+
+
+async def test_banning_a_bot_does_not_catch_its_neighbour(cfg, store, room):
+    from chickenbot.commands import COMMANDS, Context
+
+    from .test_irc_transport import feed
+
+    await _fill(room, feed)
+    h = Handler(cfg, store, None, None)
+    c = Context(
+        handler=h,
+        transport=room,
+        nick="alice",
+        account="alice",
+        channel="#chan",
+        args="biff",
+        is_owner=True,
+        in_channel=True,
+    )
+    room.sent.clear()
+    await COMMANDS["ban"].run(h, c)
+    assert ("MODE", "#chan", "+b", "biff!biff@8ff135c4.users.example") in room.sent
+
+
+async def test_the_wide_ban_says_who_else_it_catches(cfg, store, room):
+    from chickenbot.commands import COMMANDS, Context
+
+    from .test_irc_transport import feed
+
+    await _fill(room, feed)
+    h = Handler(cfg, store, None, None)
+    c = Context(
+        handler=h,
+        transport=room,
+        nick="alice",
+        account="alice",
+        channel="#chan",
+        args="biff --host",
+        is_owner=True,
+        in_channel=True,
+    )
+    room.sent.clear()
+    await COMMANDS["ban"].run(h, c)
+    assert ("MODE", "#chan", "+b", "*!*@8ff135c4.users.example") in room.sent
+    said = " ".join(c[2] for c in room.sent if c[0] == "PRIVMSG")
+    assert "also catches chrisk" in said

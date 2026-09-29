@@ -54,6 +54,15 @@ class Transport(Protocol):
 
     def is_ignored(self, sender: str) -> bool: ...
 
+    def mask_for(self, room: str, nick: str, wide: bool = False) -> str:
+        """A ban mask for one person: narrow by default, the whole host when
+        `wide`. "" where the network has no such notion."""
+        return ""
+
+    def covers(self, room: str, mask: str) -> list[str]:
+        """Who in the room a mask would catch."""
+        return []
+
     def roster(self, room: str) -> list[tuple[str, str, str]]:
         """(nick, account, modes) for everyone in the room, as far as the
         network has said. An empty account means nobody vouched for them."""

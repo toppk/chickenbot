@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import fnmatch
 import logging
 
 from ..brain import blocks, clean_for_irc
@@ -13,6 +14,11 @@ from ..transport import BAN, DEOP, DEVOICE, KICK, OP, TOPIC, UNBAN, VOICE, Membe
 log = logging.getLogger(__name__)
 
 MODES = {OP: "+o", DEOP: "-o", VOICE: "+v", DEVOICE: "-v", BAN: "+b", UNBAN: "-b"}
+
+
+def _matches(mask: str, source: str) -> bool:
+    """`*` and `?` as IRC means them, against a full nick!user@host."""
+    return fnmatch.fnmatchcase(source, mask)
 
 
 def _verbatim(body: str, limit: int) -> list[str]:
@@ -149,7 +155,7 @@ class IRCTransport:
             self.client.send("KICK", room, target, reason or "requested")
             return f"kicked {target}"
         if action in {BAN, UNBAN}:
-            mask = target if "@" in target else self._mask(room, target)
+            mask = target if "@" in target else self.mask_for(room, target)
             if not mask:
                 return f"error: i do not know {target}'s host"
             self.client.send("MODE", room, MODES[action], mask)
@@ -159,10 +165,36 @@ class IRCTransport:
             return f"{action} {target}"
         return f"error: irc cannot {action}"
 
-    def _mask(self, room: str, nick: str) -> str:
+    def mask_for(self, room: str, nick: str, wide: bool = False) -> str:
+        """The ban mask for one person, narrow by default.
+
+        `nate!nate@8ff135c4.users.example` catches that connection and nobody
+        else; `*!*@8ff135c4.users.example` catches everyone behind the address,
+        which on a cloaking network can be several unrelated people. An errant
+        bot wants the first. A malicious host wants the second, and should have
+        to say so.
+        """
         chan = self.client.channels.get(self.fold(room))
-        host = chan.host(nick) if chan else ""
-        return f"*!*@{host}" if host else ""
+        source = chan.hosts.get(self.fold(nick), "") if chan else ""
+        host = source.split("@", 1)[1] if "@" in source else ""
+        if not host:
+            return ""
+        return f"*!*@{host}" if wide else source
+
+    def covers(self, room: str, mask: str) -> list[str]:
+        """Who in the room this mask would catch. A cloak is shared by everyone
+        behind one address, so a specific-looking mask is not always specific."""
+        chan = self.client.channels.get(self.fold(room))
+        if chan is None:
+            return []
+        return sorted(
+            nick
+            for nick, source in chan.hosts.items()
+            if _matches(self.fold(mask), self.fold(source)) and nick in chan.members
+        )
+
+    def _mask(self, room: str, nick: str) -> str:
+        return self.mask_for(room, nick, wide=True)
 
     async def _on_irc(self, msg: Message) -> None:
         if msg.command == "MODE" and msg.source and self.client.isupport.is_channel(msg.target):

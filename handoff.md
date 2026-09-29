@@ -814,6 +814,14 @@ model's `chan_kick` go through it.
   only actions that actually happened -- a refusal from an unopped network is
   not a spent action.
 - **No channel-wide masks.** `*!*@*` and its spellings are a ban on everyone.
+- **A ban is that connection alone unless asked otherwise.** `.ban biff` bans
+  `biff!biff@8ff135c4.users.example`; `.ban biff --host` bans
+  `*!*@8ff135c4.users.example`. On a cloaking network the host is an HMAC of
+  the address, so it is shared by everyone behind it -- chonkbase showed
+  `chrisk`, `chrisk_` and `biff` on one cloak, and the old always-wildcard mask
+  would have banned all three to stop one. Either way the reply names anybody
+  else the mask catches. The model gets the same choice through `chan_ban`'s
+  `host` argument, described so it knows what it is reaching for.
 - op, voice and unban are unrationed: they hand privilege back rather than
   taking it.
 

@@ -97,7 +97,7 @@ async def test_moderation_refuses_without_ops_and_acts_with_them(irc):
     assert ("KICK", "#chan", "nate", "rude") in irc.sent
 
     await irc.moderate(BAN, "#chan", "nate")
-    assert ("MODE", "#chan", "+b", "*!*@example.com") in irc.sent
+    assert ("MODE", "#chan", "+b", "nate!u@example.com") in irc.sent  # narrow by default
 
     await irc.moderate(OP, "#chan", "nate")
     assert ("MODE", "#chan", "+o", "nate") in irc.sent
