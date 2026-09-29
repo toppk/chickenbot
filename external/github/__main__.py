@@ -315,10 +315,18 @@ class Tool:
             await self.poll_once(only=users)
 
     def age(self, user: str = "") -> str:
-        """How old the answer is, so a reader can judge it."""
+        """How old the answer is, so a reader can judge it.
+
+        "not watched" and "nothing fetched yet" are different kinds of nothing,
+        and a reader told only the second concludes the first.
+        """
+        if user and user.casefold() not in {u.casefold() for u in self.users}:
+            return f"{user} is not watched here"
         stamps = [self.store.cursor(f"user:{u}")[1] for u in ([user] if user else self.users)]
         stamps = [t for t in stamps if t]
-        return f"as of {ago(int(time.time()) - min(stamps))} ago" if stamps else "never fetched"
+        if stamps:
+            return f"as of {ago(int(time.time()) - min(stamps))} ago"
+        return "watched, but nothing fetched yet; ask again in a moment"
 
     def call(self, name: str, args: dict) -> str:
         handler = {

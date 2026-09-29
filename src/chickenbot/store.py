@@ -947,6 +947,18 @@ class Store:
         self._keep_revision("person", str(pid), notes, author)
         return pid
 
+    def drop_alias(self, realm: str, handle: str) -> bool:
+        """Forget one handle without forgetting the person. A mistyped handle
+        is the ordinary case, and the only alternative was forgetting them
+        entirely. Their last handle is not droppable: that would leave a
+        person nothing answers to."""
+        pid = self.person_id(realm, handle)
+        if pid is None or len(self.aliases(pid)) <= 1:
+            return False
+        cur = self._db.execute("DELETE FROM alias WHERE realm = ? AND handle = ? COLLATE NOCASE", (realm, handle))
+        self._db.commit()
+        return cur.rowcount > 0
+
     def add_alias(self, person_id: int, realm: str, handle: str, source: str = "cli") -> bool:
         try:
             self._db.execute(

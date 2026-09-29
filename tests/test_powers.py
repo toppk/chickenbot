@@ -97,3 +97,21 @@ def test_the_model_is_told_how_long_it_has_been_running(handler):
     because nothing in the prompt said."""
     _system, prompt = compose(handler, ctx(handler, FakeTransport()), scrollback="")
     assert "running_for=" in prompt
+
+
+def test_it_knows_what_it_is_running_on(cfg, store):
+    """Asked "which LLM are you" it said it could not tell, while every
+    activity row it can read carries the answer."""
+
+    class Provider:
+        name = "openrouter"
+        model = "deepseek/deepseek-v4.1-flash"
+
+    h = Handler(cfg, store, Provider(), None)
+    _system, prompt = compose(h, ctx(h, FakeTransport()), scrollback="")
+    assert "model=openrouter:deepseek/deepseek-v4.1-flash" in prompt
+
+
+def test_with_no_model_configured_it_says_none(handler):
+    _system, prompt = compose(handler, ctx(handler, FakeTransport()), scrollback="")
+    assert "model=none" in prompt

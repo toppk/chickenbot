@@ -282,6 +282,18 @@ def manage(cfg: config.Config, args: argparse.Namespace) -> int:
         if args.forget:
             print("forgotten" if store.forget_person(args.realm, args.account) else "no such person")
             return 0
+        if args.unlink:
+            other_realm, _, other_handle = args.unlink.partition("/")
+            if not other_handle:
+                print("an alias looks like realm/handle, e.g. github/iconidentity", file=sys.stderr)
+                return 1
+            if store.person_id(other_realm, other_handle) != store.person_id(args.realm, args.account):
+                print(f"{args.unlink} does not belong to {args.realm}/{args.account}", file=sys.stderr)
+                return 1
+            ok = store.drop_alias(other_realm, other_handle)
+            print("dropped" if ok else "that is their only handle; use --forget to drop the person")
+            return 0 if ok else 1
+
         if args.alias:
             pid = store.person_id(args.realm, args.account)
             if pid is None:
@@ -695,6 +707,7 @@ def main(argv: list[str] | None = None) -> int:
     who.add_argument("text", nargs="?", help="new notes, @file, or - for stdin; omit to show")
     who.add_argument("--forget", action="store_true")
     who.add_argument("--alias", metavar="REALM/HANDLE", help="another name the same person goes by")
+    who.add_argument("--unlink", metavar="REALM/HANDLE", help="drop one handle, e.g. a mistyped one")
 
     bot_cmd = sub.add_parser("bot", help="mark an account as a bot, for networks that do not")
     bot_cmd.add_argument("realm", nargs="?", help="e.g. irc:irc.chonkbase.net; omit to list")

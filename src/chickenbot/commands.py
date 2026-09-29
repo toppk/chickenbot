@@ -125,7 +125,7 @@ def compose(h: Handler, ctx: Context, scrollback: str, *, following: bool = Fals
     situation = (
         f"<context>network={ctx.transport.name} room={ctx.channel} kind={where}"
         f" asking={ctx.nick} you={'/'.join(h.wake_words(ctx.transport))}"
-        f" now={now} running_for={ago(int(h.started))}</context>"
+        f" now={now} running_for={ago(int(h.started))} model={_model(h)}</context>"
     )
     # What it can actually do here, right now. Without this the model finds out
     # by proposing a kick it has no power to perform and relaying the refusal.
@@ -141,6 +141,14 @@ def compose(h: Handler, ctx: Context, scrollback: str, *, following: bool = Fals
             f"{head}\n<channel_scrollback>\n{scrollback}\n</channel_scrollback>\n\n{ctx.nick} asks: {ctx.args}",
         )
     return system, f"{head}\n\n{ctx.args}"
+
+
+def _model(h: Handler) -> str:
+    """What is answering. It was asked directly and had to say it could not
+    tell, while every activity row it can read carries the answer."""
+    if h.provider is None:
+        return "none"
+    return f"{h.provider.name}:{getattr(h.provider, 'model', '?')}"
 
 
 def who_is_here(ctx: Context) -> tuple[list[str], list[str]]:

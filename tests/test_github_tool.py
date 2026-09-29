@@ -616,7 +616,7 @@ def test_the_answer_says_how_old_it_is(gh):
 
 def test_a_never_fetched_mirror_says_so(gh):
     gh.users = ["toppk"]
-    assert "[never fetched]" in gh.call("github_repos", {})
+    assert "nothing fetched yet" in gh.call("github_repos", {})
 
 
 async def test_a_question_refreshes_behind_itself_not_in_front(gh, monkeypatch):
@@ -643,7 +643,7 @@ async def test_a_question_refreshes_behind_itself_not_in_front(gh, monkeypatch):
 
     answer = gh.call("github_activity", {"user": "toppk", "summarize": True})
     assert polled == []  # answered without waiting
-    assert "never fetched" in answer
+    assert "nothing fetched yet" in answer
 
     await gh._refreshing
     assert polled == ["toppk"]
@@ -672,3 +672,17 @@ def test_polling_on_a_timer_is_off_unless_asked():
     assert ghm.DEFAULT_INTERVAL == 6 * 3600
     source = inspect.getsource(ghm.run)
     assert "if args.poll:" in source  # the loop is opt-in
+
+
+def test_a_handle_nobody_watches_says_that_instead(gh):
+    """ "nothing fetched yet" and "not watched" are different kinds of nothing,
+    and a reader told only the second concludes the first."""
+    answer = gh.call("github_activity", {"user": "stranger"})
+    assert "stranger is not watched here" in answer
+
+
+def test_a_watched_handle_says_it_is_watched(gh):
+    gh.watch(["newcomer"])
+    answer = gh.call("github_activity", {"user": "newcomer"})
+    assert "not watched" not in answer
+    assert "nothing fetched yet" in answer

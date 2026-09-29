@@ -323,7 +323,7 @@ async def tool_self_activity(h: Handler, ctx: Context, args: dict) -> str:
     for row in reversed(rows):
         when = time.strftime("%m-%d %H:%M", time.localtime(row["ts"]))
         bits = [f"{when} {row['kind']}", row["room"] or "-", row["nick"] or "-"]
-        for field in ("command", "outcome", "tools", "error"):
+        for field in ("command", "outcome", "llm", "model", "served", "tools", "error"):
             if row[field]:
                 bits.append(f"{field}={row[field]}")
         if row["cost"]:

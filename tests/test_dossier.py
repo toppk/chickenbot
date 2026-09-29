@@ -291,3 +291,26 @@ def test_the_old_two_column_table_migrates_to_aliases(tmp_path):
         assert st.aliases(pid) == [("irc:host", "chrisk")]
     finally:
         st.close()
+
+
+def test_a_mistyped_handle_can_be_dropped_without_the_person(store):
+    """The ordinary case: somebody types iconidentity for iconidentify."""
+    pid = store.set_person("irc", "chrisk", "runs the server")
+    store.add_alias(pid, "github", "iconidentity")
+    store.add_alias(pid, "github", "iconidentify")
+
+    assert store.drop_alias("github", "iconidentity") is True
+    assert store.person_id("github", "iconidentity") is None
+    assert store.person_id("github", "iconidentify") == pid
+    assert store.person_notes(pid) == "runs the server"
+
+
+def test_the_last_handle_is_not_droppable(store):
+    """It would leave a person nothing answers to."""
+    store.set_person("irc", "chrisk", "runs the server")
+    assert store.drop_alias("irc", "chrisk") is False
+    assert store.person_id("irc", "chrisk") is not None
+
+
+def test_dropping_a_handle_nobody_holds_is_not_an_error(store):
+    assert store.drop_alias("github", "nobody") is False
