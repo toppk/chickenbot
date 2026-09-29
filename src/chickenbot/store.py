@@ -797,9 +797,9 @@ class Store:
         return int(row["n"] or 0) if row else 0
 
     def described_rooms(self, any_policy: bool = False) -> list[tuple[str, str, int]]:
-        """(realm, room, updated_at) for every room with notes, or with anything
-        recorded about it at all."""
-        where = "" if any_policy else " WHERE notes != ''"
+        """(realm, room, updated_at) for every room anything has been written
+        about -- by an owner or by the bot -- or every room at all."""
+        where = "" if any_policy else " WHERE notes != '' OR observed != ''"
         rows = self._db.execute(f"SELECT realm, name, updated_at FROM room{where} ORDER BY realm, name").fetchall()
         return [(r["realm"], r["name"], r["updated_at"]) for r in rows]
 

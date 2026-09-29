@@ -558,6 +558,9 @@ prints. Nothing logs or prints the key itself.
 
 - `docs/deploying.md` -- installing, instances, deploying, rolling back,
   backups, and starting one over.
+- `docs/maintaining.md` -- for whoever runs an instance: the soul, person and
+  room dossiers, identities, what it has been doing, and which of those the
+  bot may write itself.
 - `docs/chatting.md` -- for anybody in a channel with it. No jargon, no
   configuration: attention, what it can see, what it does unprompted, what it
   will not do, and what to check when it seems wrong.

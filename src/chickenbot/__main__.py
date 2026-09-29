@@ -206,6 +206,58 @@ def show_spend(cfg: config.Config, store: Store) -> int:
     return 0
 
 
+def manage_vibe(store: Store, args: argparse.Namespace) -> int:
+    """What a room is like. Two halves, deliberately apart: `notes` is what
+    owners wrote and is trusted, `observed` is the bot's own daily reading of
+    the room and is not -- it is distilled from what people said."""
+    if not args.room:
+        rows = store.described_rooms()
+        for realm, room, updated in rows:
+            when = time.strftime("%Y-%m-%d", time.localtime(updated))
+            print(f"{realm}/{room}\t{when}")
+        if not rows:
+            print("(nothing written about any room yet)")
+        return 0
+    if not args.realm:
+        print("vibe needs a realm and a room", file=sys.stderr)
+        return 1
+
+    kind = "room-observed" if args.observed else "room"
+    key = f"{args.realm}/{store.fold(args.realm, args.room)}"
+    if args.forget:
+        if args.observed:
+            store.set_room_observed(args.realm, args.room, "")
+        else:
+            store.set_room_notes(args.realm, args.room, "", author="cli")
+        print("cleared; the next daily read will write a new one" if args.observed else "cleared")
+        return 0
+    if args.observed and args.text:
+        print("the observed half is the bot's own reading; set the notes instead", file=sys.stderr)
+        return 1
+
+    current = store.room_observed(args.realm, args.room) if args.observed else store.room_notes(args.realm, args.room)
+    if args.text is None and not (args.history or args.revision is not None or args.restore is not None):
+        # Showing it: both halves, marked, because which is which is the point.
+        notes = store.room_notes(args.realm, args.room)
+        observed = store.room_observed(args.realm, args.room)
+        if args.observed:
+            print(observed or "(the bot has not read this room yet)")
+            return 0
+        print("-- noted by owners (trusted) --")
+        print(notes or "(nothing)")
+        print("\n-- observed by the bot (impressions, not rules) --")
+        print(observed or "(not read yet)")
+        return 0
+    return _document(
+        store,
+        kind,
+        key,
+        args,
+        lambda text: store.set_room_notes(args.realm, args.room, text, author="cli"),
+        current,
+    )
+
+
 def manage_rooms(cfg: config.Config, store: Store, args: argparse.Namespace) -> int:
     """Read-only: a room's job is declared in the toml, beside its channel
     list. Change it there and restart."""
@@ -254,12 +306,15 @@ def manage(cfg: config.Config, args: argparse.Namespace) -> int:
         if args.what == "room":
             return manage_rooms(cfg, store, args)
 
+        if args.what == "vibe":
+            return manage_vibe(store, args)
+
         if args.what == "tune":
             return manage_settings(Settings(store, cfg), args)
 
         if args.what == "soul":
             seed_soul(store)
-            return _document(store, "soul", "", args, lambda text: store.set_soul(text))
+            return _document(store, "soul", "", args, lambda text: store.set_soul(text), store.soul())
 
         if args.account is None:
             # A bare handle searches every realm, which is how "who is
@@ -315,6 +370,7 @@ def manage(cfg: config.Config, args: argparse.Namespace) -> int:
             str(pid) if pid else "",
             args,
             lambda text: store.set_person(args.realm, args.account, text),
+            store.person_notes(pid) if pid else "",
         )
     finally:
         store.close()
@@ -503,9 +559,8 @@ def export(cfg: config.Config, args: argparse.Namespace) -> int:
         store.close()
 
 
-def _document(cfg_store: Store, kind: str, key: str, args: argparse.Namespace, write) -> int:
+def _document(cfg_store: Store, kind: str, key: str, args: argparse.Namespace, write, current: str = "") -> int:
     """Show, set, list history, print an old revision, or restore one."""
-    current = cfg_store.soul() if kind == "soul" else (cfg_store.person_notes(int(key)) if key else "")
 
     if args.history:
         rows = cfg_store.revisions(kind, key)
@@ -718,6 +773,13 @@ def main(argv: list[str] | None = None) -> int:
     set_cmd.add_argument("key", nargs="?", help=f"one of: {', '.join(SETTABLE)}")
     set_cmd.add_argument("value", nargs="?", help="omit to read it back")
     set_cmd.add_argument("--unset", action="store_true", help="fall back to the config file")
+
+    vibe = versioned(sub.add_parser("vibe", help="what a room is like: owner notes and the bot's own reading"))
+    vibe.add_argument("realm", nargs="?", help="e.g. irc:irc.chonkbase.net; omit to list")
+    vibe.add_argument("room", nargs="?")
+    vibe.add_argument("text", nargs="?", help="new notes, @file, or - for stdin; omit to show")
+    vibe.add_argument("--observed", action="store_true", help="the bot's own reading rather than the owners' notes")
+    vibe.add_argument("--forget", action="store_true", help="clear it")
 
     room_cmd = sub.add_parser("room", help="what each room is for, as the config declares it")
     room_cmd.add_argument("realm", nargs="?", help="e.g. irc:irc.chonkbase.net; omit for every one")

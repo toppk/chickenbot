@@ -42,6 +42,13 @@ systemctl --user restart chickenbot@hobby chickenbot-github@hobby
 `deploy/*.service` are systemd user templates; `%i` is the instance name and
 its run directory under `~/server/chickenbot/`.
 
+## Looking after it
+
+`docs/maintaining.md` is the maintainer's guide: the soul, what it knows about
+people and rooms, what it has been doing and what it cost. `docs/deploying.md`
+covers instances and deploys, `docs/reviewing.md` how to review an episode,
+and `docs/authority.md` who is allowed to do what.
+
 ## Talking to it
 
 `docs/chatting.md` is the guide for anybody sharing a channel with it:

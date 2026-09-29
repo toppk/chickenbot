@@ -128,3 +128,67 @@ async def test_an_owner_writes_the_vibe(cfg, store):
     c = ctx(h, args="a serious room", owner=True)
     await COMMANDS["vibe"].run(h, c)
     assert store.room_notes("fake", "#soup") == "a serious room"
+
+
+# -- reading and correcting it from the command line --------------------
+
+
+def cli(tmp_path, store, *args) -> tuple[int, str]:
+    import io
+    from contextlib import redirect_stdout
+
+    from chickenbot.__main__ import main
+
+    toml = tmp_path / "c.toml"
+    toml.write_text(f'db_path = "{store.path}"\n[irc]\nenabled = true\nhost = "x"\nowners = ["a"]\n')
+    out = io.StringIO()
+    with redirect_stdout(out):
+        code = main(["-c", str(toml), *args])
+    return code, out.getvalue()
+
+
+def test_vibe_shows_both_halves_apart(tmp_path, store):
+    store.set_room_notes("fake", "#soup", "no politics", author="alice")
+    store.set_room_observed("fake", "#soup", "soup puns, mostly")
+    code, out = cli(tmp_path, store, "vibe", "fake", "#soup")
+    assert code == 0
+    assert "noted by owners (trusted)" in out and "no politics" in out
+    assert "observed by the bot" in out and "soup puns" in out
+
+
+def test_vibe_lists_rooms_anything_is_known_about(tmp_path, store):
+    store.set_room_observed("fake", "#lobby", "the printer joke is sacred")
+    assert "fake/#lobby" in cli(tmp_path, store, "vibe")[1]
+
+
+def test_an_owner_can_write_the_notes(tmp_path, store):
+    assert cli(tmp_path, store, "vibe", "fake", "#soup", "no politics")[0] == 0
+    assert store.room_notes("fake", "#soup") == "no politics"
+
+
+def test_the_bots_own_reading_can_be_cleared(tmp_path, store):
+    """For when it has fixed on something wrong -- it rewrites nightly."""
+    store.set_room_observed("fake", "#soup", "toppk always says make it so")
+    assert cli(tmp_path, store, "vibe", "fake", "#soup", "--observed", "--forget")[0] == 0
+    assert store.room_observed("fake", "#soup") == ""
+
+
+def test_the_bots_own_reading_is_not_handwritten(tmp_path, store):
+    """It is a record of what it noticed; writing it by hand would be a lie
+    about where it came from. Correct the notes instead."""
+    assert cli(tmp_path, store, "vibe", "fake", "#soup", "made up", "--observed")[0] == 1
+
+
+def test_notes_keep_their_history(tmp_path, store):
+    cli(tmp_path, store, "vibe", "fake", "#soup", "first")
+    cli(tmp_path, store, "vibe", "fake", "#soup", "second")
+    out = cli(tmp_path, store, "vibe", "fake", "#soup", "--history")[1]
+    assert out.count("chars") == 2
+
+
+def test_a_note_can_be_rolled_back(tmp_path, store):
+    cli(tmp_path, store, "vibe", "fake", "#soup", "first")
+    cli(tmp_path, store, "vibe", "fake", "#soup", "second")
+    first = store.revisions("room", "fake/#soup")[-1][0]
+    assert cli(tmp_path, store, "vibe", "fake", "#soup", "--restore", str(first))[0] == 0
+    assert store.room_notes("fake", "#soup") == "first"
