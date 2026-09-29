@@ -360,6 +360,10 @@ def show_prompt(cfg: config.Config, args: argparse.Namespace) -> int:
     store = Store(cfg.db_path)
     Settings(store, cfg).apply_stored()  # the preview should match the real thing
     try:
+        # No instance's name in the code: an owner of the network being
+        # previewed, or nobody in particular.
+        owners = next((t.owners for t in cfg.enabled_transports().values() if t.owners), [])
+        asker = args.nick or (owners[0] if owners else "someone")
         realm, _, room = (args.room or "").partition("/")
         if not room:
             rooms = store.rooms()
@@ -370,8 +374,8 @@ def show_prompt(cfg: config.Config, args: argparse.Namespace) -> int:
         ctx = Context(
             handler=handler,
             transport=transport,
-            nick=args.nick,
-            account=args.nick,
+            nick=asker,
+            account=asker,
             channel=room,
             args=args.question,
             is_owner=False,
@@ -685,7 +689,7 @@ def main(argv: list[str] | None = None) -> int:
     pr = sub.add_parser("prompt", help="show exactly what the model would be sent")
     pr.add_argument("room", nargs="?", help="realm/#room, as `log` lists them")
     pr.add_argument("question", nargs="?", default="what is going on?")
-    pr.add_argument("--nick", default="toppk", help="who is asking")
+    pr.add_argument("--nick", default="", help="who is asking; an owner of that network by default")
     pr.add_argument("--following", action="store_true", help="as a followed conversation")
 
     init_cmd = sub.add_parser("init", help="lay out a new instance's run directory")
