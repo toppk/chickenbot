@@ -1,4 +1,5 @@
 import asyncio
+from collections import deque
 
 from chickenbot.irc import Channel, Client, ISupport, parse, split_message
 
@@ -272,3 +273,72 @@ async def test_a_confirmed_claim_is_left_alone(monkeypatch):
     assert sent == []
     if client._bot_check:
         client._bot_check.cancel()
+
+
+# -- staying under the network's flood protection ------------------------
+
+
+def _paced(**over):
+    client = _client()
+    client.send_interval = 0.0
+    for key, value in over.items():
+        setattr(client, key, value)
+    return client
+
+
+async def test_a_burst_goes_out_at_once(monkeypatch):
+    """Responsiveness first: the allowance is there to be spent."""
+    client = _paced(flood_messages=5, flood_seconds=10.0)
+    for _ in range(5):
+        await client._wait_for_room_to_speak()
+    assert len(client._spoken) == 5
+
+
+async def test_the_next_message_waits_for_the_window(monkeypatch):
+    slept: list[float] = []
+
+    async def record(seconds):
+        slept.append(seconds)
+        client._spoken[0] -= 100  # as though the window had passed
+
+    client = _paced(flood_messages=2, flood_seconds=10.0)
+    monkeypatch.setattr(asyncio, "sleep", record)
+    await client._wait_for_room_to_speak()
+    await client._wait_for_room_to_speak()
+    await client._wait_for_room_to_speak()
+    assert slept and 0 < slept[0] <= 10.0
+
+
+async def test_the_steady_rate_matches_what_eggbot_asks_for():
+    """Six in ten seconds, kicking on the seventh, means one every two seconds
+    once a burst is spent -- which is the spacing it asks for between lines of
+    ascii art."""
+    from chickenbot.config import IRCConfig
+
+    cfg = IRCConfig()
+    assert cfg.flood_messages < 6  # under the limit, not at it
+    assert cfg.flood_seconds / cfg.flood_messages >= 2.0
+
+
+async def test_a_message_older_than_the_window_stops_counting():
+    client = _paced(flood_messages=2, flood_seconds=10.0)
+    await client._wait_for_room_to_speak()
+    client._spoken[0] -= 100  # as though it were sent long ago
+    await client._wait_for_room_to_speak()
+    assert len(client._spoken) == 1  # dropped on the way past, not counted
+
+
+async def test_only_speech_is_counted(monkeypatch):
+    """A network meters what the bot says, not what it does. Holding back a
+    MODE would make it slow to do as it is told, for nothing."""
+    from chickenbot.irc import SPEECH
+
+    assert sorted(SPEECH) == ["NOTICE", "PRIVMSG"]
+    assert "MODE" not in SPEECH and "JOIN" not in SPEECH
+
+
+async def test_the_limit_can_be_turned_off():
+    client = _paced(flood_messages=0)
+    for _ in range(50):
+        await client._wait_for_room_to_speak()
+    assert client._spoken == deque()

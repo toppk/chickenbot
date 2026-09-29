@@ -832,6 +832,17 @@ through the shouts instead of taking a pause. A held line that was *addressed*
 removes the option of silence -- that is for a conversation it was merely
 party to, not for somebody asking it something.
 
+**Outgoing messages are held under the network's flood limit.**
+`irc.flood_messages` (5) in `irc.flood_seconds` (10), a rolling window over
+PRIVMSG and NOTICE only -- a network meters what a bot says, not what it does,
+and holding back a MODE would just make it slow to obey. eggbot's defaults are
+six in ten seconds, kicking on the seventh, counted per nick!user@host across
+every channel; five leaves a margin, and once a burst is spent the rate
+settles to one message every two seconds, which is the spacing eggbot asks for
+between lines of ascii art. Being slow is recoverable; being banned
+mid-sentence is not. A fourteen-line art block therefore takes about half a
+minute to deliver.
+
 **A fenced block is the exception.** ``` on its own line either side means the
 shape *is* the content -- ascii art, a table, a snippet -- so it is sent line
 for line, neither reflowed nor markdown-stripped, with its own budget

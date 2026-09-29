@@ -50,6 +50,8 @@ class IRCTransport:
             sasl_user=cfg.sasl_user,
             sasl_password=cfg.sasl_password,
             casemapping=cfg.casemapping,
+            flood_messages=cfg.flood_messages,
+            flood_seconds=cfg.flood_seconds,
         )
         self.client.handler = self._on_irc
         self._members = Membership(cfg.owners, cfg.ignore_nicks, self.fold)

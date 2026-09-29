@@ -77,6 +77,14 @@ class IRCConfig:
     # Empty honours the network's CASEMAPPING; set it when the server advertises
     # a mapping it does not actually implement.
     casemapping: str = ""
+    # Stay under the network's flood protection. eggbot's defaults allow six
+    # channel messages in ten seconds and kick on the seventh, counted per
+    # nick!user@host across every channel, so these are ours with a margin.
+    # Once the burst is spent the steady rate is one message every
+    # flood_seconds/flood_messages -- two seconds at the defaults, which is
+    # what eggbot asks for between lines of ascii art.
+    flood_messages: int = 5
+    flood_seconds: float = 10.0
     password_env: str = "CHICKENBOT_SERVER_PASSWORD"
     sasl_user: str = ""
     sasl_password_env: str = "CHICKENBOT_SASL_PASSWORD"

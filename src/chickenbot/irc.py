@@ -8,6 +8,8 @@ import contextlib
 import logging
 import random
 import ssl
+import time
+from collections import deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 
@@ -17,6 +19,9 @@ from .observe import TRACE
 log = logging.getLogger(__name__)
 
 # A claim can be lost; ask again rather than sit in the room unflagged.
+# What a network's flood protection counts: what the bot says, not what it does.
+SPEECH = {"PRIVMSG", "NOTICE"}
+
 BOT_MODE_WAIT = 8.0
 BOT_MODE_TRIES = 3
 
@@ -232,6 +237,8 @@ class Client:
         sasl_user: str = "",
         sasl_password: str = "",
         send_interval: float = 0.6,
+        flood_messages: int = 5,
+        flood_seconds: float = 10.0,
         whois_limit: int = 30,
         casemapping: str = "",
     ) -> None:
@@ -250,6 +257,12 @@ class Client:
         self.sasl_user = sasl_user
         self.sasl_password = sasl_password
         self.send_interval = send_interval
+        self.flood_messages = flood_messages
+        self.flood_seconds = flood_seconds
+        # When each of the last few messages went out. Registration, joins and
+        # modes are not counted: networks meter chatter, and holding back a
+        # MODE would only make the bot slow to do as it is told.
+        self._spoken: deque[float] = deque()
         self.whois_limit = whois_limit
 
         self.isupport = ISupport(casemapping)
@@ -377,6 +390,8 @@ class Client:
     async def _drain_outbox(self) -> None:
         while True:
             line = await self._outbox.get()
+            if line.split(" ", 1)[0].upper() in SPEECH:
+                await self._wait_for_room_to_speak()
             writer = self._writer
             if writer is None:
                 continue
@@ -388,6 +403,27 @@ class Client:
                 return
             log.log(TRACE, ">> %s", _safe(line))
             await asyncio.sleep(self.send_interval)
+
+    async def _wait_for_room_to_speak(self) -> None:
+        """Hold a message back rather than be kicked for flooding.
+
+        A rolling window, because that is how the bots enforcing it count: a
+        burst goes out at once, and once it is spent the rate settles to one
+        message per window-slice. Being slow is recoverable; being banned
+        mid-sentence is not.
+        """
+        if self.flood_messages <= 0:
+            return
+        while True:
+            now = time.monotonic()
+            while self._spoken and now - self._spoken[0] >= self.flood_seconds:
+                self._spoken.popleft()
+            if len(self._spoken) < self.flood_messages:
+                self._spoken.append(now)
+                return
+            wait = self.flood_seconds - (now - self._spoken[0])
+            log.debug("holding a message for %.1fs to stay under the flood limit", wait)
+            await asyncio.sleep(max(wait, 0.05))
 
     async def _read_loop(self) -> None:
         assert self._reader is not None
