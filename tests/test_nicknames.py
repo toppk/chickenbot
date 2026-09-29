@@ -194,3 +194,60 @@ async def test_a_name_somebody_else_goes_by_is_refused(cfg, store, transport):
     pid = store.set_person("irc:host", "chrisk", "notes")
     store.add_alias(pid, "nick", "chris")
     assert "already somebody's name" in await naming(handler, transport, "chris")
+
+
+# -- named anywhere, not only first ------------------------------------
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "hello chickenbot do you know biff",
+        "hi cb",
+        "does chickenbot know about this?",
+        "ask cb, it keeps the log",
+        "what do you think chickenbot",
+        "chickenbot?",
+    ],
+)
+async def test_being_named_mid_sentence_is_being_addressed(handler, transport, line):
+    """Both of these were ignored: the name only counted as the first word."""
+    await handler.dispatch(transport.envelope(line))
+    assert handler.provider.prompts, f"ignored: {line}"
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "the chickenbots are revolting",
+        "unchickenbot the thing",
+        "i prefer chickenbotany",
+        "the cbs are fine",
+    ],
+)
+async def test_a_name_glued_into_a_word_is_somebody_elses_business(handler, transport, line):
+    await handler.dispatch(transport.envelope(line))
+    assert handler.provider.prompts == []
+
+
+async def test_a_name_first_still_strips_it(handler, transport):
+    """`chickenbot: uptime` is a command, not a question about uptime."""
+    await handler.dispatch(transport.envelope("chickenbot: uptime"))
+    assert "up " in transport.sent[-1][1]
+    assert handler.provider.prompts == []
+
+
+async def test_a_name_later_keeps_the_whole_line(handler, transport):
+    await handler.dispatch(transport.envelope("hello chickenbot do you know biff"))
+    assert "hello chickenbot do you know biff" in handler.provider.prompts[-1]
+
+
+def test_names_needs_a_word_boundary():
+    from chickenbot.commands import names
+
+    assert names("hi chick", "chick")
+    assert names("chick?", "chick")
+    assert names("[chick]", "chick")
+    assert not names("chicken", "chick")
+    assert not names("2chick", "chick")
+    assert not names("", "chick")

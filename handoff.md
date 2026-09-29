@@ -824,6 +824,14 @@ how a bot ends up answering something from yesterday evening.
 
 ## Attention
 
+**Being named anywhere in the line is being addressed.** `_extract` used to
+match a wake word only as the first word, so "hi chick" and "hello chickenbot
+do you know biff" were both logged as ordinary chat and ignored — in a public
+room, where the name is the only way in, that made it look broken. A name at
+the start is still stripped, so `chickenbot: uptime` is a command; a name
+later leaves the line whole. Word boundaries are checked by hand rather than
+with `\b`, which mishandles the `[]\^{}|` an IRC nick may contain.
+
 **A burst of questions is one exchange.** The first thing said to it is
 answered at once; anything arriving while that engagement is open is held and
 answered together after the pause. Four questions in a minute earned four

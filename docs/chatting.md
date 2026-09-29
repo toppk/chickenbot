@@ -14,7 +14,10 @@ chickenbot what is a quine
 ```
 
 `:` `,` or a plain space all work, and it answers to any nickname it has been
-given as well as its own — `.help` shows which. In the room where its admins
+given as well as its own — `.help` shows which. **Naming it anywhere in the
+line counts**, not only at the start: "hello chickenbot, do you know biff" and
+"hi chick" are both addressing it. A name glued into another word is not —
+"the chickenbots are revolting" is somebody else's business. In the room where its admins
 sit it also answers a bare `.ask` and friends; in other channels it does not,
 so it never fights whatever else already uses that character. `.help` shows the
 form that works where you are.

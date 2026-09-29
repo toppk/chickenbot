@@ -192,6 +192,25 @@ def powers(h: Handler, ctx: Context) -> str:
     return "<powers>\n" + "\n".join(lines) + "\n</powers>" if lines else ""
 
 
+def names(line: str, word: str) -> bool:
+    """Whether `word` appears as a word of its own.
+
+    Not a regex: an IRC nick may contain `[]\^{}|`, which `\b` mishandles, and
+    the rule wanted here is only "not glued to a letter or digit" -- so
+    `chickenbots` and `unchick` are somebody else's business.
+    """
+    if not word:
+        return False
+    start = 0
+    while (at := line.find(word, start)) != -1:
+        before = line[at - 1] if at else " "
+        after = line[at + len(word)] if at + len(word) < len(line) else " "
+        if not before.isalnum() and not after.isalnum():
+            return True
+        start = at + 1
+    return False
+
+
 def ago(ts: int) -> str:
     seconds = max(0, int(time.time()) - ts)
     if seconds < 60:
@@ -542,11 +561,17 @@ class Handler:
         if how == PREFIX:
             return None if in_group else text
         lowered = tr.fold(text)
-        for word in self.wake_words(tr):
+        words = self.wake_words(tr)
+        for word in words:
             folded = tr.fold(word)
             for sep in (":", ",", " "):
                 if lowered.startswith(folded + sep):
                     return text[len(folded) + len(sep) :].strip()
+        # Named later in the line is still being named: "hi chick" and "hello
+        # chickenbot, do you know biff" are how people actually address
+        # somebody, and both were ignored when only the first word counted.
+        if any(names(lowered, tr.fold(word)) for word in words):
+            return text.strip()
         return text if not in_group else None
 
     def _may_dm(self, tr: Transport, env: Event) -> bool:
