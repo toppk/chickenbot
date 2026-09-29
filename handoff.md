@@ -502,6 +502,19 @@ Deliberately not asked for, because chickenbot uses none of them: `WHOX`,
 `chathistory`, `echo-message`, `labeled-response`, `batch`, `multiline`, `setname`,
 `MONITOR`, `standard-replies`. Keep it that way — asks should track real need.
 
+## Authority
+
+`docs/authority.md` is the trust model in one place: what an owner is and what
+it is not, why a nick is worth nothing, how the account reaches the bot, and
+why a tool the model proposes is gated exactly as a typed command is. Read it
+before changing anything that touches `is_owner`, `ToolBox._available` or the
+`<powers>` and `<observed>` blocks.
+
+The short version: authority is the services account on the message, checked in
+that network's namespace, by deterministic code. The model proposes and never
+holds any of its own, and everything it reads -- scrollback, topics, tool
+output, its own notes about a room -- is data rather than instruction.
+
 ## Who may talk to it privately
 
 A direct message has no room policy behind it and no witnesses. `direct` is a

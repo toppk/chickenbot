@@ -165,3 +165,36 @@ async def test_ops_make_a_plus_t_room_writable(irc):
     await feed(irc, ":server 353 chickenbot = #chan :@chickenbot nate")
     result = await irc.moderate(TOPIC, "#chan", "something new")
     assert result == "topic set"
+
+
+async def test_the_message_tag_wins_over_anything_remembered(irc):
+    """Impersonation check: the per-message account the server asserts is what
+    is used, not a nick->account mapping learned earlier."""
+    await feed(irc, ":server 330 chickenbot nate stale_account :is logged in as")
+    await feed(irc, "@account=real_account :nate!u@h PRIVMSG #chan :hello")
+    assert irc.seen[-1].account == "real_account"
+
+
+async def test_a_nick_released_and_retaken_carries_no_account(irc):
+    """toppk logs in, quits; somebody else takes the nick. They are nobody."""
+    await feed(irc, ":server 330 chickenbot toppk toppk :is logged in as")
+    assert irc.client.account_of("toppk") == "toppk"
+    await feed(irc, ":toppk!u@h QUIT :bye")
+    await feed(irc, ":toppk!other@elsewhere PRIVMSG #chan :i am the owner now")
+    assert irc.seen[-1].account == ""
+    assert irc.is_owner(irc.seen[-1].account) is False
+
+
+async def test_logging_out_of_services_drops_the_account(irc):
+    await feed(irc, ":server 330 chickenbot nate nate :is logged in as")
+    await feed(irc, ":nate!u@h ACCOUNT *")
+    await feed(irc, ":nate!u@h PRIVMSG #chan :still me?")
+    assert irc.seen[-1].account == ""
+
+
+async def test_an_account_follows_a_nick_change(irc):
+    await feed(irc, ":server 330 chickenbot nate nate :is logged in as")
+    await feed(irc, ":nate!u@h NICK :nate_away")
+    await feed(irc, ":nate_away!u@h PRIVMSG #chan :hello")
+    assert irc.seen[-1].account == "nate"
+    assert irc.client.account_of("nate") == ""
