@@ -794,6 +794,26 @@ async def cmd_tune(h: Handler, ctx: Context) -> None:
         ctx.say(f"{ctx.nick}: bad value ({exc})")
 
 
+@command("activity", owner=True, tier=ALL, usage="activity [kind|outcome]", blurb="what i have been doing")
+async def cmd_activity(h: Handler, ctx: Context) -> None:
+    """The same record `chickenbot activity` reads, from the chair."""
+    which = ctx.args.strip().lower()
+    kinds = {"message", "barfly", "vibe", "arrival", "departure", "topic", "scheduled", "mode", "follow"}
+    rows = h.store.activity(
+        since=int(time.time() - 24 * 3600),
+        kind=which if which in kinds else "",
+        outcome="" if which in kinds else which,
+        room=ctx.channel if ctx.in_channel else "",
+        limit=8,
+    )
+    if not rows:
+        ctx.say(f"{ctx.nick}: nothing in the last day matching that")
+        return
+    for row in reversed(rows):
+        extra = " ".join(f"{f}={row[f]}" for f in ("command", "outcome", "tools", "error") if row[f])
+        ctx.say(f"{ago(row['ts'])} ago {row['kind']} {row['nick'] or '-'} {extra}")
+
+
 @command("room", owner=True, tier=ALL, usage="room [profile|knob] [value]", blurb="what the bot is in this room")
 async def cmd_room(h: Handler, ctx: Context) -> None:
     if not ctx.in_channel:

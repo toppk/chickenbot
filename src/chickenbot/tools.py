@@ -277,6 +277,61 @@ async def tool_chan_history(h: Handler, ctx: Context, args: dict) -> str:
     return render_scrollback(lines)
 
 
+ACTIVITY_MAX = 30
+
+
+@tool(
+    "self_activity",
+    description=(
+        "Your own record of what you did: one row per event, with the outcome, "
+        "the tools you called, the model that served it and what it cost. Use it "
+        "when asked what you have been doing, why you did something, or what "
+        "went wrong. It is your log, not the channel's -- `chan_history` is what "
+        "people said."
+    ),
+    params={
+        "type": "object",
+        "properties": {
+            "hours": {"type": "integer", "description": "how far back, default 24"},
+            "kind": {"type": "string", "description": "message, barfly, vibe, arrival, topic, scheduled, mode"},
+            "outcome": {"type": "string", "description": "e.g. answered, silent, restrained, llm-error, crashed"},
+            "here": {"type": "boolean", "description": "this room only; default true"},
+            "limit": {"type": "integer", "description": f"at most {ACTIVITY_MAX}, default 10"},
+        },
+        "required": [],
+    },
+)
+async def tool_self_activity(h: Handler, ctx: Context, args: dict) -> str:
+    """Open, not owner-only: it is a record of the bot's own conduct, and
+    somebody asking why it just did that deserves the answer."""
+    try:
+        hours = max(1, min(int(args.get("hours") or 24), 24 * 30))
+        limit = max(1, min(int(args.get("limit") or 10), ACTIVITY_MAX))
+    except (TypeError, ValueError):
+        return "error: hours and limit must be numbers"
+    here = args.get("here", True)
+    rows = h.store.activity(
+        since=int(time.time() - hours * 3600),
+        kind=str(args.get("kind", "")),
+        outcome=str(args.get("outcome", "")),
+        room=ctx.channel if here and ctx.in_channel else "",
+        limit=limit,
+    )
+    if not rows:
+        return f"nothing in your record for the last {hours}h"
+    out = []
+    for row in reversed(rows):
+        when = time.strftime("%m-%d %H:%M", time.localtime(row["ts"]))
+        bits = [f"{when} {row['kind']}", row["room"] or "-", row["nick"] or "-"]
+        for field in ("command", "outcome", "tools", "error"):
+            if row[field]:
+                bits.append(f"{field}={row[field]}")
+        if row["cost"]:
+            bits.append(f"cost={row['cost']:.5f}")
+        out.append(" ".join(bits))
+    return "\n".join(out)
+
+
 @tool(
     "chan_state",
     description=(

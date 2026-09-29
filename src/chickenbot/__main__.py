@@ -415,6 +415,10 @@ def show_activity(cfg: config.Config, args: argparse.Namespace) -> int:
             room=args.room or "",
             limit=args.limit,
         )
+        if args.json:
+            for row in reversed(rows):
+                print(json.dumps(row))
+            return 0
         for row in reversed(rows):
             when = time.strftime("%m-%d %H:%M", time.localtime(row["ts"]))
             bits = [f"{when} {row['kind']:8} {row['room'] or '-':<12} {row['nick'] or '-':>12}"]
@@ -674,6 +678,7 @@ def main(argv: list[str] | None = None) -> int:
     act.add_argument("--room", help="one channel, e.g. #soup")
     act.add_argument("--command", help="e.g. ask, topic")
     act.add_argument("--cost", action="store_true", help="just the model spend")
+    act.add_argument("--json", action="store_true", help="one object per line, for something other than a person")
     act.add_argument("--limit", type=int, default=40)
 
     pr = sub.add_parser("prompt", help="show exactly what the model would be sent")

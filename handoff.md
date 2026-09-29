@@ -745,6 +745,10 @@ serving provider, tools called, cost and duration. `observe.set_sink` wires
 line shows and nothing has to be kept in step by hand.
 
 
+The bot reads the same table through the `self_activity` tool and owners
+through `.activity`, so "why did you go quiet?" is answered from the record.
+`--json` emits one object per line for an agent.
+
 `chickenbot activity` also takes `--kind` (message, barfly, vibe, arrival,
 scheduled) and `--room`, which is how the unprompted behaviour is reviewed
 without wading through everything anyone said.

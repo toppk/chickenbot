@@ -61,6 +61,32 @@ sqlite3 chickenbot.db "SELECT ts, author, text FROM revision \
   WHERE kind='room-observed' ORDER BY id DESC LIMIT 5"
 ```
 
+## Three readers, one record
+
+The `activity` table is the same record for all three:
+
+- **A maintainer at a terminal** reads `chickenbot activity`, with `--kind`,
+  `--room`, `--outcome`, `--since` and `--cost`.
+- **An agent** reads `chickenbot activity --json`, one object per line, every
+  column, same filters.
+- **The bot itself** has the `self_activity` tool, so "why did you go quiet?"
+  or "what have you been doing?" is answered from the record rather than from
+  the model's impression of it. This room by default, `here: false` for all of
+  them. Open to anyone, not owner-only: somebody asking why it just did that
+  deserves an answer. From the partyline, `.activity [kind|outcome]` does the
+  same for a person.
+
+## Moderation
+
+Everything the bot actually did to somebody, who asked for it, and what the
+network said back:
+
+```bash
+sqlite3 chickenbot.db "SELECT datetime(ts,'unixepoch','localtime'), room, action, target, actor \
+  FROM moderation ORDER BY id DESC LIMIT 20"
+chickenbot activity --outcome restrained    # and what it refused to do
+```
+
 ## Cost
 
 ```bash
