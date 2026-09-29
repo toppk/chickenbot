@@ -198,3 +198,28 @@ async def test_an_account_follows_a_nick_change(irc):
     await feed(irc, ":nate_away!u@h PRIVMSG #chan :hello")
     assert irc.seen[-1].account == "nate"
     assert irc.client.account_of("nate") == ""
+
+
+async def test_it_answers_ctcp_version(irc):
+    """How a client asks what something is without speaking to the room."""
+    await feed(irc, ":nate!u@h PRIVMSG chickenbot :\x01VERSION\x01")
+    reply = next(c for c in irc.sent if c[0] == "NOTICE")
+    assert reply[1] == "nate"
+    assert reply[2].startswith("\x01VERSION chickenbot ") and reply[2].endswith("\x01")
+    assert irc.seen == []  # not a message to answer in words
+
+
+async def test_it_answers_ctcp_ping(irc):
+    await feed(irc, ":nate!u@h PRIVMSG chickenbot :\x01PING 1234\x01")
+    assert ("NOTICE", "nate", "\x01PING 1234\x01") in irc.sent
+
+
+async def test_an_action_is_still_ignored(irc):
+    await feed(irc, ":nate!u@h PRIVMSG #chan :\x01ACTION waves\x01")
+    assert irc.seen == []
+    assert not any(c[0] == "NOTICE" for c in irc.sent)
+
+
+async def test_the_gecos_carries_the_version(irc):
+    assert irc.client.realname.startswith("chickenbot 0")
+    assert irc.client.version.startswith("chickenbot 0")

@@ -16,6 +16,10 @@ from .observe import TRACE
 
 log = logging.getLogger(__name__)
 
+# A claim can be lost; ask again rather than sit in the room unflagged.
+BOT_MODE_WAIT = 8.0
+BOT_MODE_TRIES = 3
+
 WANTED_CAPS = frozenset(
     {
         "message-tags",
@@ -237,7 +241,11 @@ class Client:
         self.nick = nick
         self.wanted_nick = nick
         self.username = username or nick
-        self.realname = realname or nick
+        # The version rides in the gecos, which is what WHO and WHOIS show.
+        from . import version
+
+        self.version = f"chickenbot {version()}"
+        self.realname = f"{realname or nick} {version()}"
         self.server_password = server_password
         self.sasl_user = sasl_user
         self.sasl_password = sasl_password
@@ -251,6 +259,7 @@ class Client:
         self.accounts: dict[str, str] = {}
         self.ready = asyncio.Event()
         self._bot_mode_set = False
+        self._bot_check: asyncio.Task | None = None
         # What the server says our own modes are, from RPL_UMODEIS. Whether the
         # bot flag actually took is otherwise only visible by WHOIS from
         # another client.
@@ -474,11 +483,34 @@ class Client:
                 self._end_caps()
 
     def _claim_bot_mode(self) -> None:
-        """Tell the network we are a bot so other bots can leave us alone."""
+        """Tell the network we are a bot so other bots can leave us alone.
+
+        Claiming is a request; RPL_UMODEIS is the answer. A claim can be lost
+        -- a queued send dropped by a reconnect, a rejection nobody read -- and
+        the bot would then sit in the room unflagged with nothing saying so.
+        `_confirm_bot_mode` checks a few seconds later and asks again.
+        """
         if self._bot_mode_set or not self.isupport.bot_mode or not self.ready.is_set():
             return
         self._bot_mode_set = True
         self.send("MODE", self.nick, "+" + self.isupport.bot_mode)
+        self._check_bot_mode()
+
+    def _check_bot_mode(self) -> None:
+        if self._bot_check is not None:
+            self._bot_check.cancel()
+        self._bot_check = asyncio.create_task(self._confirm_bot_mode())
+
+    async def _confirm_bot_mode(self) -> None:
+        """Ask again if the server never said we got it."""
+        for _ in range(BOT_MODE_TRIES):
+            await asyncio.sleep(BOT_MODE_WAIT)
+            flag = self.isupport.bot_mode
+            if not flag or flag in self.umodes or not self.ready.is_set():
+                return
+            log.warning("bot mode +%s did not take; asking again", flag)
+            self.send("MODE", self.nick, "+" + flag)
+            self.send("MODE", self.nick)  # and make the server state the result
 
     def _channel(self, name: str) -> Channel:
         key = self.fold(name)

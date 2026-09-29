@@ -65,10 +65,18 @@ cannot be traced to anything. It builds both wheels, installs them into
 
 ```
 revision: 39af305
+tag:      deploy/20260929-012447
 built:    2026-09-29T00:55:40-04:00
 from:     /home/toppk/workspace/chickenbot
 versions: chickenbot 0.1.0, chickenbot-github-tool 0.1.0
 ```
+
+**Every clean deploy is tagged and the tag is pushed**, so what ran on a given
+evening can be checked out by name rather than reconstructed from a timestamp.
+A dirty build is not tagged: there would be nothing for the tag to point at.
+The revision is also written into the package as `_revision.txt`, which is how
+the running bot can say which commit it is — it has no working tree to ask,
+and the whole point is that it is not running the working tree.
 
 It prints the restart commands rather than running them: building and
 interrupting a running bot are two decisions. **Every instance shares the one
@@ -113,7 +121,8 @@ chickenbot -c <config> activity --since 1 --exclude mode,topic,roster
 There is no rollback command. Check out the revision you want and deploy it:
 
 ```bash
-git checkout <revision>
+git tag -l 'deploy/*' | tail -5      # what was deployed, and when
+git checkout deploy/20260929-012447
 ./deploy/deploy.sh
 systemctl --user restart chickenbot@eaccel chickenbot-github@eaccel
 git checkout master

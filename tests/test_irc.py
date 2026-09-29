@@ -1,3 +1,5 @@
+import asyncio
+
 from chickenbot.irc import Channel, Client, ISupport, parse, split_message
 
 
@@ -235,3 +237,38 @@ async def test_the_server_says_which_modes_took():
 async def test_modes_start_empty_and_clear_on_reconnect():
     client = _client()
     assert client.umodes == set()
+
+
+async def test_a_lost_bot_mode_claim_is_made_again(monkeypatch):
+    """A claim is a request. If the server never confirms it, the bot sits in
+    the room unflagged with nothing saying so."""
+    from chickenbot import irc as irc_mod
+
+    monkeypatch.setattr(irc_mod, "BOT_MODE_WAIT", 0.01)
+    client = _client()
+    await client._handle_protocol(parse(":toy 001 chickenbot :welcome"))
+    sent: list[tuple] = []
+    client.send = lambda *args: sent.append(args)
+    await client._handle_protocol(parse(":toy 005 chickenbot BOT=B :are supported"))
+    assert ("MODE", "chickenbot", "+B") in sent
+
+    sent.clear()
+    await asyncio.sleep(0.05)  # the server said nothing
+    assert ("MODE", "chickenbot", "+B") in sent
+    client._bot_check.cancel()
+
+
+async def test_a_confirmed_claim_is_left_alone(monkeypatch):
+    from chickenbot import irc as irc_mod
+
+    monkeypatch.setattr(irc_mod, "BOT_MODE_WAIT", 0.01)
+    client = _client()
+    await client._handle_protocol(parse(":toy 001 chickenbot :welcome"))
+    await client._handle_protocol(parse(":toy 005 chickenbot BOT=B :are supported"))
+    await client._handle_protocol(parse(":toy 221 chickenbot +B :bot"))
+    sent: list[tuple] = []
+    client.send = lambda *args: sent.append(args)
+    await asyncio.sleep(0.05)
+    assert sent == []
+    if client._bot_check:
+        client._bot_check.cancel()

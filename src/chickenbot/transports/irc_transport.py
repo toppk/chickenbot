@@ -185,7 +185,10 @@ class IRCTransport:
         if self.fold(msg.nick) == self.fold(self.me):
             return
         text = msg.text.strip()
-        if not text or text.startswith("\x01"):  # CTCP, including /me
+        if text.startswith("\x01"):
+            self._on_ctcp(msg.nick, text.strip("\x01"))
+            return
+        if not text:
             return
         room = self.client.isupport.channel_of(msg.target)
         account = msg.account or self.client.account_of(msg.nick)
@@ -226,6 +229,15 @@ class IRCTransport:
                 text=msg.source,
             )
         )
+
+    def _on_ctcp(self, who: str, body: str) -> None:
+        """VERSION and PING are how a client asks what something is without
+        speaking to the room. Everything else, including /me, stays ignored."""
+        verb, _, rest = body.partition(" ")
+        if verb.upper() == "VERSION":
+            self.client.send("NOTICE", who, f"\x01VERSION {self.client.version}\x01")
+        elif verb.upper() == "PING":
+            self.client.send("NOTICE", who, f"\x01PING {rest}\x01")
 
     async def _on_topic(self, room: str, topic: str, who: str) -> None:
         room = self.client.isupport.channel_of(room) or room

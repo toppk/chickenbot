@@ -71,6 +71,11 @@ cd ~/workspace/chickenbot && ./deploy/deploy.sh
 systemctl --user restart chickenbot@eaccel chickenbot-github@eaccel
 ```
 
+Every clean deploy is tagged `deploy/<timestamp>` and the tag is pushed. The
+revision is stamped into the wheel as `_revision.txt`, so `chickenbot.version()`
+reads `0.1.0+b1cbfe6` — which rides in the IRC gecos and answers CTCP VERSION,
+making "which build is that one running" answerable from another client.
+
 `deploy.sh` refuses a dirty tree (`ALLOW_DIRTY=1` overrides), builds both
 wheels, installs them into `~/server/chickenbot/venv` with `--reinstall`
 (versions rarely change between deploys, so uv would otherwise skip the work),

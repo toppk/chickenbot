@@ -37,6 +37,9 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/chickenbot"]
+# deploy.sh writes _revision.txt beside the code so the running bot can say
+# which commit it is, without a working tree to ask.
+artifacts = ["src/chickenbot/_revision.txt"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
