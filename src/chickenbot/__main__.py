@@ -603,6 +603,19 @@ def name_process(role: str) -> str:
     return title
 
 
+def versions() -> str:
+    """What is actually installed, which is not always what the checkout says."""
+    from importlib.metadata import PackageNotFoundError, version
+
+    out = []
+    for dist in ("chickenbot", "chickenbot-github-tool"):
+        try:
+            out.append(f"{dist} {version(dist)}")
+        except PackageNotFoundError:
+            out.append(f"{dist} (not installed)")
+    return ", ".join(out)
+
+
 def log_handlers(path: str) -> list[logging.Handler] | None:
     """None leaves logging on stdout, which is where a service manager wants it.
     A path is for running by hand, where the terminal scrolls away."""
@@ -623,6 +636,7 @@ def main(argv: list[str] | None = None) -> int:
         help="config file; defaults to $CB_CONFIG_PATH",
     )
     parser.add_argument("--check-config", action="store_true", help="validate the config and exit")
+    parser.add_argument("--version", action="store_true", help="what is installed, and exit")
     parser.add_argument(
         "-l",
         "--log-level",
@@ -701,6 +715,10 @@ def main(argv: list[str] | None = None) -> int:
     export_cmd.add_argument("into", help="directory to write under")
     args = parser.parse_args(argv)
 
+    if args.version:
+        print(versions())
+        return 0
+
     if args.what == "init":
         # No config to load: this is the command that writes one.
         logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(message)s")
@@ -736,7 +754,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     if level.lower() not in LEVELS:
         log.warning("unknown log level %r, using info", level)
-    log.info("starting as %s", name_process("main"))
+    log.info("starting as %s: %s", name_process("main"), versions())
     try:
         return asyncio.run(run(cfg))
     except KeyboardInterrupt:

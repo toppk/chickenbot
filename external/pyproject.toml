@@ -1,0 +1,28 @@
+# The github tool is its own distribution on purpose: a tool is a separate
+# process that talks to chickenbot over a socket and knows nothing about its
+# internals. Packaging it together would make that a lie.
+[project]
+name = "chickenbot-github-tool"
+version = "0.1.0"
+description = "GitHub activity as an external chickenbot tool"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+    "httpx>=0.27",
+    "setproctitle>=1.3",
+]
+
+[project.scripts]
+chickenbot-github = "chickenbot_github.__main__:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["github"]
+
+# In the checkout it is `external/github`, run as `python -m external.github`.
+# Installed, it is `chickenbot_github`, run as `chickenbot-github`.
+[tool.hatch.build.targets.wheel.sources]
+"github" = "chickenbot_github"
