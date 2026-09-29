@@ -108,3 +108,62 @@ async def test_vibe_shows_what_the_topic_has_been(handler, store):
     await COMMANDS["vibe"].run(handler, c)
     said = " ".join(text for _room, text in c.transport.sent)
     assert "soup o'clock" in said and "printer joke" in said
+
+
+# -- who is in the room, learned on joining -----------------------------
+
+
+async def test_joining_learns_who_is_here(irc):  # noqa: F811
+    await feed(irc, ":chickenbot!u@h JOIN #chan")
+    await feed(irc, ":server 353 chickenbot = #chan :@alice +bob chrisk chickenbot")
+    await feed(irc, ":server 366 chickenbot #chan :End of /NAMES list")
+    chan = irc.client.channels["#chan"]
+    assert set(chan.members) == {"alice", "bob", "chrisk", "chickenbot"}
+    assert "o" in chan.members["alice"] and "v" in chan.members["bob"]
+
+
+async def test_joining_asks_who_the_strangers_are(irc):  # noqa: F811
+    """NAMES carries no accounts, so the people already here are whoised."""
+    irc.client.caps.add("extended-join")
+    await feed(irc, ":chickenbot!u@h JOIN #chan")
+    await feed(irc, ":server 353 chickenbot = #chan :alice chickenbot")
+    await feed(irc, ":server 366 chickenbot #chan :End of /NAMES list")
+    assert ("WHOIS", "alice") in irc.sent
+
+
+def test_the_room_block_says_who_is_here(handler, store):
+    from chickenbot.commands import Context
+
+    tr = FakeTransport()
+    c = Context(
+        handler=handler,
+        transport=tr,
+        nick="nate",
+        account="nate",
+        channel="#chan",
+        args="who is about?",
+        is_owner=False,
+        in_channel=True,
+    )
+    from chickenbot.rooms import Rooms
+
+    facts = Rooms(store).facts("fake", "#chan", ["alice", "bob"], ["alice"])
+    assert "here now (2): alice, bob" in facts
+    assert "ops here: alice" in facts
+    assert c.channel == "#chan"
+
+
+def test_a_crowd_is_counted_not_listed(handler, store):
+    from chickenbot.rooms import HERE_SHOWN, Rooms
+
+    crowd = [f"person{i:02d}" for i in range(HERE_SHOWN + 5)]
+    facts = Rooms(store).facts("fake", "#chan", crowd, [])
+    assert f"here now ({len(crowd)})" in facts
+    assert "and 5 more" in facts
+    assert "person16" not in facts
+
+
+def test_an_empty_room_says_nothing_about_who_is_here(handler, store):
+    from chickenbot.rooms import Rooms
+
+    assert "here now" not in Rooms(store).facts("fake", "#chan", [], [])

@@ -22,6 +22,7 @@ log = logging.getLogger(__name__)
 
 MAX_CHARS = 1200
 TOPIC_HISTORY = 3  # the current one and what it displaced
+HERE_SHOWN = 12  # names, then a count: a big channel is not a guest list
 
 GUEST, MEMBER, FIXTURE = "guest", "member", "fixture"
 # (standing, days seen, lines heard). Both, and chatter is the binding one: a
@@ -73,11 +74,15 @@ class Rooms:
         """Whether the bot knows this room well enough to do anything unbidden."""
         return self.standing(realm, room) != GUEST
 
-    def facts(self, realm: str, room: str, ops: list[str] | None = None) -> str:
-        """Plain facts about the place: who runs it, and what the topic has
-        been. A topic the bot changed and cannot remember changing is how a
-        running joke gets quietly lost."""
+    def facts(self, realm: str, room: str, here: list[str] | None = None, ops: list[str] | None = None) -> str:
+        """Plain facts about the place: who is in it, who runs it, and what the
+        topic has been. A topic the bot changed and cannot remember changing is
+        how a running joke gets quietly lost."""
         lines = []
+        if here:
+            shown = ", ".join(here[:HERE_SHOWN])
+            more = f", and {len(here) - HERE_SHOWN} more" if len(here) > HERE_SHOWN else ""
+            lines.append(f"here now ({len(here)}): {shown}{more}")
         if ops:
             lines.append(f"ops here: {', '.join(ops)}")
         history = self.store.topics(realm, room, limit=TOPIC_HISTORY)
@@ -89,14 +94,14 @@ class Rooms:
                 lines.append(f'  was: "{topic}" ({who or "as found"}, {_ago(when)})')
         return "\n".join(lines)
 
-    def block(self, realm: str, room: str, ops: list[str] | None = None) -> str:
+    def block(self, realm: str, room: str, here: list[str] | None = None, ops: list[str] | None = None) -> str:
         """Trusted, unlike scrollback: this is what the owners have written down
         about the place, plus what sitting in it has established."""
         standing = self.standing(realm, room)
         days, lines = self.store.tenure(realm, room)
         parts = [f"{room} on {realm}: you are a {standing} here ({days}d, {lines} lines heard)."]
         parts.append(MANNER[standing])
-        if facts := self.facts(realm, room, ops):
+        if facts := self.facts(realm, room, here, ops):
             parts.append(facts)
         if notes := self.notes(realm, room):
             parts.append(notes)

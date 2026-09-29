@@ -132,7 +132,7 @@ def compose(h: Handler, ctx: Context, scrollback: str, *, following: bool = Fals
     # Owner-written notes about whoever is here. Trusted, unlike scrollback.
     people = h.dossiers.block(realm=ctx.transport.realm, account=ctx.account, text=f"{ctx.args} {scrollback}")
     # ...and about the room itself, which has a character of its own.
-    room = h.rooms.block(ctx.transport.realm, ctx.channel, ops_in(ctx)) if ctx.in_channel else ""
+    room = h.rooms.block(ctx.transport.realm, ctx.channel, *who_is_here(ctx)) if ctx.in_channel else ""
     head = "\n".join(part for part in (*head_lines, room, people) if part)
     if scrollback:
         return (
@@ -142,11 +142,17 @@ def compose(h: Handler, ctx: Context, scrollback: str, *, following: bool = Fals
     return system, f"{head}\n\n{ctx.args}"
 
 
-def ops_in(ctx: Context) -> list[str]:
-    """Who runs this room, where the network models that at all."""
+def who_is_here(ctx: Context) -> tuple[list[str], list[str]]:
+    """(everyone present, whoever holds ops), where the network models it.
+
+    Learned on joining, from NAMES. A person walking into a room can see who
+    is in it without asking anybody, and so should the bot.
+    """
     client = getattr(ctx.transport, "client", None)
     chan = client.channels.get(ctx.transport.fold(ctx.channel)) if client else None
-    return sorted(n for n, modes in chan.members.items() if "o" in modes) if chan else []
+    if chan is None:
+        return [], []
+    return sorted(chan.members), sorted(n for n, modes in chan.members.items() if "o" in modes)
 
 
 def powers(h: Handler, ctx: Context) -> str:
@@ -799,7 +805,7 @@ async def cmd_vibe(h: Handler, ctx: Context) -> None:
     realm = ctx.transport.realm
     if not ctx.args:
         ctx.say(f"{ctx.channel}: {h.rooms.describe(realm, ctx.channel)}")
-        for line in h.rooms.facts(realm, ctx.channel, ops_in(ctx)).splitlines():
+        for line in h.rooms.facts(realm, ctx.channel, *who_is_here(ctx)).splitlines():
             ctx.say(f"  {line.strip()}")
         for label, body in (
             ("noted", h.rooms.notes(realm, ctx.channel)),
