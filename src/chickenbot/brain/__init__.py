@@ -53,6 +53,31 @@ _LINK = re.compile(r"\[([^\]]+)\]\((https?://[^)\s]+)\)")
 _CITATION = re.compile(r"\s*\[\d+\](?=[\s.,;:]|$)")
 
 
+def blocks(text: str) -> list[tuple[bool, str]]:
+    """Split into (is_preformatted, content) runs, on fenced code blocks.
+
+    A fence is how a model says "this has a shape": ascii art, a table, a
+    snippet. Everything inside must reach the room byte for byte -- stripped
+    of markdown and reflowed to fit a sentence, art is noise.
+    """
+    out: list[tuple[bool, str]] = []
+    rest = text
+    while (start := rest.find("```")) != -1:
+        end = rest.find("```", start + 3)
+        if end == -1:
+            break  # unclosed: it is prose that happens to contain backticks
+        if before := rest[:start]:
+            out.append((False, before))
+        inner = rest[start + 3 : end]
+        # A language tag on the opening fence is not part of the art.
+        first, newline, remainder = inner.partition("\n")
+        out.append((True, remainder if newline and " " not in first.strip() else inner))
+        rest = rest[end + 3 :]
+    if rest:
+        out.append((False, rest))
+    return out or [(False, text)]
+
+
 def clean_for_irc(text: str) -> str:
     """Strip markdown and control codes. Called by transports that want plain text,
     never by a provider: Discord and Telegram render markdown and should keep it."""

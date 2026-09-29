@@ -125,3 +125,77 @@ def test_the_cap_is_tunable(cfg):
 
 def test_a_short_answer_is_untouched():
     assert chunk("just this", 400, 2) == ["just this"]
+
+
+# -- except art, which is several lines on purpose ----------------------
+
+
+def irc_transport(cfg, **over):
+    from chickenbot.config import IRCConfig
+    from chickenbot.transports import build
+
+    cfg.irc = IRCConfig(enabled=True, host="x", nick="chickenbot", owners=["a"])
+    for key, value in over.items():
+        setattr(cfg.llm, key, value)
+    return build(cfg, "irc", None)
+
+
+CAT = "Here:\n```\n  /\\_/\\\n ( o.o )\n  > ^ <\n```"
+
+
+def test_a_fenced_block_is_sent_line_for_line(cfg):
+    sent = irc_transport(cfg).lines(CAT)
+    assert sent == ["Here:", "  /\\_/\\", " ( o.o )", "  > ^ <"]
+
+
+def test_the_shape_survives(cfg):
+    """Leading spaces are the art. Stripping them is destroying it."""
+    assert irc_transport(cfg).lines(CAT)[1].startswith("  ")
+
+
+def test_a_block_is_not_markdown_stripped(cfg):
+    """An underscore in art is art, not emphasis."""
+    art = "```\n_/\\_ *o* __x__\n```"
+    assert irc_transport(cfg).lines(art) == ["_/\\_ *o* __x__"]
+
+
+def test_a_block_has_its_own_budget(cfg):
+    """The conversational cap of two would cut the cat in half."""
+    tall = "```\n" + "\n".join(f"line {i}" for i in range(10)) + "\n```"
+    assert len(irc_transport(cfg).lines(tall)) == 10
+    assert cfg.llm.reply_lines == 2
+
+
+def test_a_block_is_still_bounded(cfg):
+    huge = "```\n" + "\n".join(f"line {i}" for i in range(200)) + "\n```"
+    assert len(irc_transport(cfg, block_lines=6).lines(huge)) == 6
+
+
+def test_a_gap_inside_a_block_is_kept(cfg):
+    """IRC has no empty message; a space holds the gap open."""
+    art = "```\ntop\n\nbottom\n```"
+    assert irc_transport(cfg).lines(art) == ["top", " ", "bottom"]
+
+
+def test_blank_lines_around_a_block_are_not(cfg):
+    assert irc_transport(cfg).lines("```\n\n\nart\n\n\n```") == ["art"]
+
+
+def test_a_language_tag_is_not_part_of_the_art(cfg):
+    assert irc_transport(cfg).lines("```python\nprint(1)\n```") == ["print(1)"]
+
+
+def test_prose_around_a_block_is_still_paced(cfg):
+    wordy = "word " * 300 + "\n```\nart\n```"
+    sent = irc_transport(cfg).lines(wordy)
+    assert sent[-1] == "art"
+    assert len(sent) == 3  # two of prose, then the art
+
+
+def test_an_unclosed_fence_is_treated_as_prose(cfg):
+    """Otherwise a stray backtick run swallows the rest of the answer."""
+    assert "```" not in " ".join(irc_transport(cfg).lines("here we go ```\nnot really art"))
+
+
+def test_ordinary_prose_is_unaffected(cfg):
+    assert irc_transport(cfg).lines("just a sentence") == ["just a sentence"]

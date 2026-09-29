@@ -827,6 +827,14 @@ through the shouts instead of taking a pause. A held line that was *addressed*
 removes the option of silence -- that is for a conversation it was merely
 party to, not for somebody asking it something.
 
+**A fenced block is the exception.** ``` on its own line either side means the
+shape *is* the content -- ascii art, a table, a snippet -- so it is sent line
+for line, neither reflowed nor markdown-stripped, with its own budget
+(`llm.block_lines`, 14). Leading spaces survive, a blank line inside becomes a
+single space because IRC has no empty message, and an unclosed fence is
+treated as prose so a stray backtick run cannot swallow an answer. Asked for
+ascii art under the conversational cap, it produced two lines and an ellipsis.
+
 `llm.reply_lines` (2) caps how many messages one reply may become. It is
 handed to the transport at build time, because how long a reply runs is
 behaviour rather than a property of the network.

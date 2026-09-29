@@ -11,6 +11,7 @@ def build(cfg: Config, name: str, sink: Sink) -> Transport:
     so it is handed down rather than configured per transport."""
     transport = _make(cfg, name, sink)
     transport.reply_lines = cfg.llm.reply_lines
+    transport.block_lines = cfg.llm.block_lines
     return transport
 
 

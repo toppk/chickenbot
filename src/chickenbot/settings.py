@@ -37,6 +37,7 @@ SETTABLE = (
     "llm.tools",
     "llm.session_stickiness",
     "llm.reply_lines",
+    "llm.block_lines",
     "llm.history_lines",
     "llm.history_minutes",
     "llm.per_user_per_min",

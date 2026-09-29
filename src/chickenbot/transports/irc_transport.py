@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from ..brain import clean_for_irc
+from ..brain import blocks, clean_for_irc
 from ..config import IRCConfig, irc_realm
 from ..events import Event, Kind
 from ..irc import Client, Message
@@ -15,9 +15,24 @@ log = logging.getLogger(__name__)
 MODES = {OP: "+o", DEOP: "-o", VOICE: "+v", DEVOICE: "-v", BAN: "+b", UNBAN: "-b"}
 
 
+def _verbatim(body: str, limit: int) -> list[str]:
+    """One message per line, shape intact. Leading spaces are the art.
+
+    IRC has no empty message, so a blank line inside a block becomes a single
+    space -- which is what keeps a gap between two halves of a drawing.
+    """
+    kept = [line.rstrip()[:400] for line in body.splitlines()]
+    while kept and not kept[0].strip():
+        kept.pop(0)
+    while kept and not kept[-1].strip():
+        kept.pop()
+    return [line if line.strip() else " " for line in kept[:limit]]
+
+
 class IRCTransport:
     name = "irc"
     reply_lines = 4  # replaced at build time from [llm] reply_lines
+    block_lines = 14  # ...and this, for fenced blocks
     caps = frozenset({OP, DEOP, VOICE, DEVOICE, KICK, BAN, UNBAN, TOPIC})
 
     def __init__(self, cfg: IRCConfig, sink: Sink) -> None:
@@ -57,7 +72,19 @@ class IRCTransport:
         return self._members.is_ignored(sender)
 
     def lines(self, text: str) -> list[str]:
-        return chunk(clean_for_irc(text), 400, self.reply_lines)
+        """Prose is cleaned and wrapped; a fenced block is sent as it stands.
+
+        Art is several short lines whose shape is the whole content, so it is
+        neither reflowed nor markdown-stripped, and it gets its own budget --
+        the conversational cap of two would cut the cat in half.
+        """
+        out: list[str] = []
+        for preformatted, body in blocks(text):
+            if preformatted:
+                out += _verbatim(body, self.block_lines)
+            else:
+                out += chunk(clean_for_irc(body), 400, self.reply_lines)
+        return out
 
     def say(self, room: str, text: str) -> None:
         for line in self.lines(text):

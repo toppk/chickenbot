@@ -175,6 +175,9 @@ class LLMConfig:
     # Messages one reply may become. Two is a remark; four is a monologue
     # delivered to a room that asked a question.
     reply_lines: int = 2
+    # Lines a fenced block may run to. Art and tables are several short lines
+    # on purpose, and reflowing them into a sentence destroys the point.
+    block_lines: int = 14
     history_lines: int = 20  # the most scrollback to hand over
     history_minutes: int = 180  # ...and how far back of it still counts as the conversation
     per_user_per_min: int = 4
