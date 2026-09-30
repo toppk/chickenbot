@@ -146,9 +146,18 @@ class Store:
         self.db.commit()
         return fresh
 
-    def activity(self, *, actor: str = "", repo: str = "", since: int = 0, limit: int = 50) -> list[sqlite3.Row]:
+    def activity(
+        self, *, actor: str = "", repo: str = "", kind: str = "", since: int = 0, limit: int = 50
+    ) -> list[sqlite3.Row]:
         sql = "SELECT * FROM activity WHERE ts >= ?"
         args: list = [since]
+        if kind == "merged":
+            # A landing is a pull request in a particular state, not a kind of
+            # its own -- and it is the thing people actually ask after.
+            sql += " AND state = 'merged'"
+        elif kind:
+            sql += " AND kind = ?"
+            args.append(kind)
         if actor:
             sql += " AND actor = ? COLLATE NOCASE"
             args.append(actor)
@@ -160,12 +169,17 @@ class Store:
         return self.db.execute(sql, args).fetchall()
 
     def tally(self, *, actor: str = "", since: int = 0) -> dict[str, int]:
-        sql = "SELECT kind, COUNT(*) AS n FROM activity WHERE ts >= ?"
+        sql = (
+            "SELECT CASE WHEN state = 'merged' THEN 'merged' ELSE kind END AS kind,"
+            " COUNT(*) AS n FROM activity WHERE ts >= ?"
+        )
         args: list = [since]
         if actor:
             sql += " AND actor = ? COLLATE NOCASE"
             args.append(actor)
-        sql += " GROUP BY kind ORDER BY n DESC"
+        # GROUP BY 1, not `kind`: the name binds to the table column, not the
+        # alias, and merges were counted back in with the ordinary pull requests.
+        sql += " GROUP BY 1 ORDER BY n DESC"
         return {r["kind"]: r["n"] for r in self.db.execute(sql, args)}
 
     # -- open items --------------------------------------------------------

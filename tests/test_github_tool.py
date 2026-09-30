@@ -1194,3 +1194,54 @@ def test_the_merged_search_asks_for_what_it_means(monkeypatch):
     assert seen["path"] == "/search/issues"
     assert "author:iconidentify" in seen["q"]
     assert "is:pr is:merged" in seen["q"] and "merged:>=" in seen["q"]
+
+
+async def test_a_landing_is_not_hidden_by_a_busy_afternoon(tmp_path):
+    """A merge five hours old fell off the end behind newer pushes, and the
+    honest report of what it could see read as "nothing merged"."""
+    store = Store(tmp_path / "g.db")
+    now = int(time.time())
+    store.record(
+        [
+            Item(id=f"push:{i}", kind="commit", actor="chrisk", repo="a/b", ts=now - 3600, title=f"pushed {i}")
+            for i in range(20)
+        ]
+        + [
+            Item(
+                id="merged:c/d#58",
+                kind="pr",
+                actor="chrisk",
+                repo="c/d",
+                ts=now - 5 * 3600,
+                title="merged #58: SEP",
+                state="merged",
+            )
+        ]
+    )
+    tool = Tool(store, None, ["chrisk"])
+    assert "merged #58" in await tool.call("github_activity", {"user": "chrisk", "kind": "merged"})
+    store.close()
+
+
+async def test_a_summary_counts_landings_apart_from_openings(tmp_path):
+    """They were counted back in with the ordinary pull requests, because the
+    GROUP BY bound to the table column rather than the alias."""
+    store = Store(tmp_path / "g.db")
+    now = int(time.time())
+    store.record(
+        [
+            Item(id="pr:1", kind="pr", actor="chrisk", repo="a/b", ts=now, title="opened #1"),
+            Item(id="merged:a/b#2", kind="pr", actor="chrisk", repo="a/b", ts=now, title="merged #2", state="merged"),
+        ]
+    )
+    tally = store.tally(actor="chrisk")
+    assert tally == {"pr": 1, "merged": 1}
+    store.close()
+
+
+async def test_an_unknown_kind_finds_nothing_rather_than_everything(tmp_path):
+    store = Store(tmp_path / "g.db")
+    store.record([Item(id="x", kind="commit", actor="chrisk", repo="a/b", ts=int(time.time()), title="pushed")])
+    tool = Tool(store, None, ["chrisk"])
+    assert "no activity" in await tool.call("github_activity", {"user": "chrisk", "kind": "nonsense"})
+    store.close()

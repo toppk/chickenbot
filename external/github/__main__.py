@@ -34,6 +34,7 @@ SUBJECTS = "github"  # the realm whose handles chickenbot should send us
 # it actually talks to. A list in two places is a list that disagrees with itself.
 USERS: list[str] = []
 SEARCH_PACE = 2.0  # seconds between searches; the endpoint dislikes bursts
+ACTIVITY_SHOWN = 14  # rows per answer; a burst of pushes must not hide a landing
 MERGED_DAYS = 7  # how far back to look for pull requests somebody else merged
 DESCRIPTION = 90  # enough to say what a repo is, not enough to fill the context
 REFRESH_GAP = 60.0  # a forced refresh this soon after the last one is just quota
@@ -313,7 +314,11 @@ class Tool:
                 return f"no activity for {who} in the last {args.get('range', 'day')}"
             return f"{who}: " + ", ".join(f"{n} {kind}" for kind, n in tally.items())
 
-        rows = self.store.activity(actor=user, since=since, limit=8)
+        # Eight was too few to answer "did anything land": a merge five hours
+        # old fell off the end behind newer pushes, and the honest report of
+        # what it could see read as "nothing merged".
+        kind = str(args.get("kind") or "")
+        rows = self.store.activity(actor=user, kind=kind, since=since, limit=ACTIVITY_SHOWN)
         if not rows:
             return f"no activity for {who} in the last {args.get('range', 'day')}"
         now = int(time.time())
