@@ -351,17 +351,6 @@ class Handler:
 
         return sorted(name for name in self.cfg.tools.grants if name.startswith("ext_") and name not in TOOLS)
 
-    def follows_everyone(self, tr: Transport, room: str) -> bool:
-        """Whether being drawn in by one person means listening to the room.
-
-        In its own room, yes: that is the point of following. Somewhere it was
-        invited into and has no standing yet, no -- it answers whoever spoke to
-        it and stays out of everybody else's conversation.
-        """
-        if self.policies.of(tr.realm, room).commands == ALL:
-            return True
-        return self.rooms.may_act_out(tr.realm, room)
-
     def greets(self, realm: str, room: str) -> bool:
         """Saying hello is unprompted, so it waits for standing like anything
         else does. A guest in somebody else's channel greeting the regulars on
@@ -522,13 +511,13 @@ class Handler:
             # Not addressed. If this room is mid-conversation with us, hold the
             # line and wait for a pause rather than answering every message.
             if self.cfg.llm.follow and env.is_group and self.attention.engaged(key):
-                if self.follows_everyone(tr, env.room) or tr.fold(env.sender) == tr.fold(
-                    self.attention.drawn_in_by(key)
-                ):
-                    note(outcome="following")
-                    self.attention.hold(key, env.sender, env.account, env.text)
-                    return
-                note(outcome="not-mine")
+                # A channel is not a set of private threads: while it is in a
+                # conversation, the conversation is the room's, and somebody
+                # joining it is joining the same one. Held without `addressed`,
+                # because nobody named it in this line -- so it may still
+                # decide the exchange does not need anything from it.
+                note(outcome="following")
+                self.attention.hold(key, env.sender, env.account, env.text)
                 return
             note(outcome="chat")
             return

@@ -4,6 +4,7 @@ The expectation being checked: in #lobby it stays quiet unless spoken to,
 until it has heard enough of the room to have standing there.
 """
 
+import asyncio
 import time
 
 import pytest
@@ -149,53 +150,47 @@ async def test_the_two_rooms_keep_their_own_scrollback(both, store):
 # -- being spoken to is not an invitation to join in --------------------
 
 
-async def test_it_follows_only_whoever_spoke_to_it_in_the_lobby(both, store):
-    """The 00:38 failure: toppk said "you back?", and it started answering
-    chrisk, who had not addressed it at all."""
+async def test_it_joins_the_conversation_it_is_already_in(both, store):
+    """A channel is not a set of private threads. Once it is talking in the
+    room, somebody else adding to that exchange is adding to the same one."""
     h, tr = both
+    h.attention.pause_seconds = 0.01  # captured at construction, not read per line
     await h.dispatch(tr.envelope("chickenbot: you back?", room="#lobby", sender="toppk", account="toppk"))
-    tr.sent.clear()
+    await h.drain()
     h.provider.prompts.clear()
 
-    await h.dispatch(tr.envelope("asahi, nope, different universe", room="#lobby", sender="chrisk", account="chrisk"))
+    await h.dispatch(tr.envelope("anyone know of an aol server?", room="#lobby", sender="chrisk", account="chrisk"))
+    await asyncio.sleep(0.05)
+    assert h.provider.prompts, "it ignored a line in a conversation it was part of"
+
+
+async def test_it_may_still_decide_that_line_was_not_for_it(both):
+    """Following is not answering: a line nobody named it in leaves silence
+    on the table, which is what FOLLOW_NOTE offers."""
+    from chickenbot.attention import FOLLOW_NOTE
+
+    h, tr = both
+    h.attention.pause_seconds = 0.01  # captured at construction, not read per line
+    await h.dispatch(tr.envelope("chickenbot: you back?", room="#lobby", sender="toppk", account="toppk"))
     await h.drain()
-    assert tr.sent == []
+    await h.dispatch(tr.envelope("unrelated chatter", room="#lobby", sender="chrisk", account="chrisk"))
+    await asyncio.sleep(0.05)
+    assert FOLLOW_NOTE in h.provider.system
+
+
+async def test_a_room_it_is_not_talking_in_is_left_alone(both):
+    """Nothing is held when no engagement is open: ordinary chat stays chat."""
+    h, tr = both
+    await h.dispatch(tr.envelope("just talking", room="#lobby", sender="chrisk", account="chrisk"))
+    await h.drain()
     assert h.provider.prompts == []
 
 
-async def test_it_still_follows_the_person_who_did_speak_to_it(both):
+async def test_everyone_who_spoke_to_it_is_remembered(both):
+    """Recorded for the log, not to decide who it listens to."""
     h, tr = both
-    await h.dispatch(tr.envelope("chickenbot: you back?", room="#lobby", sender="toppk", account="toppk"))
-    tr.sent.clear()
-    await h.dispatch(tr.envelope("and another thing", room="#lobby", sender="toppk", account="toppk"))
-    assert h.attention.engaged("fake/#lobby")
-
-
-async def test_the_partyline_still_follows_the_room(both):
-    """Its own room is the one place where being drawn in means listening to
-    everybody: that is what a barfly does."""
-    h, tr = both
-    await h.dispatch(tr.envelope("chickenbot: you back?", room="#soup", sender="toppk", account="toppk"))
-    await h.dispatch(tr.envelope("unrelated chatter", room="#soup", sender="chrisk", account="chrisk"))
-    assert h.follows_everyone(tr, "#soup") is True
-
-
-async def test_standing_earns_the_same_in_a_public_room(both, store):
-    """Once it knows the place, it may join in like anyone else."""
-    h, tr = both
-    for i in range(250):
-        said(store, "#lobby", f"line {i}", ago_seconds=86400 * (i % 3 + 1))
-    assert h.follows_everyone(tr, "#lobby") is True
-
-
-async def test_a_line_it_will_not_follow_is_recorded_as_such(both, store):
-    from chickenbot.observe import set_sink
-
-    h, tr = both
-    await h.dispatch(tr.envelope("chickenbot: you back?", room="#lobby", sender="toppk", account="toppk"))
-    set_sink(store.record_activity)
-    try:
-        await h.dispatch(tr.envelope("something else", room="#lobby", sender="chrisk", account="chrisk"))
-    finally:
-        set_sink(None)
-    assert store.activity()[0]["outcome"] == "not-mine"
+    await h.dispatch(tr.envelope("chickenbot: hello", sender="toppk", account="toppk", room="#lobby"))
+    await h.drain()
+    await h.dispatch(tr.envelope("chickenbot: and me", sender="chrisk", account="chrisk", room="#lobby"))
+    await h.drain()
+    assert {n.casefold() for n in h.attention.drawn_in_by("fake/#lobby")} == {"toppk", "chrisk"}

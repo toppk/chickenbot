@@ -33,10 +33,11 @@ class Engagement:
     """One room's state. `until` is when interest lapses without being renewed."""
 
     until: float
-    # Who drew it in. In a room where it has no standing, only this person's
-    # lines are followed: being spoken to by one person is not an invitation
-    # to join everybody else's conversation.
-    who: str = ""
+    # Everyone who has spoken to it while this engagement was open. A set,
+    # not the latest: two people talking to it in the same minute are both
+    # talking to it, and replacing the name left whoever spoke first being
+    # ignored mid-conversation.
+    who: set[str] = field(default_factory=set)
     pending: list[tuple[str, str, str, bool]] = field(default_factory=list)  # nick, account, text, addressed
     silences: int = 0
     timer: asyncio.Task | None = None
@@ -79,17 +80,18 @@ class Attention:
         """Being addressed opens or renews interest in this room."""
         spot = self.rooms.get(key)
         if spot is None:
-            self.rooms[key] = Engagement(until=time.monotonic() + self.follow_seconds, who=who)
+            spot = Engagement(until=time.monotonic() + self.follow_seconds)
+            self.rooms[key] = spot
             log.debug("following %s, drawn in by %s", key, who or "-")
         else:
             spot.until = time.monotonic() + self.follow_seconds
             spot.silences = 0
-            if who:
-                spot.who = who
+        if who:
+            spot.who.add(who)
 
-    def drawn_in_by(self, key: str) -> str:
+    def drawn_in_by(self, key: str) -> set[str]:
         spot = self.rooms.get(key)
-        return spot.who if spot else ""
+        return spot.who if spot else set()
 
     def close(self, key: str, why: str = "") -> None:
         spot = self.rooms.pop(key, None)

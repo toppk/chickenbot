@@ -934,11 +934,14 @@ ascii art under the conversational cap, it produced two lines and an ellipsis.
 handed to the transport at build time, because how long a reply runs is
 behaviour rather than a property of the network.
 
-**Who it follows depends on where it is.** In its own room, being drawn in
-means listening to everybody -- that is the point. In a room it was invited
-into and has no standing in yet, it follows only the person who spoke to it:
-one person saying "you back?" is not an invitation to answer everyone else's
-conversation. A line it declines to follow is recorded as `outcome=not-mine`.
+**While it is engaged, the conversation is the room's.** A channel is not a
+set of private threads with the bot: somebody joining an exchange it is
+already in is joining the same exchange. It briefly followed only whoever drew
+it in, which left an owner asking a plain question in a live conversation
+ignored as `not-mine`. What stops it butting in is not restricting who it
+hears but the rest: a line nobody named it in is held *without* `addressed`,
+so silence stays on the table, and the pacing and two-message cap keep an
+answer short when it does come.
 
 Being addressed opens an engagement for that room (`attention.py`). While it is
 open, anything said there is held, and a pause of `pause_seconds` means the
