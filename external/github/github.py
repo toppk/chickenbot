@@ -7,6 +7,7 @@ hour, which is enough to try it and not enough to run it.
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime
 
 import httpx
@@ -102,6 +103,41 @@ class GitHub:
                 }
             )
         return out
+
+    async def merged(self, user: str, since_days: int = 7) -> list[Item]:
+        """Pull requests this user wrote that somebody merged, anywhere.
+
+        The events feed only carries a user's own actions, so a PR merged by
+        the maintainer of somebody else's repository never appears in it --
+        which is exactly the landing worth knowing about.
+        """
+        cutoff = time.strftime("%Y-%m-%d", time.gmtime(time.time() - since_days * 86400))
+        payload, _ = await self.get(
+            "/search/issues",
+            q=f"author:{user} is:pr is:merged merged:>={cutoff}",
+            per_page=PER_PAGE,
+            sort="updated",
+        )
+        items: list[Item] = []
+        for raw in payload.get("items", []) if isinstance(payload, dict) else []:
+            repo = raw.get("repository_url", "").split("/repos/")[-1]
+            number = raw.get("number")
+            if not repo or "/" not in repo or not number:
+                continue
+            when = _ts((raw.get("pull_request") or {}).get("merged_at")) or _ts(raw.get("closed_at"))
+            items.append(
+                Item(
+                    id=f"merged:{repo}#{number}",
+                    kind="pr",
+                    actor=user,
+                    repo=repo,
+                    ts=when or _ts(raw.get("updated_at")),
+                    title=f"merged #{number}: {(raw.get('title') or '')[:80]}",
+                    url=raw.get("html_url", ""),
+                    state="merged",
+                )
+            )
+        return items
 
     async def events(self, user: str) -> list[Item]:
         """A user's public timeline, which covers pushes, issues, PRs and stars

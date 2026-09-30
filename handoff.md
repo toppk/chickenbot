@@ -977,6 +977,13 @@ is a separate message and IRC paces sends at `send_interval`.
 
 ## External tools
 
+**A pull request merged by somebody else is invisible in the events feed.**
+That feed carries only a user's own actions, so a maintainer landing their
+work in a repository they do not own never shows up -- and that is the landing
+worth knowing about. A fifth search per user, `author:X is:pr is:merged
+merged:>=<7 days>`, records those as activity rather than items, so they
+persist instead of being evicted when they stop being open.
+
 **The watch list is about caching, not about who may be asked after.**
 `ext_github_lookup` answers for any login, live, and stores nothing -- somebody
 asked about once is not somebody to start mirroring. It keeps a ten-minute memo

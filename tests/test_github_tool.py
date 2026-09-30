@@ -564,7 +564,14 @@ async def test_being_told_about_one_new_handle_polls_only_that_one(gh, monkeypat
 
     gh.interval = 900
     gh.api = type(
-        "Api", (), {"repos": staticmethod(repos), "events": staticmethod(events), "search_issues": staticmethod(search)}
+        "Api",
+        (),
+        {
+            "repos": staticmethod(repos),
+            "events": staticmethod(events),
+            "search_issues": staticmethod(search),
+            "merged": staticmethod(search),
+        },
     )()
     monkeypatch.setattr("external.github.__main__.SEARCH_PACE", 0)
 
@@ -592,7 +599,12 @@ async def test_forgetting_closed_items_waits_for_a_full_pass(gh, monkeypatch):
     gh.api = type(
         "Api",
         (),
-        {"repos": staticmethod(nothing), "events": staticmethod(nothing), "search_issues": staticmethod(nothing)},
+        {
+            "repos": staticmethod(nothing),
+            "events": staticmethod(nothing),
+            "search_issues": staticmethod(nothing),
+            "merged": staticmethod(nothing),
+        },
     )()
     monkeypatch.setattr("external.github.__main__.SEARCH_PACE", 0)
     monkeypatch.setattr(gh.store, "forget_closed", lambda before: seen.append(before) or 0)
@@ -637,7 +649,12 @@ async def test_a_question_refreshes_behind_itself_not_in_front(gh, monkeypatch):
     gh.api = type(
         "Api",
         (),
-        {"repos": staticmethod(repos), "events": staticmethod(nothing), "search_issues": staticmethod(nothing)},
+        {
+            "repos": staticmethod(repos),
+            "events": staticmethod(nothing),
+            "search_issues": staticmethod(nothing),
+            "merged": staticmethod(nothing),
+        },
     )()
     monkeypatch.setattr("external.github.__main__.SEARCH_PACE", 0)
 
@@ -1079,3 +1096,101 @@ async def test_how_long_it_has_been_open_is_shown(tmp_path):
     answer = await Tool(store, None, ["someone"]).call("github_pending", {})
     assert "open 90d" in answer  # and last touched a day ago
     store.close()
+
+
+# -- landings the events feed cannot see ---------------------------------
+
+
+async def test_a_pr_merged_by_somebody_else_is_recorded(tmp_path, monkeypatch):
+    """A maintainer merging your PR never appears in your own events feed,
+    which is exactly the landing worth knowing about."""
+    store = Store(tmp_path / "g.db")
+    landed = Item(
+        id="merged:aurora-silicon/linux#8",
+        kind="pr",
+        actor="iconidentify",
+        repo="aurora-silicon/linux",
+        ts=int(time.time()) - 3600,
+        title="merged #8: SEP keystore",
+        state="merged",
+    )
+
+    async def nothing(*a, **k):
+        return []
+
+    async def merged(user, since_days=7):
+        return [landed] if user == "iconidentify" else []
+
+    tool = Tool(store, None, ["iconidentify"])
+    tool.api = type(
+        "Api",
+        (),
+        {
+            "repos": staticmethod(nothing),
+            "events": staticmethod(nothing),
+            "search_issues": staticmethod(nothing),
+            "merged": staticmethod(merged),
+        },
+    )()
+    monkeypatch.setattr("external.github.__main__.SEARCH_PACE", 0)
+    assert await tool.poll_once(force=True) == 1
+
+    answer = await tool.call("github_activity", {"user": "iconidentify", "range": "week"})
+    assert "merged #8: SEP keystore" in answer
+    assert "aurora-silicon/linux" in answer
+    store.close()
+
+
+async def test_the_same_merge_twice_is_one_landing(tmp_path, monkeypatch):
+    store = Store(tmp_path / "g.db")
+    landed = Item(
+        id="merged:aurora-silicon/linux#8",
+        kind="pr",
+        actor="iconidentify",
+        repo="aurora-silicon/linux",
+        ts=int(time.time()),
+        title="merged #8",
+        state="merged",
+    )
+
+    async def nothing(*a, **k):
+        return []
+
+    async def merged(user, since_days=7):
+        return [landed]
+
+    tool = Tool(store, None, ["iconidentify"])
+    tool.api = type(
+        "Api",
+        (),
+        {
+            "repos": staticmethod(nothing),
+            "events": staticmethod(nothing),
+            "search_issues": staticmethod(nothing),
+            "merged": staticmethod(merged),
+        },
+    )()
+    monkeypatch.setattr("external.github.__main__.SEARCH_PACE", 0)
+    assert await tool.poll_once(force=True) == 1
+    assert await tool.poll_once(force=True) == 0  # already known
+    store.close()
+
+
+def test_the_merged_search_asks_for_what_it_means(monkeypatch):
+    """`author:X is:pr is:merged merged:>=date` -- not `user:`, which would
+    only find their own repositories."""
+    import asyncio as _asyncio
+
+    from external.github.github import GitHub
+
+    seen = {}
+
+    async def fake_get(self, path, **params):
+        seen.update({"path": path} | params)
+        return {"items": []}, ""
+
+    monkeypatch.setattr(GitHub, "get", fake_get)
+    _asyncio.run(GitHub("token").merged("iconidentify", since_days=7))
+    assert seen["path"] == "/search/issues"
+    assert "author:iconidentify" in seen["q"]
+    assert "is:pr is:merged" in seen["q"] and "merged:>=" in seen["q"]

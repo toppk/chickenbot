@@ -34,6 +34,7 @@ SUBJECTS = "github"  # the realm whose handles chickenbot should send us
 # it actually talks to. A list in two places is a list that disagrees with itself.
 USERS: list[str] = []
 SEARCH_PACE = 2.0  # seconds between searches; the endpoint dislikes bursts
+MERGED_DAYS = 7  # how far back to look for pull requests somebody else merged
 DESCRIPTION = 90  # enough to say what a repo is, not enough to fill the context
 REFRESH_GAP = 60.0  # a forced refresh this soon after the last one is just quota
 LOOKUP_MEMO = 600.0  # an ad-hoc lookup is remembered this long, against being asked twice
@@ -253,6 +254,15 @@ class Tool:
                 for scope in ("user", "author")
                 for kind in ("is:issue", "is:pull-request")
             ]
+            # Merged elsewhere: a landing the events feed cannot see, because
+            # the maintainer who merged it is not somebody we watch.
+            try:
+                fresh += self.store.record(await self.api.merged(user, since_days=MERGED_DAYS))
+            except Exception as exc:  # noqa: BLE001
+                complete = False
+                log.warning("merged search for %s failed: %s", user, exc)
+            await asyncio.sleep(SEARCH_PACE)
+
             for query in queries:
                 try:
                     for row in await self.api.search_issues(query):
