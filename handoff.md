@@ -981,6 +981,13 @@ against being asked twice in a row, validates the login before spending a
 request, and is granted open because reading a public profile is not a
 privilege. The mirrored tools stay cheaper and deeper for the watched people.
 
+**A forced refresh joins the fetch already running** rather than starting a
+second pass over the same handles, and giving up waiting does not cancel the
+work. Both were wrong at once in the field: a question kicked off a background
+refresh, the forced one raced it, gave up at 22 seconds and reported failure,
+and the background one finished at 24 and recorded 39 items. The budget is 35
+seconds, because two handles is repos, events and four paced searches each.
+
 **Tools cache; they do not prefetch.** `ext_github_refresh` is the one that
 goes and looks now -- for "has it landed yet" -- and it waits rather than
 answering from the mirror. It is owner-only (unlisted in `grants`), refuses a

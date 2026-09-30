@@ -39,7 +39,9 @@ REFRESH_GAP = 60.0  # a forced refresh this soon after the last one is just quot
 LOOKUP_MEMO = 600.0  # an ad-hoc lookup is remembered this long, against being asked twice
 LOOKUP_MEMOS = 32  # ...and only this many, because it is a memo and not a mirror
 _LOGIN = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]{0,38}")
-REFRESH_BUDGET = 25.0  # give up waiting rather than hold the conversation
+# Two watched handles is repos, events and four paced searches each: around
+# twenty-five seconds of honest work. Waiting stops here; the fetch does not.
+REFRESH_BUDGET = 35.0
 # Nobody needs GitHub at their fingertips. Answers come from the mirror, and a
 # stale mirror is refreshed behind the question rather than in front of it, so
 # a poll costs nothing when nobody is asking.
@@ -452,11 +454,22 @@ class Tool:
         since = min((self.store.cursor(f"user:{u}")[1] or 0) for u in who)
         if since and time.time() - since < REFRESH_GAP:
             return f"fetched {ago(int(time.time() - since))} ago already; nothing will have changed"
+        # Join the fetch already running rather than starting a second one:
+        # two passes over the same handles is twice the quota for one answer,
+        # and they raced -- the forced one gave up at 22 seconds while the
+        # background one finished at 24 and recorded 39 items.
+        task = self._refreshing
+        if task is None or task.done():
+            task = asyncio.get_running_loop().create_task(self.poll_once(force=True, only=who))
+            self._refreshing = task
+        done, _pending = await asyncio.wait({task}, timeout=REFRESH_BUDGET)
+        if not done:
+            # Waiting stopped; the fetch did not. "Ask again" is a real offer.
+            return "still fetching, and still going; ask again in a moment"
         try:
-            async with asyncio.timeout(REFRESH_BUDGET):
-                fresh = await self.poll_once(force=True, only=who)
-        except TimeoutError:
-            return "still fetching; ask again in a moment"
+            fresh = task.result()
+        except Exception as exc:  # noqa: BLE001 - the room gets the failure, not a traceback
+            return f"the fetch failed ({type(exc).__name__})"
         return (
             f"refreshed {', '.join(who)}: {fresh} new item(s)" if fresh else f"refreshed {', '.join(who)}: nothing new"
         )

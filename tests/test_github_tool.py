@@ -751,6 +751,56 @@ async def test_a_slow_fetch_does_not_hold_the_conversation(gh, monkeypatch):
     monkeypatch.setattr(gh, "poll_once", slow)
     gh.watch(["toppk"])
     assert "ask again in a moment" in await gh.call("github_refresh", {"user": "toppk"})
+    assert gh._refreshing is not None and not gh._refreshing.done()  # still going
+    gh._refreshing.cancel()
+
+
+async def test_giving_up_waiting_does_not_abandon_the_fetch(gh, monkeypatch):
+    """It gave up at 22 seconds while the same work finished at 24 and
+    recorded 39 items; the answer said the refresh had failed."""
+    from external.github import __main__ as ghmod
+
+    monkeypatch.setattr(ghmod, "REFRESH_BUDGET", 0.01)
+    finished = []
+
+    async def slow(*, force=False, only=None):
+        await asyncio.sleep(0.05)
+        finished.append(True)
+        return 7
+
+    monkeypatch.setattr(gh, "poll_once", slow)
+    gh.watch(["toppk"])
+    await gh.call("github_refresh", {"user": "toppk"})
+    await gh._refreshing
+    assert finished == [True]  # the work completed after the answer went out
+
+
+async def test_a_second_ask_joins_the_fetch_already_running(gh, monkeypatch):
+    """Two passes over the same handles is twice the quota for one answer."""
+    starts = []
+
+    async def slow(*, force=False, only=None):
+        starts.append(only)
+        await asyncio.sleep(0.05)
+        return 1
+
+    monkeypatch.setattr(gh, "poll_once", slow)
+    gh.watch(["toppk"])
+    first, second = await asyncio.gather(
+        gh.call("github_refresh", {"user": "toppk"}),
+        gh.call("github_refresh", {"user": "toppk"}),
+    )
+    assert len(starts) == 1  # one fetch, two answers
+    assert "1 new item" in first and "1 new item" in second
+
+
+async def test_a_failing_fetch_is_reported_not_raised(gh, monkeypatch):
+    async def boom(*, force=False, only=None):
+        raise RuntimeError("github said no")
+
+    monkeypatch.setattr(gh, "poll_once", boom)
+    gh.watch(["toppk"])
+    assert "the fetch failed (RuntimeError)" in await gh.call("github_refresh", {"user": "toppk"})
 
 
 def test_the_refresh_tool_is_declared():
