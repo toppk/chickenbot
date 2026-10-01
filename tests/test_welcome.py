@@ -4,7 +4,14 @@ import time
 
 from chickenbot.commands import Handler
 from chickenbot.events import Event, Kind
-from chickenbot.welcome import NEW_DAY_QUIET, REGULAR_DAYS, ROOM_GAP, Welcome, _wording
+from chickenbot.welcome import (
+    NEW_DAY_QUIET,
+    REGULAR_DAYS,
+    REJOIN_GAP,
+    ROOM_GAP,
+    Welcome,
+    _wording,
+)
 
 from .conftest import FakeTransport
 
@@ -113,9 +120,18 @@ def test_the_wording_suits_the_hour(store):
     def at(h):
         return time.mktime((day.tm_year, day.tm_mon, day.tm_mday, h, 0, 0, 0, 0, -1))
 
-    assert "morning" in _wording("nate", at(8))
-    assert "afternoon" in _wording("nate", at(14)) or "hey" in _wording("nate", at(14))
-    assert "up" in _wording("nate", at(3)) or "late" in _wording("nate", at(3))
+    from chickenbot.welcome import AFTERNOON, EVENING, LATE, MORNING
+
+    for hour, bank in ((8, MORNING), (14, AFTERNOON), (20, EVENING), (3, LATE)):
+        assert _wording("nate", at(hour)) in [w.format(who="nate") for w in bank], hour
+
+
+def test_there_are_enough_wordings_to_not_sound_like_two(store):
+    """ "late one, toppk" every other night reads as a bot with two greetings."""
+    from chickenbot.welcome import AFTERNOON, EVENING, LATE, MORNING
+
+    for bank in (MORNING, AFTERNOON, EVENING, LATE):
+        assert len(bank) >= 4
 
 
 def test_the_same_person_gets_the_same_wording_all_day(store):
@@ -164,4 +180,52 @@ async def test_leaving_is_never_remarked_on(cfg, store):
     tr = FakeTransport()
     h = Handler(cfg, store, None, None)
     await h.dispatch(arrival(tr, "nate", Kind.DEPARTURE))
+    assert tr.sent == []
+
+
+# -- coming back is not arriving -----------------------------------------
+
+
+def test_a_reconnect_is_not_an_arrival(store):
+    """toppk dropped at 03:24:34 and was back at 03:24:45. He never left."""
+    w = Welcome(store)
+    spoke(store, "toppk", midday(2))
+    now = midday()
+    w.on_departure("irc", "#soup", "toppk", now)
+    assert w.on_arrival("irc", "#soup", "toppk", now + 11) == ""
+
+
+def test_a_real_absence_is_still_greeted(store):
+    w = Welcome(store)
+    spoke(store, "toppk", midday(2))
+    now = midday()
+    w.on_departure("irc", "#soup", "toppk", now)
+    assert w.on_arrival("irc", "#soup", "toppk", now + REJOIN_GAP + 1) != ""
+
+
+def test_somebody_elses_exit_does_not_cover_your_entrance(store):
+    w = Welcome(store)
+    spoke(store, "toppk", midday(2))
+    now = midday()
+    w.on_departure("irc", "#soup", "wraps", now)
+    assert w.on_arrival("irc", "#soup", "toppk", now + 11) != ""
+
+
+def test_leaving_the_other_room_does_not_count(store):
+    w = Welcome(store)
+    spoke(store, "toppk", midday(2))
+    spoke(store, "toppk", midday(2), room="#other")
+    now = midday()
+    w.on_departure("irc", "#other", "toppk", now)
+    assert w.on_arrival("irc", "#soup", "toppk", now + 11) != ""
+
+
+async def test_the_engine_remembers_who_it_watched_leave(cfg, store):
+    """The departure it already sees is the whole signal; nothing is inferred
+    from a quit message or guessed from a timeout."""
+    settled_in(store)
+    tr = FakeTransport()
+    h = Handler(cfg, store, None, None)
+    await h.dispatch(arrival(tr, "nate", Kind.DEPARTURE))
+    await h.dispatch(arrival(tr, "nate"))
     assert tr.sent == []

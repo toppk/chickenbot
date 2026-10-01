@@ -610,6 +610,7 @@ class Handler:
         else gets the quiet they arrived in."""
         note(who=event.sender, account=event.account or "-")
         if event.kind is Kind.DEPARTURE:
+            self.welcome.on_departure(event.transport.realm, event.room, event.sender)
             note(outcome="noted")
             return
         tr = event.transport
