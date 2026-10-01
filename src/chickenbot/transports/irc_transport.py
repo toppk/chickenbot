@@ -108,6 +108,9 @@ class IRCTransport:
             for nick, modes in chan.members.items()
         )
 
+    async def who(self, target: str) -> list[str] | None:
+        return [row.describe() for row in await self.client.who(target)]
+
     def opped(self, room: str) -> bool | None:
         return self.client.has_op(room)
 

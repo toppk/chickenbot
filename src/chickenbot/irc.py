@@ -22,6 +22,7 @@ log = logging.getLogger(__name__)
 # What a network's flood protection counts: what the bot says, not what it does.
 SPEECH = {"PRIVMSG", "NOTICE"}
 
+WHO_WAIT = 6.0  # a WHO the server never ends must not hang the asker
 BOT_MODE_WAIT = 8.0
 BOT_MODE_TRIES = 3
 
@@ -132,6 +133,44 @@ def parse(raw: str) -> Message:
     if msg.params:
         msg.command = msg.params.pop(0).upper()
     return msg
+
+
+@dataclass(frozen=True, slots=True)
+class WhoRow:
+    """One RPL_WHOREPLY line, as the server sees that connection right now.
+
+    `flags` is the interesting field: `H`/`G` here or gone, `*` operator, `B`
+    bot, `@`/`+` status in a shared channel. It is the only place the network
+    will tell us whether somebody claims to be a bot.
+    """
+
+    nick: str
+    user: str
+    host: str
+    server: str
+    flags: str
+    account: str
+    real: str
+    channel: str
+
+    @property
+    def bot(self) -> bool:
+        return "B" in self.flags
+
+    def describe(self) -> str:
+        marks = [
+            "away" if "G" in self.flags else "",
+            "bot" if "B" in self.flags else "",
+            "oper" if "*" in self.flags else "",
+            "op" if "@" in self.flags else ("voice" if "+" in self.flags else ""),
+        ]
+        said = ", ".join(m for m in marks if m)
+        return (
+            f"{self.nick} ({self.user}@{self.host})"
+            f"{' account ' + self.account if self.account else ' not logged in'}"
+            f"{' [' + said + ']' if said else ''}"
+            f"{' ' + self.real if self.real else ''}"
+        )
 
 
 class ISupport:
@@ -290,6 +329,11 @@ class Client:
         self.umodes: set[str] = set()
         # Folded nicks the server has told us are away.
         self.away: set[str] = set()
+        # One WHO at a time: 352 does not echo what was asked, so the only way
+        # to know which question a row answers is to have asked one question.
+        self._who_lock = asyncio.Lock()
+        self._who_rows: list[WhoRow] = []
+        self._who_end: asyncio.Future[None] | None = None
         self.handler: Handler | None = None
 
         self._reader: asyncio.StreamReader | None = None
@@ -316,6 +360,27 @@ class Client:
             self._outbox.put_nowait(line)
         except asyncio.QueueFull:
             log.warning("outbox full, dropping: %s", command)
+
+    async def who(self, target: str) -> list[WhoRow]:
+        """Ask the server about a nick or a channel and wait for the answer.
+
+        Serialised, because RPL_WHOREPLY does not say which question it
+        answers -- only the terminating 315 names the mask, and by then the
+        rows are already in. An unanswered WHO gives up rather than hanging
+        whoever asked.
+        """
+        if not target or any(c in target for c in " \r\n"):
+            return []
+        async with self._who_lock:
+            self._who_rows = []
+            self._who_end = asyncio.get_running_loop().create_future()
+            self.send("WHO", target)
+            try:
+                await asyncio.wait_for(asyncio.shield(self._who_end), WHO_WAIT)
+            except TimeoutError:
+                log.warning("WHO %s went unanswered", target)
+            rows, self._who_rows, self._who_end = self._who_rows, [], None
+            return rows
 
     def privmsg(self, target: str, text: str) -> None:
         for line in split_message(text):
@@ -492,6 +557,24 @@ class Client:
                 log.warning("user modes: +%s", "".join(sorted(self.umodes)) or "none")
             case "353":
                 self._handle_names(msg)
+            case "352":  # RPL_WHOREPLY - <me> <chan> <user> <host> <server> <nick> <flags> :<hops> <real>
+                if self._who_end is not None and len(msg.params) >= 7:
+                    hops, _, real = (msg.params[7] if len(msg.params) > 7 else "").partition(" ")
+                    self._who_rows.append(
+                        WhoRow(
+                            nick=msg.params[5],
+                            user=msg.params[2],
+                            host=msg.params[3],
+                            server=msg.params[4],
+                            flags=msg.params[6],
+                            account=self.account_of(msg.params[5]),
+                            real=real or hops,
+                            channel=msg.params[1],
+                        )
+                    )
+            case "315" | "401" | "403":  # end of WHO, or no such nick/channel
+                if self._who_end is not None and not self._who_end.done():
+                    self._who_end.set_result(None)
             case "367":  # RPL_BANLIST - <me> <chan> <mask> ...
                 if len(msg.params) >= 3:
                     self._channel(msg.params[1]).lists["b"].add(msg.params[2])

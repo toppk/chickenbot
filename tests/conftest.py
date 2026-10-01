@@ -22,6 +22,8 @@ class FakeTransport:
         self.sent: list[tuple[str, str]] = []
         self.actions: list[tuple[str, str, str, str]] = []
         self.topics: dict[str, str] = {}
+        self.who_rows: list[str] | None = None  # None: this network has no WHO
+        self.whoed: list[str] = []
         self._members = Membership(list(owners), list(ignored), self.fold)
 
     @property
@@ -36,6 +38,10 @@ class FakeTransport:
 
     def roster(self, room: str) -> list[tuple[str, str, str]]:
         return list(self.here)
+
+    async def who(self, target: str) -> list[str] | None:
+        self.whoed.append(target)
+        return self.who_rows
 
     def opped(self, room: str) -> bool | None:
         return self.ops

@@ -143,6 +143,9 @@ class ToolBox:
             return f"error: {name} failed ({type(exc).__name__})"
 
 
+WHO_SHOWN = 25  # a busy channel is a wall of text; the roster is the cheap way
+
+
 @tool("current_time", description="The current UTC date and time. Use it rather than guessing today's date.")
 async def tool_current_time(h: Handler, ctx: Context, args: dict) -> str:
     import datetime
@@ -424,6 +427,36 @@ async def tool_room_state(h: Handler, ctx: Context, args: dict) -> str:
         f"{', bans: ' + ', '.join(bans) if bans else ', no bans'}"
         f"{', topic: ' + chan.topic if chan.topic else ', no topic set'}"
     )
+
+
+@tool(
+    "chan_who",
+    description=(
+        "Ask the network directly about a channel or one name (IRC WHO): hostmask, services "
+        "account, away state, operator and channel status, and whether they are flagged as a bot. "
+        "Live, unlike chan_state, and the only way to see the bot flag. "
+        "Leave `target` out for the current room."
+    ),
+    params={
+        "type": "object",
+        "properties": {"target": {"type": "string", "description": "A nick, or a channel you are in."}},
+    },
+)
+async def tool_chan_who(h: Handler, ctx: Context, args: dict) -> str:
+    tr = ctx.transport
+    target = str(args.get("target") or ctx.channel).strip()
+    if not target:
+        return "error: no target, and this is not a room"
+    # A channel we are not in would be answered by the server, but asking is
+    # the bot wandering off on its own. A nick is fair game: it is public.
+    if target.startswith(("#", "&")) and tr.fold(target) != tr.fold(ctx.channel):
+        return f"error: not in {target}, so not asking about it"
+    rows = await tr.who(target)
+    if rows is None:
+        return f"error: {tr.name} has no such query"
+    if not rows:
+        return f"no answer about {target} -- nobody by that name, or the server did not reply"
+    return "\n".join(rows[:WHO_SHOWN])
 
 
 @tool(

@@ -68,7 +68,11 @@ Prefix them the way `.help` tells you — `.seen nate` in the admin room,
 | `uptime` | how long it has been up |
 
 Plain questions are usually better. It has tools for the room, the log, the
-clock and GitHub, and it will reach for them without being told which.
+clock and GitHub, and it will reach for them without being told which. "who is
+biff" or "run a who on this channel" reaches the network itself: hostmask,
+services account, away, ops, and whether the server has them flagged as a bot.
+A bot that sets its version as its realname -- chickenbot does -- shows it
+there, so that is where to look rather than asking it.
 
 ## Things you can just tell it
 

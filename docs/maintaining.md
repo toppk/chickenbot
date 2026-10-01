@@ -172,6 +172,11 @@ answering one does not leave the room followed. Expect to want all of this
 when the other bot is also a chickenbot: it has the same manners and will
 return every volley you send.
 
+`.ask who is biff` -- or any phrasing of it -- runs a real WHO and reports the
+flags, so `B` is visible without opening a client. chickenbot's own realname
+carries its version, which WHO shows; another bot's realname is whatever that
+bot chose.
+
 IRCv3 bot mode and the platform flags are honoured automatically; this is for
 the ones that do not flag themselves. Whether chickenbot flags *itself* is
 `.botmode on|off` in the partyline, or `irc.bot_mode` in the toml — a user

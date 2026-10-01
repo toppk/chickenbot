@@ -68,6 +68,12 @@ class Transport(Protocol):
         network has said. An empty account means nobody vouched for them."""
         return []
 
+    async def who(self, target: str) -> list[str] | None:
+        """Ask the network, right now, about a room or one name: one
+        descriptive line each. None where the network has no such query --
+        which is not the same as an empty room."""
+        return None
+
     def opped(self, room: str) -> bool | None:
         """Whether we currently hold privilege in this room. None where the
         question does not apply, which is not the same as no."""
