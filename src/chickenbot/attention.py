@@ -34,21 +34,23 @@ def addressed_elsewhere(claim: str) -> bool:
     return claim not in (TO_YOU, OVERHEARD)
 
 
-# The token is honoured on every path -- a reply that is only this is never
-# said out loud. It was only ever *offered* while following, so a direct line
-# that needed no answer left the model to invent its own way of declining, and
-# it wrote "(no reply -- the line is addressed to chrisk)" into the channel.
+# Stated mechanically, because that is what it is. Told only "prefer silence",
+# a model treats a parenthetical as a side channel and writes "(no reply --
+# that was addressed to chrisk)" into the room. It has no way to know the
+# channel is verbatim unless it is told so.
 SILENCE_NOTE = (
-    f" If a line names you but needs nothing from you, reply with exactly {SILENT} and nothing else: "
-    "someone quoting you, or asking a third party about you, is not a question put to you. "
-    "Never write out that you are not replying, or why. That is still replying."
+    f" Saying nothing has one spelling: {SILENT}, alone, with nothing before or after it. "
+    "That string is read by code and never reaches anyone. Everything else you write is sent to "
+    "the room exactly as typed -- there is no aside, no stage direction, no note to your "
+    "maintainer, and no way to think out loud. A line naming you does not oblige an answer: "
+    "someone quoting you, or asking a third party about you, needs nothing from you. "
+    f"Decline with {SILENT}, never with a sentence about declining."
 )
 FOLLOW_NOTE = (
     " You are following a conversation you were drawn into rather than being asked a direct question. "
     "Each line is marked with its claim on you: `to you` named you, `overheard` named nobody, and "
     "`to <nick>` was addressed to somebody else and is none of your business -- read it for context and "
     "do not answer it. "
-    f"If the latest messages do not need anything from you, reply with exactly {SILENT} and nothing else. "
     "Prefer silence over filler: do not acknowledge, agree, or comment merely to be present."
 )
 

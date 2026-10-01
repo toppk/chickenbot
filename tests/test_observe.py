@@ -239,6 +239,6 @@ def test_silence_is_offered_on_every_path(tmp_path):
     # Offered on both paths: a direct line can name it and still need
     # nothing, and with no way to decline the model wrote its refusal out.
     assert "<silent>" in plain.getvalue()
-    assert "needs nothing from you" in plain.getvalue()
+    assert "does not oblige an answer" in plain.getvalue()
     # What following adds is the framing, not the token.
     assert "drawn into" in followed.getvalue() and "drawn into" not in plain.getvalue()
