@@ -256,6 +256,10 @@ class Config:
     # message has no room policy behind it and no witnesses, so the default is
     # the narrow one.
     direct: str = "owners"
+    # How to treat other bots: ignore them, answer when one addresses you by
+    # name, or treat them as people. `bot_mode` is about the flag this bot
+    # sets on itself and has nothing to do with this.
+    bots: str = "ignore"
     irc: IRCConfig = field(default_factory=IRCConfig)
     signal: SignalConfig = field(default_factory=SignalConfig)
     discord: DiscordConfig = field(default_factory=DiscordConfig)

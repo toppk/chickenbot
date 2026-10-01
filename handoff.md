@@ -732,6 +732,21 @@ another name, `<mallory (unidentified)>` is nobody the network vouched for, and
 `<biff (bot, unidentified)>` is both. The model could not otherwise tell a
 claim worth weighing from one worth nothing.
 
+**`bot_mode` and `bots` are different questions.** `irc.bot_mode` (and
+`.botmode`) is the `+B` flag this bot sets on *itself*, so others leave it
+alone. `bots` is how it treats *them*, and the two never interacted: turning
+our own flag off still ignored eggbot (marked by hand) and biff (discovered
+by `+B`). `bots` takes `ignore` (the default), `addressed` -- answer a bot
+that names us, which is the interesting case -- or `all`. Replies to bots are
+capped at `BOT_REPLIES` per room per hour, because two bots that answer each
+other on sight is a loop, and that is where it stops.
+
+**A line that opens `somebody-else:` is for them.** "eggbot: tell chickenbot
+a joke" woke it, because being named anywhere counts -- but the IRC
+convention for saying who a line is *for* is a nick and a colon at the front.
+Checked against the roster rather than any `word:`, or a line beginning
+`https://` would read as addressing `https`.
+
 **What a bot says is read, marked, and never acted on.** Its lines are logged
 as `kind=bot` and appear in the scrollback as `<biff (bot)>`. They were
 excluded from the scrollback at first, which meant a room containing another

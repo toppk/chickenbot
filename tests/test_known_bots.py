@@ -267,3 +267,88 @@ async def test_the_bots_own_lines_are_not_labelled(cfg, store):
 
     await store.log_line("fake", "#chan", "chickenbot", "", "42", "self")
     assert "<chickenbot>" in render_scrollback(await store.recent("fake", "#chan"))
+
+
+# -- how other bots are treated, which is not about our own flag --------
+
+
+async def test_a_line_addressed_to_another_bot_is_not_for_us(cfg, store):
+    """ "eggbot: tell chickenbot a joke" woke it, because its name was in the
+    line. The line is addressed to eggbot."""
+    from .test_commands import StubProvider
+
+    h = Handler(cfg, store, StubProvider("ok"), None)
+    tr = FakeTransport(here=[("eggbot", "", ""), ("nate", "nate", ""), ("chickenbot", "", "")])
+    await h.dispatch(tr.envelope("eggbot: tell chickenbot a joke", sender="nate"))
+    assert tr.sent == []
+
+
+async def test_being_addressed_ourselves_still_works(cfg, store):
+    from .test_commands import StubProvider
+
+    h = Handler(cfg, store, StubProvider("ok"), None)
+    tr = FakeTransport(here=[("eggbot", "", ""), ("chickenbot", "", "")])
+    await h.dispatch(tr.envelope("chickenbot: tell eggbot a joke", sender="nate"))
+    assert tr.sent
+
+
+async def test_a_url_is_not_somebody_being_addressed(cfg, store):
+    """`https://...` partitions on a colon too."""
+    from .test_commands import StubProvider
+
+    h = Handler(cfg, store, StubProvider("ok"), None)
+    tr = FakeTransport(here=[("nate", "nate", ""), ("chickenbot", "", "")])
+    await h.dispatch(tr.envelope("https://example.com/x what do you make of that chickenbot", sender="nate"))
+    assert tr.sent
+
+
+async def test_a_bot_is_ignored_by_default(handler, store):
+    store.mark_bot("fake", "eggbot")
+    tr = FakeTransport()
+    await handler.dispatch(tr.envelope("chickenbot: hello", sender="eggbot", account="eggbot"))
+    assert tr.sent == []
+
+
+async def test_addressed_lets_a_bot_through(cfg, store):
+    from .test_commands import StubProvider
+
+    cfg.bots = "addressed"
+    h = Handler(cfg, store, StubProvider("hello back"), None)
+    store.mark_bot("fake", "eggbot")
+    tr = FakeTransport()
+    await h.dispatch(tr.envelope("chickenbot: hello", sender="eggbot", account="eggbot"))
+    assert tr.sent
+
+
+async def test_addressed_still_ignores_a_bot_talking_to_the_room(cfg, store):
+    from .test_commands import StubProvider
+
+    cfg.bots = "addressed"
+    h = Handler(cfg, store, StubProvider("hello back"), None)
+    store.mark_bot("fake", "eggbot")
+    tr = FakeTransport()
+    await h.dispatch(tr.envelope("just saying things", sender="eggbot", account="eggbot"))
+    assert tr.sent == []
+
+
+async def test_two_bots_cannot_talk_forever(cfg, store):
+    """A loop with a budget: where it stops."""
+    from chickenbot.commands import BOT_REPLIES
+
+    from .test_commands import StubProvider
+
+    cfg.bots = "addressed"
+    cfg.llm.follow = False  # each line answered outright; batching is tested apart
+    h = Handler(cfg, store, StubProvider("and you"), None)
+    store.mark_bot("fake", "eggbot")
+    tr = FakeTransport()
+    for _ in range(BOT_REPLIES + 3):
+        await h.dispatch(tr.envelope("chickenbot: again", sender="eggbot", account="eggbot"))
+    assert len(tr.sent) == BOT_REPLIES
+
+
+async def test_what_a_bot_says_is_logged_either_way(handler, store):
+    store.mark_bot("fake", "eggbot")
+    tr = FakeTransport()
+    await handler.dispatch(tr.envelope("a remark", sender="eggbot", account="eggbot"))
+    assert (await store.recent("fake", "#chan"))[-1].text == "a remark"

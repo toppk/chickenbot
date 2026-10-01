@@ -28,6 +28,7 @@ log = logging.getLogger(__name__)
 SETTABLE = (
     "prefix",
     "direct",
+    "bots",
     "chatlog_days",
     "llm.enabled",
     "llm.model",
