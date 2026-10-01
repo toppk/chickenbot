@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
+import difflib
 import json
 import logging
 import os
@@ -614,6 +615,9 @@ def _document(cfg_store: Store, kind: str, key: str, args: argparse.Namespace, w
             print("(no history)")
         return 0
 
+    if getattr(args, "diff", None) is not None:
+        return _diff(cfg_store, kind, key, args.diff, current)
+
     if args.revision is not None:
         found = cfg_store.revision(args.revision)
         if found is None or found[0] != kind or found[1] != key:
@@ -637,6 +641,40 @@ def _document(cfg_store: Store, kind: str, key: str, args: argparse.Namespace, w
         return 0
     write(_read_text(args.text))
     print("updated")
+    return 0
+
+
+def _diff(cfg_store: Store, kind: str, key: str, against: str, current: str) -> int:
+    """What changed, against an old revision or against the shipped template.
+
+    An instance keeps its own soul, so the template is only ever the seed:
+    the two drift the moment either is edited, and a rule written into the
+    template reaches nobody until somebody notices. This is how you notice.
+    """
+    from .soul import TEMPLATE as SOUL_TEMPLATE
+
+    if against == "template":
+        if kind != "soul":
+            print("only the soul has a template", file=sys.stderr)
+            return 1
+        if not SOUL_TEMPLATE.is_file():
+            print("no template shipped with this build", file=sys.stderr)
+            return 1
+        was, label = SOUL_TEMPLATE.read_text(encoding="utf-8"), "template"
+    else:
+        if not against.isdigit():
+            print(f"not a revision or 'template': {against}", file=sys.stderr)
+            return 1
+        found = cfg_store.revision(int(against))
+        if found is None or found[0] != kind or found[1] != key:
+            print(f"no revision {against} of this", file=sys.stderr)
+            return 1
+        was, label = found[2], f"revision {against}"
+
+    lines = list(
+        difflib.unified_diff(was.splitlines(), current.splitlines(), fromfile=label, tofile="current", lineterm="")
+    )
+    print("\n".join(lines) if lines else f"no difference from {label}")
     return 0
 
 
@@ -796,6 +834,9 @@ def main(argv: list[str] | None = None) -> int:
 
     def versioned(sub_parser):
         sub_parser.add_argument("--history", action="store_true", help="list past revisions")
+        sub_parser.add_argument(
+            "--diff", metavar="N", help="what changed since revision N, or since the shipped 'template'"
+        )
         sub_parser.add_argument("--revision", type=int, metavar="N", help="print revision N")
         sub_parser.add_argument("--restore", type=int, metavar="N", help="make revision N current")
         return sub_parser

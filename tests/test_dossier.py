@@ -314,3 +314,45 @@ def test_the_last_handle_is_not_droppable(store):
 
 def test_dropping_a_handle_nobody_holds_is_not_an_error(store):
     assert store.drop_alias("github", "nobody") is False
+
+
+# -- what changed ---------------------------------------------------------
+
+
+def test_the_soul_can_be_diffed_against_the_shipped_template(tmp_path):
+    """An instance keeps its own soul, so "is this the soul we wrote?" has to
+    be answerable without reading two files side by side."""
+    from chickenbot.soul import TEMPLATE
+
+    cli(tmp_path, "soul", TEMPLATE.read_text(encoding="utf-8") + "\n**New rule.** On trial.\n")
+    code, out = cli(tmp_path, "soul", "--diff", "template")
+    assert code == 0
+    assert "+**New rule.** On trial." in out
+    assert "--- template" in out and "+++ current" in out
+
+
+def test_an_untouched_soul_says_so(tmp_path):
+    from chickenbot.soul import TEMPLATE
+
+    cli(tmp_path, "soul", TEMPLATE.read_text(encoding="utf-8"))
+    assert "no difference from template" in cli(tmp_path, "soul", "--diff", "template")[1]
+
+
+def test_a_revision_can_be_diffed_too(tmp_path):
+    cli(tmp_path, "soul", "first")
+    first = cli(tmp_path, "soul", "--history")[1].split()[1]
+    cli(tmp_path, "soul", "second")
+    out = cli(tmp_path, "soul", "--diff", first)[1]
+    assert "-first" in out and "+second" in out
+
+
+def test_notes_have_no_template(tmp_path):
+    cli(tmp_path, "dossier", "irc", "chrisk", "runs the server")
+    code, _out = cli(tmp_path, "dossier", "irc", "chrisk", "--diff", "template")
+    assert code == 1
+
+
+def test_a_diff_against_nothing_is_refused(tmp_path):
+    cli(tmp_path, "soul", "first")
+    assert cli(tmp_path, "soul", "--diff", "nonsense")[0] == 1
+    assert cli(tmp_path, "soul", "--diff", "9999")[0] == 1

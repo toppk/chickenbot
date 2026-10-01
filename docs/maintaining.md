@@ -156,6 +156,26 @@ misbehaving client, because a cloaked host is shared: `chrisk`, `chrisk_` and
 `biff` have appeared on chonkbase under one cloak. Either form tells you who
 else the mask catches.
 
+## The soul
+
+```bash
+chickenbot -c <config> soul                   # what it is running
+chickenbot -c <config> soul --diff template   # what this instance has that the shipped seed does not
+chickenbot -c <config> soul @my-soul.md       # replace it
+chickenbot -c <config> soul --history         # revisions; --diff N and --restore N from there
+```
+
+The soul is per instance, in its database. `SOUL.md` in the checkout is the
+seed used by `chickenbot init` and nothing else, so editing it changes what
+the *next* instance starts with and nothing that is already running. Entries
+being tried on one bot before they are written into the seed are listed in
+`docs/templates/SOUL-trials.md`.
+
+Nothing the bot can reach writes the soul. There is no `.soul` command and no
+tool for it: it is set from the CLI, which means shell access to the instance
+directory. A bot cannot edit its own character, and nothing said in a channel
+can either -- which is the point, given that scrollback is untrusted input.
+
 ## Other bots
 
 ```bash

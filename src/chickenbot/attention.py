@@ -49,6 +49,7 @@ class Engagement:
     """One room's state. `until` is when interest lapses without being renewed."""
 
     until: float
+    opened: float = field(default_factory=time.monotonic)
     # Everyone who has spoken to it while this engagement was open. A set,
     # not the latest: two people talking to it in the same minute are both
     # talking to it, and replacing the name left whoever spoke first being
@@ -98,7 +99,7 @@ class Attention:
         if spot is None:
             spot = Engagement(until=time.monotonic() + self.follow_seconds)
             self.rooms[key] = spot
-            log.debug("following %s, drawn in by %s", key, who or "-")
+            log.info("following %s for %ss, drawn in by %s", key, self.follow_seconds, who or "-")
         else:
             spot.until = time.monotonic() + self.follow_seconds
             spot.silences = 0
@@ -126,10 +127,14 @@ class Attention:
 
     def close(self, key: str, why: str = "") -> None:
         spot = self.rooms.pop(key, None)
-        if spot is not None and spot.timer is not None:
+        if spot is None:
+            return
+        if spot.timer is not None:
             spot.timer.cancel()
-        if spot is not None:
-            log.debug("stopped following %s (%s)", key, why or "closed")
+        # At info, not debug: "it ignored me" is answered by when it stopped
+        # listening, and that was only ever derivable from an absence in the
+        # log plus the configured window.
+        log.info("stopped following %s (%s), open %.0fs", key, why or "closed", time.monotonic() - spot.opened)
 
     def note_silence(self, key: str) -> None:
         """The model chose not to answer. A few of those and it stops listening."""

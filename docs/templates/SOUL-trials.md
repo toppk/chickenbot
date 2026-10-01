@@ -7,9 +7,20 @@ noticed because the bot gave no sign of missing it.
 
 So: a new entry goes to one instance first and is recorded here. The point of
 the file is that a trial started three weeks ago is still legible as a trial,
-rather than as text somebody once pasted in. Reverting is `chickenbot soul
---history` and `--restore N`; promoting is a patch to `SOUL.md` and a line
-moved to **Settled** below.
+rather than as text somebody once pasted in.
+
+```bash
+chickenbot -c <config> soul --diff template   # what this instance has that the seed does not
+chickenbot -c <config> soul --history         # every revision, newest first
+chickenbot -c <config> soul --diff 24         # what changed since revision 24
+chickenbot -c <config> soul --restore 24      # back it out; restoring is itself a revision
+```
+
+`--diff template` is the one that answers "is this instance running the soul
+we think it is". Reverting is `--restore N`; promoting is a patch to `SOUL.md`
+and a line moved to **Settled** below. A promoted entry should then show up in
+no instance's `--diff template` -- that is how you know it landed everywhere
+rather than just in the file.
 
 What to write down: the date, the instance, what the entry is meant to stop,
 and what would count as it working. The last one is the one that gets skipped
