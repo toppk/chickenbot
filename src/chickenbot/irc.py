@@ -22,6 +22,7 @@ log = logging.getLogger(__name__)
 # What a network's flood protection counts: what the bot says, not what it does.
 SPEECH = {"PRIVMSG", "NOTICE"}
 
+INBOX = 500  # handler backlog; a bot this far behind is not coming back
 WHO_WAIT = 6.0  # a WHO the server never ends must not hang the asker
 BOT_MODE_WAIT = 8.0
 BOT_MODE_TRIES = 3
@@ -335,6 +336,8 @@ class Client:
         self._who_rows: list[WhoRow] = []
         self._who_end: asyncio.Future[None] | None = None
         self.handler: Handler | None = None
+        # Handler work, kept off the read loop. One worker preserves order.
+        self._inbox: asyncio.Queue[Message] | None = None
 
         self._reader: asyncio.StreamReader | None = None
         self._writer: asyncio.StreamWriter | None = None
@@ -376,8 +379,10 @@ class Client:
             self._who_end = asyncio.get_running_loop().create_future()
             self.send("WHO", target)
             try:
-                await asyncio.wait_for(asyncio.shield(self._who_end), WHO_WAIT)
-            except TimeoutError:
+                await asyncio.wait_for(self._who_end, WHO_WAIT)
+            except (TimeoutError, asyncio.CancelledError):
+                # Not shielded: a dead query must be dead, or its replies
+                # arrive late and are reported as the next query's answer.
                 log.warning("WHO %s went unanswered", target)
             rows, self._who_rows, self._who_end = self._who_rows, [], None
             return rows
@@ -450,6 +455,8 @@ class Client:
         self.away.clear()
         self.nick = self.wanted_nick
         drain = asyncio.create_task(self._drain_outbox())
+        self._inbox = asyncio.Queue(maxsize=INBOX)
+        work = asyncio.create_task(self._work_inbox())
         try:
             self.send("CAP", "LS", "302")
             if self.server_password:
@@ -462,6 +469,8 @@ class Client:
             await self._read_loop()
         finally:
             drain.cancel()
+            work.cancel()
+            self._inbox = None
             self.ready.clear()
             writer, self._writer = self._writer, None
             if writer is not None:
@@ -519,12 +528,31 @@ class Client:
                 continue
             log.log(TRACE, "<< %s", _safe(line))
             msg = parse(line)
+            # Protocol state is updated here, in line order, because the rest
+            # of the client reads it. The handler is not awaited: it runs the
+            # whole model pipeline, and a tool that waits on the server -- WHO,
+            # and WHOIS after it -- would be waiting on this loop to parse the
+            # reply it is blocking. Five WHOs timed out that way before anyone
+            # worked out the bot was holding its own line.
             await self._handle_protocol(msg)
-            if self.handler is not None:
-                try:
-                    await self.handler(msg)
-                except Exception:
-                    log.exception("handler raised on %s", msg.command)
+            if self.handler is None or self._inbox is None:
+                continue
+            try:
+                self._inbox.put_nowait(msg)
+            except asyncio.QueueFull:
+                log.warning("inbox full, dropping %s", msg.command)
+
+    async def _work_inbox(self) -> None:
+        """One worker, so handlers still run strictly in the order received."""
+        assert self._inbox is not None
+        while True:
+            msg = await self._inbox.get()
+            if self.handler is None:
+                continue
+            try:
+                await self.handler(msg)
+            except Exception:
+                log.exception("handler raised on %s", msg.command)
 
     # -- protocol --------------------------------------------------------
 

@@ -190,35 +190,14 @@ async def test_it_is_offered_to_anybody(cfg, store):
 # -- a command word in a sentence ----------------------------------------
 
 
-@pytest.mark.parametrize(
-    "body",
-    [
-        "who is chickenbot",
-        "who is chickenbot?",
-        "who is b* account?",
-        "seen the new guy?",
-        "help me with this",
-        "history of this channel",
-    ],
-)
-def test_a_sentence_is_not_a_command(body):
-    from chickenbot.commands import reads_as_english
+async def test_a_question_is_not_a_command(cfg, store):
+    """`.who` was renamed because "who is biff?" invoked it. Nothing named
+    `who` remains, so the question reaches the model like any other."""
+    from chickenbot.commands import COMMANDS
 
-    assert reads_as_english(body)
-
-
-@pytest.mark.parametrize("body", ["who biff", "seen nate", "help", "uptime", "history deploy", "tune bots all"])
-def test_an_invocation_still_is_one(body):
-    from chickenbot.commands import reads_as_english
-
-    assert not reads_as_english(body)
-
-
-async def test_asked_in_words_it_answers_rather_than_running_who(cfg, store):
-    """`.who` is owner-only and about dossiers; "who is biff" is a question."""
     from .test_commands import StubProvider
 
-    cfg.prefix = "."
+    assert "who" not in COMMANDS and "dossier" in COMMANDS
     h = Handler(cfg, store, StubProvider("biff is another bot"), None)
     tr = FakeTransport(owners=("toppk",))
     await h.dispatch(tr.envelope("chickenbot: who is biff?", sender="toppk", account="toppk"))
@@ -226,10 +205,40 @@ async def test_asked_in_words_it_answers_rather_than_running_who(cfg, store):
     assert "another bot" in tr.said()[0]
 
 
-async def test_spelled_with_the_prefix_it_is_still_the_command(cfg, store):
-    cfg.prefix = "."
-    h = Handler(cfg, store, None, None)
-    tr = FakeTransport(owners=("toppk",))
-    await h.dispatch(tr.envelope(".who is biff", sender="toppk", account="toppk"))
-    await h.drain()
-    assert "nothing on is" in tr.said()[0]
+def test_no_command_name_can_open_a_question():
+    """The rule the rename follows, so the next one is caught before it ships."""
+    from chickenbot.commands import COMMANDS
+
+    openers = {"who", "what", "when", "where", "why", "how", "which", "whose", "is", "are", "can", "do", "does"}
+    assert not (openers & set(COMMANDS))
+
+
+async def test_a_handler_that_waits_on_the_server_does_not_deadlock():
+    """The read loop must keep parsing while a handler runs. It did not, so a
+    tool that asked the server a question blocked the reply to itself: five
+    WHOs timed out in a row and the bot reported that WHO returns nothing."""
+    c = client()
+    answered: list[list] = []
+
+    async def handler(msg):
+        if msg.command == "PRIVMSG":
+            answered.append(await c.who("biff"))
+
+    c.handler = handler
+    c._inbox = asyncio.Queue(maxsize=8)
+    work = asyncio.ensure_future(c._work_inbox())
+    c._inbox.put_nowait(Message(command="PRIVMSG", params=["#lobby", "chick: who is biff"]))
+    await asyncio.sleep(0)
+    # The read loop's job, arriving while the handler is mid-question.
+    for _ in range(40):
+        await asyncio.sleep(0.005)
+        if c._who_end is not None:
+            break
+    await c._handle_protocol(reply("biff", "HB"))
+    await c._handle_protocol(Message(command="315", params=["chickenbot", "biff", "End"]))
+    for _ in range(40):
+        await asyncio.sleep(0.005)
+        if answered:
+            break
+    work.cancel()
+    assert answered and answered[0][0].nick == "biff"
