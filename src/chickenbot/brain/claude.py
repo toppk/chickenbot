@@ -79,5 +79,5 @@ class ClaudeProvider:
         if response.stop_reason == "max_tokens" and text:
             text += " [cut off]"
         if not text:
-            raise ProviderError("empty response")
+            raise ProviderError("the model came back with nothing")
         return text

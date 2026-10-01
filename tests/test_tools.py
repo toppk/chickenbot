@@ -174,7 +174,7 @@ async def test_a_model_that_only_ever_calls_tools_still_gets_an_answer(handler, 
 
     fn, _ = transport({"role": "assistant", "content": None, "tool_calls": [call("again", {})]})
     p = provider(monkeypatch, fn)
-    with pytest.raises(ProviderError, match="empty response"):
+    with pytest.raises(ProviderError, match="came back with nothing"):
         await p.reply(
             system="s", history=[], prompt="p", search=False, toolbox=box(handler, again=make("again", again))
         )

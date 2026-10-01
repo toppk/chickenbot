@@ -344,20 +344,28 @@ class Tool:
         now = int(time.time())
         return " | ".join(self._repo(r, now) for r in rows[:limit])
 
-    @staticmethod
-    def _repo(r, now: int) -> str:
+    def _repo(self, r, now: int) -> str:
         """A fork of somebody else's project is not their work, and an archived
         one is not their current work. Both were mirrored and never said, so
         "ten repos" counted four forks as if they were all theirs."""
         marks = [m for m, on in (("fork", r["fork"]), ("archived", r["archived"])) if on]
         marks.append(f"{r['stars']} stars")
-        # GitHub's open_issues_count includes pull requests. Rendered as bare
-        # "open" it was read as open PRs, and somebody conceded to a number
-        # that was never about them.
-        marks.append(f"{r['open_issues']} open issues+PRs")
+        marks.append(self._open(r))
         marks.append(f"pushed {ago(now - r['pushed_at'])} ago")
         described = f": {r['description'][:DESCRIPTION]}" if r["description"] else ""
         return f"{r['full_name']} ({', '.join(marks)}){described}"
+
+    def _open(self, r) -> str:
+        """GitHub's open_issues_count is issues *and* pull requests in one
+        number. Where the mirror holds the items, say which is which; where
+        the two disagree the mirror is partial, so report the total and label
+        it honestly rather than inventing a split."""
+        total = r["open_issues"]
+        issues, prs = self.store.open_counts(r["full_name"])
+        if total and issues + prs == total:
+            parts = [f"{issues} issue{'s' if issues != 1 else ''}", f"{prs} PR{'s' if prs != 1 else ''}"]
+            return ", ".join(p for p in parts if not p.startswith("0 ")) + " open"
+        return f"{total} open issues+PRs"
 
     def _items(self, rows, now: int, *, whose: str) -> str:
         if not rows:

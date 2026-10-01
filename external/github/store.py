@@ -128,6 +128,19 @@ class Store:
             ).fetchall()
         return self.db.execute("SELECT * FROM repo ORDER BY pushed_at DESC").fetchall()
 
+    def open_counts(self, repo: str) -> tuple[int, int]:
+        """(issues, pull requests) open on this repo, as mirrored.
+
+        GitHub's own `open_issues_count` is a single number covering both, so
+        the only way to say "74 issues and 3 pull requests" is to count the
+        items we already store separately.
+        """
+        rows = self.db.execute(
+            "SELECT kind, COUNT(*) AS n FROM item WHERE repo = ? COLLATE NOCASE GROUP BY kind", (repo,)
+        ).fetchall()
+        counts = {r["kind"]: r["n"] for r in rows}
+        return counts.get("issue", 0), counts.get("pr", 0)
+
     def stars(self) -> int:
         return self.db.execute("SELECT COALESCE(SUM(stars), 0) AS n FROM repo").fetchone()["n"]
 

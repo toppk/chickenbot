@@ -85,7 +85,7 @@ async def test_refusal_and_empty_answers_become_provider_errors(provider):
         await provider.reply(system="s", history=[], prompt="p", search=False)
 
     stub_create(provider, response(content=[block("text", "  ")]))
-    with pytest.raises(ProviderError, match="empty response"):
+    with pytest.raises(ProviderError, match="came back with nothing"):
         await provider.reply(system="s", history=[], prompt="p", search=False)
 
 

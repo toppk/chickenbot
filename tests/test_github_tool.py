@@ -1246,3 +1246,41 @@ async def test_an_unknown_kind_finds_nothing_rather_than_everything(tmp_path):
     tool = Tool(store, None, ["chrisk"])
     assert "no activity" in await tool.call("github_activity", {"user": "chrisk", "kind": "nonsense"})
     store.close()
+
+
+async def test_issues_and_pull_requests_are_told_apart(tmp_path):
+    """GitHub's open_issues_count is both in one number, so the only way to
+    say "74 issues and 3 pull requests" is to count what we mirrored."""
+    store = Store(tmp_path / "g.db")
+    store.save_repo(_repo_row("chonkcraft", stars=25, open_issues=6))
+    for i in range(5):
+        store.save_item(_item_row(i, kind="issue", repo="someone/chonkcraft", id=f"someone/chonkcraft#{i}"))
+    store.save_item(_item_row(9, kind="pr", repo="someone/chonkcraft", id="someone/chonkcraft#9"))
+
+    answer = await Tool(store, None, ["someone"]).call("github_repos", {"user": "someone"})
+    assert "5 issues, 1 PR open" in answer
+    store.close()
+
+
+async def test_a_partial_mirror_reports_the_total_rather_than_inventing_a_split(tmp_path):
+    """The search caps at a hundred items across all of somebody's repos, so
+    a busy one is mirrored incompletely. Better the honest total."""
+    store = Store(tmp_path / "g.db")
+    store.save_repo(_repo_row("chonkstep", open_issues=77))
+    for i in range(3):
+        store.save_item(_item_row(i, kind="issue", repo="someone/chonkstep", id=f"someone/chonkstep#{i}"))
+
+    answer = await Tool(store, None, ["someone"]).call("github_repos", {"user": "someone"})
+    assert "77 open issues+PRs" in answer
+    assert "3 issues" not in answer
+    store.close()
+
+
+async def test_a_repo_with_only_issues_does_not_mention_pull_requests(tmp_path):
+    store = Store(tmp_path / "g.db")
+    store.save_repo(_repo_row("quiet", open_issues=2))
+    for i in range(2):
+        store.save_item(_item_row(i, kind="issue", repo="someone/quiet", id=f"someone/quiet#{i}"))
+    answer = await Tool(store, None, ["someone"]).call("github_repos", {"user": "someone"})
+    assert "2 issues open" in answer and "PR" not in answer
+    store.close()

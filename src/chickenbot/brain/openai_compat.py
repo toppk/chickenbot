@@ -117,7 +117,7 @@ class OpenAICompatProvider:
 
         text = (message.get("content") or "").strip()
         if not text:
-            raise ProviderError("empty response")
+            raise ProviderError("the model came back with nothing")
         return text
 
     async def _post(self, body: dict) -> dict:
