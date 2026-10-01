@@ -210,18 +210,31 @@ def compose(h: Handler, ctx: Context, scrollback: str, *, following: bool = Fals
     return system, f"{head}\n\n{ctx.args}"
 
 
-def is_silence(answer: str) -> bool:
-    """Whether the model declined, however it spelled it.
+PAIRS = {"(": ")", "[": "]"}
 
-    A line wrapped whole in brackets is an aside -- stage direction, not
-    speech -- and "(no reply: the line is addressed to chrisk)" is the bot
-    narrating its own turn, which is the thing being declined, not a message
-    to pass on.
+
+def is_silence(answer: str) -> tuple[bool, str]:
+    """Whether the model declined, and whether it said so properly.
+
+    The token is one known string, so reading it through the decoration a
+    model puts on things -- quotes, asterisks, a full stop -- is a tolerant
+    parse of a protocol we defined, not a guess at meaning.
+
+    The second test is a guess, and is marked as one. A line wrapped whole in
+    matching brackets is an aside: "(no reply -- the line is addressed to
+    chrisk)" is the bot narrating its own turn, which is exactly what it was
+    told not to do. Dropping it is better than saying it, but it is a
+    judgement about prose and it can be wrong -- an answer that is genuinely
+    one parenthesis, "(bcde73e)", would be swallowed. So it is reported
+    separately and logged with the text, because a rule like this earns its
+    place by being watched, not by being quietly right.
     """
     said = answer.strip()
-    if len(said) > 1 and said[0] in "([" and said[-1] in ")]":
-        return True
-    return said.strip("*_\"'").rstrip(".").strip() == SILENT
+    if said.strip("*_\"'").rstrip(".").strip() == SILENT:
+        return True, "silent"
+    if len(said) > 1 and PAIRS.get(said[0]) == said[-1]:
+        return True, "silent-aside"
+    return False, ""
 
 
 def addressed_to_somebody(ctx: Context, answer: str) -> bool:
@@ -941,12 +954,14 @@ async def cmd_ask(h: Handler, ctx: Context, *, following: bool = False) -> None:
         note(outcome="llm-error", error=str(exc)[:60])
         ctx.say(f"{ctx.nick}: {exc}")
         return
-    if is_silence(answer):
-        # Silence, whichever way it was reached. Only a followed conversation
-        # is *invited* to decline, but being named in passing -- someone asking
-        # a third party about it -- is exactly when it might anyway, and the
-        # word itself must never reach the room.
-        note(outcome="silent")
+    quiet, how = is_silence(answer)
+    if quiet:
+        # Silence, whichever way it was reached. The word itself must never
+        # reach the room; an aside is a failure to use it, so it is said out
+        # loud here where it can be counted, rather than only dropped.
+        note(outcome=how)
+        if how != "silent":
+            log.warning("dropped an aside rather than saying it: %r", answer.strip()[:160])
         if following:
             h.attention.note_silence(f"{ctx.transport.realm}/{ctx.channel}")
         return

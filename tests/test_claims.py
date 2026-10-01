@@ -176,29 +176,37 @@ def test_its_own_version_is_in_the_context_it_is_given(cfg, store, transport):
 # -- declining out loud ---------------------------------------------------
 
 
-def test_an_aside_is_not_a_message():
-    """It said "(no reply - the line is addressed to chrisk, and it is the
-    same request I already answered)" into #lobby. A line wrapped whole in
-    brackets is stage direction, and a bot has no business emitting it."""
+def test_an_aside_is_dropped_but_reported_apart():
+    """It said "(no reply - the line is addressed to chrisk)" into #lobby.
+    Dropping it is a judgement about prose, so it is counted separately from
+    the model using the token properly -- a rule like this earns its place by
+    being watched."""
     from chickenbot.commands import is_silence
 
-    assert is_silence("(no reply — the line is addressed to chrisk)")
-    assert is_silence("[nothing needed here]")
+    assert is_silence("(no reply — the line is addressed to chrisk)") == (True, "silent-aside")
+    assert is_silence("[nothing needed here]") == (True, "silent-aside")
 
 
 def test_the_token_is_taken_however_it_is_dressed():
+    """A tolerant parse of one known string, not a guess at meaning."""
     from chickenbot.commands import is_silence
 
-    for said in ("<silent>", " <silent> ", "<silent>.", "*<silent>*", '"<silent>"', "(<silent>)"):
-        assert is_silence(said), said
+    for said in ("<silent>", " <silent> ", "<silent>.", "*<silent>*", '"<silent>"'):
+        assert is_silence(said) == (True, "silent"), said
+
+
+def test_mismatched_brackets_are_not_an_aside():
+    from chickenbot.commands import is_silence
+
+    assert is_silence("(half an aside]") == (False, "")
 
 
 def test_an_ordinary_reply_is_not_silence():
     from chickenbot.commands import is_silence
 
-    assert not is_silence("toppk: (as I said) the topic is yours")
-    assert not is_silence("no")
-    assert not is_silence("biff: 0.2.1 (twenty-two commits past it)")
+    assert is_silence("toppk: (as I said) the topic is yours") == (False, "")
+    assert is_silence("no") == (False, "")
+    assert is_silence("biff: 0.2.1 (twenty-two commits past it)") == (False, "")
 
 
 async def test_a_declined_direct_line_says_nothing_at_all(cfg, store):
