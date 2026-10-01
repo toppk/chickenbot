@@ -352,3 +352,28 @@ async def test_what_a_bot_says_is_logged_either_way(handler, store):
     tr = FakeTransport()
     await handler.dispatch(tr.envelope("a remark", sender="eggbot", account="eggbot"))
     assert (await store.recent("fake", "#chan"))[-1].text == "a remark"
+
+
+async def test_a_bot_that_is_answered_is_logged_once(cfg, store):
+    """Logged on the ignore path and again on the normal one, everything a
+    bot said appeared twice -- and it accused eggbot of repeating itself."""
+    from .test_commands import StubProvider
+
+    cfg.bots = "addressed"
+    h = Handler(cfg, store, StubProvider("ok"), None)
+    store.mark_bot("fake", "eggbot")
+    tr = FakeTransport()
+    await h.dispatch(tr.envelope("chickenbot: hello", sender="eggbot", account="eggbot"))
+    await h.drain()
+    said = [line for line in store.conversation("fake", "#chan") if line[1] == "eggbot"]
+    assert len(said) == 1
+    assert said[0][3] == "bot"  # and still marked as one
+
+
+async def test_an_ignored_bot_is_logged_once_too(handler, store):
+    tr = FakeTransport()
+    store.mark_bot("fake", "eggbot")
+    await handler.dispatch(tr.envelope("a remark", sender="eggbot", account="eggbot"))
+    await handler.drain()
+    said = [line for line in store.conversation("fake", "#chan") if line[1] == "eggbot"]
+    assert len(said) == 1 and said[0][3] == "bot"

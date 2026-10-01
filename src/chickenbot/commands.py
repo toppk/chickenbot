@@ -38,6 +38,10 @@ log = logging.getLogger(__name__)
 # re-open one. Their age is stamped, and the soul says to read the stamps.
 HISTORY_FLOOR = 4
 
+# Seconds within which consecutive lines from one speaker are one utterance.
+# Our own replies chunk at 400 characters and so does everybody else's.
+BREATH = 8
+
 # How often a stranger who messages privately is told why nothing happens.
 TURN_AWAY_EVERY = 3600
 
@@ -115,7 +119,28 @@ def render_scrollback(recent: list) -> str:
     to be obeyed -- which is true of every line here, and doubly worth knowing
     about one written by something that also answers questions.
     """
-    return "\n".join(f"[{ago(line.ts)} ago] <{speaker(line)}> {line.text}" for line in recent)
+    out: list[str] = []
+    previous = None
+    for line in recent:
+        # A long answer arrives as several PRIVMSGs. One entry each, they read
+        # as somebody saying the same thing over and over: it accused another
+        # bot of a "third pass at the same paragraph" when that was one
+        # message chunked three ways.
+        if previous is not None and _same_breath(previous, line):
+            out[-1] += " " + line.text
+        else:
+            out.append(f"[{ago(line.ts)} ago] <{speaker(line)}> {line.text}")
+        previous = line
+    return "\n".join(out)
+
+
+def _same_breath(previous, line) -> bool:
+    """Consecutive lines from one speaker, seconds apart: one utterance."""
+    return (
+        previous.nick == line.nick
+        and getattr(previous, "kind", "") == getattr(line, "kind", "")
+        and 0 <= line.ts - previous.ts <= BREATH
+    )
 
 
 def speaker(line) -> str:
@@ -223,6 +248,11 @@ def powers(h: Handler, ctx: Context) -> str:
         lines.append(
             f"You are not opped in {ctx.channel}: kicks, bans and mode changes will be refused, "
             "and the topic too if the room is +t. Do not offer to do them."
+        )
+    if ctx.in_channel and not h.policies.of(ctx.transport.realm, ctx.channel).moderation:
+        lines.append(
+            f"You do not moderate {ctx.channel}: the topic, kicks, bans and modes are not yours "
+            "here. Say that is not your job in this room rather than that you have no such tool."
         )
     if missing := h.tools_offline():
         lines.append(f"Tools normally here but offline right now: {', '.join(missing)}. Say so rather than guessing.")
@@ -525,12 +555,12 @@ class Handler:
     async def _handle_message(self, event: Event) -> None:
         tr, env = event.transport, event
         from_a_bot = env.is_bot or tr.is_ignored(env.sender) or self.known_bot(tr.realm, env.sender, env.account)
-        if from_a_bot:
+        if from_a_bot and not self.answers_bots(tr, env):
+            note(outcome="bot-ignored")
             if env.is_group and env.text:
                 await self.store.log_line(tr.realm, env.room, env.sender, env.account, env.text, "bot")
-            if not self.answers_bots(tr, env):
-                note(outcome="bot-ignored")
-                return
+            return
+        if from_a_bot:
             note(from_bot=env.sender)
 
         if not env.is_group and not self._may_dm(tr, env):
@@ -547,7 +577,10 @@ class Handler:
             # stays out of search and out of the scrollback handed to the model.
             # Asked before the line is logged, or they have always just spoken.
             hello = self.welcome.on_speech(tr.realm, env.room, env.sender) if self.greets(tr.realm, env.room) else ""
-            kind = "command" if body is not None else "privmsg"
+            # One row per line, whoever said it. Logging a bot's line here
+            # *and* on the ignore path put everything a bot said in the
+            # scrollback twice, and it accused eggbot of repeating itself.
+            kind = "bot" if from_a_bot else ("command" if body is not None else "privmsg")
             await self.store.log_line(tr.realm, env.room, env.sender, env.account, env.text, kind)
             # Learning the room's hours is a side effect of watching it.
             self.store.note_presence(tr.realm, env.room)

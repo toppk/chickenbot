@@ -227,3 +227,42 @@ async def test_silence_in_a_followed_conversation_still_counts(cfg, store):
     h = Handler(cfg, store, StubProvider(SILENT), None)
     await h.dispatch(tr.envelope("chickenbot: hello"))
     assert tr.sent == []
+
+
+# -- one message, several lines -----------------------------------------
+
+
+async def test_a_chunked_message_reads_as_one(cfg, store):
+    """Our replies chunk at 400 characters and so does everybody else's. One
+    entry per line, it accused another bot of a "third pass at the same
+    paragraph" over a message split three ways."""
+    from chickenbot.commands import render_scrollback
+
+    for part in ("the spec is simple:", "server sends BOT=B,", "client sets MODE +B"):
+        await store.log_line("fake", "#chan", "eggbot", "", part, "bot")
+    rendered = render_scrollback(await store.recent("fake", "#chan"))
+    assert rendered.count("<eggbot") == 1
+    assert "client sets MODE +B" in rendered
+
+
+async def test_two_people_are_not_run_together(cfg, store):
+    from chickenbot.commands import render_scrollback
+
+    await store.log_line("fake", "#chan", "nate", "nate", "hello", "privmsg")
+    await store.log_line("fake", "#chan", "chrisk", "chrisk", "hi", "privmsg")
+    assert render_scrollback(await store.recent("fake", "#chan")).count("[") == 2
+
+
+async def test_a_later_remark_is_its_own_utterance(cfg, store):
+    import time as clock
+
+    from chickenbot.commands import BREATH, render_scrollback
+
+    store._db.execute(
+        "INSERT INTO chatlog (ts, realm, channel, nick, nick_key, account, kind, text)"
+        " VALUES (?, 'fake', '#chan', 'nate', 'nate', 'nate', 'privmsg', 'first')",
+        (int(clock.time()) - BREATH - 60,),
+    )
+    store._db.commit()
+    await store.log_line("fake", "#chan", "nate", "nate", "second", "privmsg")
+    assert render_scrollback(await store.recent("fake", "#chan")).count("<nate>") == 2

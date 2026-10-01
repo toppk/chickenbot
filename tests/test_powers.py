@@ -115,3 +115,22 @@ def test_it_knows_what_it_is_running_on(cfg, store):
 def test_with_no_model_configured_it_says_none(handler):
     _system, prompt = compose(handler, ctx(handler, FakeTransport()), scrollback="")
     assert "model=none" in prompt
+
+
+def test_a_room_it_does_not_police_is_told_so(cfg, store):
+    """Asked to set the topic it said it had no tool for it; the tool exists
+    and is hidden because the room is not one it moderates."""
+    h = Handler(cfg, store, None, None)
+    c = ctx(h, FakeTransport())
+    c.channel = "#public"  # not declared, so `public`: no moderation
+    _system, prompt = compose(h, c, scrollback="")
+    assert "You do not moderate #public" in prompt
+    assert "rather than that you have no such tool" in prompt
+
+
+def test_the_partyline_carries_no_such_line(cfg, store):
+    from .conftest import TEST_ROOMS  # noqa: F401
+
+    h = Handler(cfg, store, None, None)
+    _system, prompt = compose(h, ctx(h, FakeTransport()), scrollback="")
+    assert "do not moderate" not in prompt
