@@ -164,6 +164,14 @@ chickenbot -c <config> bot irc:irc.chonkbase.net eggbot        # mark one
 chickenbot -c <config> bot irc:irc.chonkbase.net eggbot --forget
 ```
 
+`.tune bots ignore|addressed|all` says whether to answer one at all, and two
+further knobs keep an answer from becoming a rally: `.tune bot_gap_seconds`
+(quiet owed to one bot between answers, default 180) and `.tune bot_replies`
+(per room per hour, default 3). A bot also never opens a conversation, so
+answering one does not leave the room followed. Expect to want all of this
+when the other bot is also a chickenbot: it has the same manners and will
+return every volley you send.
+
 IRCv3 bot mode and the platform flags are honoured automatically; this is for
 the ones that do not flag themselves. Whether chickenbot flags *itself* is
 `.botmode on|off` in the partyline, or `irc.bot_mode` in the toml — a user

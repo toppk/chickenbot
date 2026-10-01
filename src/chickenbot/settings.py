@@ -29,6 +29,8 @@ SETTABLE = (
     "prefix",
     "direct",
     "bots",
+    "bot_replies",
+    "bot_gap_seconds",
     "chatlog_days",
     "llm.enabled",
     "llm.model",

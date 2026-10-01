@@ -260,6 +260,12 @@ class Config:
     # name, or treat them as people. `bot_mode` is about the flag this bot
     # sets on itself and has nothing to do with this.
     bots: str = "ignore"
+    # Replies to other bots: per room per hour, and the quiet owed to one bot
+    # between answers. Two machines with the same manners will keep a volley
+    # going as long as either is allowed to return it, so the limit has to be
+    # low enough that one exchange is an exchange rather than a rally.
+    bot_replies: int = 3
+    bot_gap_seconds: float = 180.0
     irc: IRCConfig = field(default_factory=IRCConfig)
     signal: SignalConfig = field(default_factory=SignalConfig)
     discord: DiscordConfig = field(default_factory=DiscordConfig)

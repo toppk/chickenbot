@@ -333,18 +333,46 @@ async def test_addressed_still_ignores_a_bot_talking_to_the_room(cfg, store):
 
 async def test_two_bots_cannot_talk_forever(cfg, store):
     """A loop with a budget: where it stops."""
-    from chickenbot.commands import BOT_REPLIES
-
     from .test_commands import StubProvider
 
     cfg.bots = "addressed"
+    cfg.bot_gap_seconds = 0  # the per-bot quiet spell is tested on its own
     cfg.llm.follow = False  # each line answered outright; batching is tested apart
     h = Handler(cfg, store, StubProvider("and you"), None)
     store.mark_bot("fake", "eggbot")
     tr = FakeTransport()
-    for _ in range(BOT_REPLIES + 3):
+    for _ in range(cfg.bot_replies + 3):
         await h.dispatch(tr.envelope("chickenbot: again", sender="eggbot", account="eggbot"))
-    assert len(tr.sent) == BOT_REPLIES
+    assert len(tr.sent) == cfg.bot_replies
+
+
+async def test_one_answer_then_a_quiet_spell(cfg, store):
+    """The volley stopper: biff gets an answer, not a rally."""
+    from .test_commands import StubProvider
+
+    cfg.bots = "all"
+    cfg.llm.follow = False
+    h = Handler(cfg, store, StubProvider("and you"), None)
+    store.mark_bot("fake", "biff")
+    tr = FakeTransport()
+    for _ in range(4):
+        await h.dispatch(tr.envelope("chickenbot: again", sender="biff", account="biff"))
+    assert len(tr.sent) == 1
+
+
+async def test_a_bot_does_not_draw_us_into_following(cfg, store):
+    """Answering biff once must not leave the room engaged, or every line
+    after it -- from anyone -- arrives mid-conversation."""
+    from .test_commands import StubProvider
+
+    cfg.bots = "all"
+    cfg.llm.follow = True
+    h = Handler(cfg, store, StubProvider("sure"), None)
+    store.mark_bot("fake", "biff")
+    tr = FakeTransport()
+    await h.dispatch(tr.envelope("chickenbot: again", sender="biff", account="biff"))
+    await h.drain()
+    assert not h.attention.engaged("fake/#chan")
 
 
 async def test_what_a_bot_says_is_logged_either_way(handler, store):
