@@ -46,7 +46,7 @@ when it said merely `irc`.
 `Transport.name` still exists and still means the kind of transport. It is what
 capability gating and tool availability use; identity uses `realm`.
 
-Editing is `chickenbot soul` and `chickenbot who`, which read and write the
+Editing is `chickenbot soul` and `chickenbot dossier`, which read and write the
 database without a running bot. Both are **versioned**: every change appends to
 a `revision` table with an author, so the previous wording is recoverable. That
 matters more once the bot writes dossiers itself — an extraction that goes

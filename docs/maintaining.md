@@ -77,7 +77,7 @@ the same as having something to say about them.
 `--forget` drops the person entirely. Neither can remove somebody's last
 handle, which would leave a record nothing answers to.
 
-Both halves are visible from the partyline with `.who <nick>`, which also
+Both halves are visible from the partyline with `.dossier <nick>`, which also
 writes the trusted half. `chickenbot remember <realm>/#room --days 7` reads
 past days and files what they said about people, for a room the bot sat in
 before it kept notes.
@@ -188,13 +188,13 @@ itself, so no amount of ops lets chickenbot set it for somebody else.
 
 The watch list is the *mirror*: the people it polls, caches and can answer
 about deeply and cheaply. It comes from the identities linked to a GitHub
-handle, so `who … --alias github/x` adds somebody to it and `--unlink` removes
+handle, so `dossier … --alias github/x` adds somebody to it and `--unlink` removes
 them. It is not a list of who may be asked about — `ext_github_lookup` answers
 for anybody, live, and stores nothing.
 
 ## Day-to-day, in the partyline
 
 Most of the above has a chat equivalent for an owner, in the room configured
-as the partyline: `.vibe`, `.activity`, `.spend`, `.tune`, `.bot`, `.dump`.
+as the partyline: `.vibe`, `.dossier`, `.activity`, `.spend`, `.tune`, `.bot`, `.dump`.
 The command line is for what the bot cannot do to itself — the soul, person
 dossiers, clearing a bad reading — and for when it is not running.

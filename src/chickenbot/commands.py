@@ -11,7 +11,7 @@ from collections import defaultdict, deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
-from .attention import FOLLOW_NOTE, SILENT, Attention
+from .attention import FOLLOW_NOTE, OVERHEARD, SILENT, TO_YOU, Attention, addressed_elsewhere
 from .brain import Provider, ProviderError
 from .config import Config
 from .dossier import Dossiers
@@ -256,8 +256,8 @@ def powers(h: Handler, ctx: Context) -> str:
     return "<powers>\n" + "\n".join(lines) + "\n</powers>" if lines else ""
 
 
-def _is_for_somebody_else(tr: Transport, room: str, text: str) -> bool:
-    """Whether the line opens by addressing another person in the room.
+def _addressee(tr: Transport, room: str, text: str) -> str:
+    """Who the line opens by addressing, if it is somebody else in the room.
 
     Checked against the roster rather than any `word:` -- a line beginning
     `https://github.com/...` would otherwise read as addressing `https`.
@@ -265,30 +265,10 @@ def _is_for_somebody_else(tr: Transport, room: str, text: str) -> bool:
     head, sep, _rest = text.partition(":")
     head = head.strip()
     if not sep or not head or " " in head:
-        return False
-    here = {tr.fold(nick) for nick, _account, _modes in getattr(tr, "roster", lambda _r: [])(room)}
-    return tr.fold(head) in here - {tr.fold(tr.me)}
-
-
-# Words English puts after a verb and no command takes as its first argument.
-# Several command names are ordinary words -- who, seen, help, history, jobs --
-# and "chickenbot: who is biff?" was being answered as `.who is`, which is the
-# same trap that got `.set` renamed to `.tune`.
-_PROSE = (
-    "a an the is are was were am be been do does did can could will would should "
-    "you your my me i we us it its that this these those there here of to in on at "
-    "for from about with has have had not no yes"
-)
-PROSE = frozenset(_PROSE.split())
-
-
-def reads_as_english(body: str) -> bool:
-    """Whether a command word at the start of an unprefixed line is prose."""
-    _name, _, rest = body.partition(" ")
-    rest = rest.strip()
-    if not rest:
-        return False
-    return rest.endswith("?") or rest.partition(" ")[0].strip(",'\"").lower() in PROSE
+        return ""
+    here = {tr.fold(nick): nick for nick, _account, _modes in getattr(tr, "roster", lambda _r: [])(room)}
+    here.pop(tr.fold(tr.me), None)
+    return here.get(tr.fold(head), "")
 
 
 def names(line: str, word: str) -> bool:
@@ -523,16 +503,24 @@ class Handler:
             log.exception("command %s failed", cmd.name)
             ctx.say(f"{ctx.nick}: that broke, sorry")
 
-    async def _follow_up(self, key: str, held: list[tuple[str, str, str, bool]]) -> None:
+    async def _follow_up(self, key: str, held: list[tuple[str, str, str, str]]) -> None:
         """A pause in a conversation we are part of. Ask once; it may decline,
         unless somebody actually put a question to it."""
         spot = self._rooms.get(key)
         if spot is None or self.provider is None:
             return
         tr, room = spot
-        asked = [line for line in held if line[3]]
+        asked = [line for line in held if line[3] == TO_YOU]
+        # Everything in the burst was addressed to other people. The room is
+        # busy, it is just not busy with us -- and that is settled here rather
+        # than by asking a model to notice and decline.
+        if all(addressed_elsewhere(line[3]) for line in held):
+            with activity(kind="follow", realm=tr.realm, room=room, nick=held[-1][0], account=held[-1][1] or "-"):
+                note(held=len(held), claim=held[-1][3], outcome="not-ours")
+            self.attention.note_silence(key)
+            return
         nick, account = (asked[-1][0], asked[-1][1]) if asked else (held[-1][0], held[-1][1])
-        lines = "\n".join(f"<{who}> {what}" for who, _acct, what, _to_me in held)
+        lines = "\n".join(f"<{claim}> {who}: {what}" for who, _acct, what, claim in held)
         ctx = Context(
             handler=self,
             transport=tr,
@@ -544,7 +532,7 @@ class Handler:
             in_channel=True,
         )
         with activity(kind="follow", realm=tr.realm, room=room, nick=nick, account=account or "-"):
-            note(asked=len(asked), held=len(held))
+            note(asked=len(asked), held=len(held), claim=",".join(sorted({line[3] for line in held})))
             # Silence is for a conversation it was merely party to. A question
             # put to it directly gets an answer.
             await cmd_ask(self, ctx, following=not asked)
@@ -624,19 +612,17 @@ class Handler:
                 # joining it is joining the same one. Held without `addressed`,
                 # because nobody named it in this line -- so it may still
                 # decide the exchange does not need anything from it.
-                note(outcome="following")
-                self.attention.hold(key, env.sender, env.account, env.text)
+                # Marked with whose business it is, so a line opening
+                # `eggbot:` is context rather than a question to answer.
+                target = _addressee(tr, env.room, env.text)
+                claim = f"to {target}" if target else OVERHEARD
+                note(outcome="following", claim=claim)
+                self.attention.hold(key, env.sender, env.account, env.text, claim)
                 return
             note(outcome="chat")
             return
 
         cmd = COMMANDS.get(name.lower().removeprefix(self.cfg.prefix))
-        # Spelled with the prefix it is a command, whatever it looks like.
-        # Addressed by name alone, a sentence is a sentence.
-        spelled = name.startswith(self.cfg.prefix) or env.text.startswith(self.cfg.prefix)
-        if cmd is not None and not spelled and reads_as_english(body):
-            note(prose=name)
-            cmd = None
         ctx = self._context(event, args.strip())
         # Asked before engaging, because engaging is what makes it true.
         mid_conversation = self.cfg.llm.follow and env.is_group and self.attention.engaged(key)
@@ -655,7 +641,7 @@ class Handler:
                     # are one exchange, and deserve one answer rather than a
                     # reply apiece.
                     note(outcome="holding")
-                    self.attention.hold(key, env.sender, env.account, body, addressed=True)
+                    self.attention.hold(key, env.sender, env.account, body, TO_YOU)
                     return
                 ctx.args = body
                 note(command="ask", owner=ctx.is_owner)
@@ -706,7 +692,7 @@ class Handler:
         # else's name and a colon at the start of a line is how IRC says who
         # is being spoken to, and being mentioned inside it is being talked
         # about, not talked to.
-        if in_group and _is_for_somebody_else(tr, room, text):
+        if in_group and _addressee(tr, room, text):
             return None
         # Named later in the line is still being named: "hi chick" and "hello
         # chickenbot, do you know biff" are how people actually address
@@ -1108,14 +1094,17 @@ async def cmd_bot(h: Handler, ctx: Context) -> None:
     )
 
 
-@command("who", owner=True, tier=ALL, usage="who <nick> [notes]", blurb="what i know about somebody")
-async def cmd_who(h: Handler, ctx: Context) -> None:
+# Not `.who`: "chickenbot: who is biff?" ran it and reported nothing on a
+# person called "is". A command whose name can open a question will be invoked
+# by people asking one, and `.set` was renamed to `.tune` for the same reason.
+@command("dossier", owner=True, tier=ALL, usage="dossier <nick> [notes]", blurb="what i know about somebody")
+async def cmd_dossier(h: Handler, ctx: Context) -> None:
     """Both halves, marked. What owners wrote is trusted; what the bot noticed
     by reading the day back is not, and saying which is which is the point."""
     realm = ctx.transport.realm
     handle, _, notes = ctx.args.partition(" ")
     if not handle:
-        ctx.say(f"usage: {h.cfg.prefix}who <nick> [notes]")
+        ctx.say(f"usage: {h.cfg.prefix}dossier <nick> [notes]")
         return
 
     found = h.store.whois(handle) or ([pid] if (pid := h.store.person_id(realm, handle)) else [])

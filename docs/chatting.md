@@ -56,9 +56,9 @@ anything it was not in the room for.
 Prefix them the way `.help` tells you — `.seen nate` in the admin room,
 `chickenbot: seen nate` elsewhere.
 
-A command word in the middle of a sentence is a sentence: "chickenbot: who is
-biff?" is a question and gets answered as one, where `.who biff` looks up the
-notes. Put the prefix on it when you mean the command.
+No command is named after a word that can open a question, so "chickenbot: who
+is biff?" is a question and is answered as one. What it knows about a person is
+`.dossier biff`.
 
 | | |
 |---|---|

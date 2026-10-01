@@ -21,8 +21,24 @@ from dataclasses import dataclass, field
 log = logging.getLogger(__name__)
 
 SILENT = "<silent>"
+
+# What claim a held line has on the bot. Not a guess about meaning: "to you"
+# is a wake word, "to <nick>" is an IRC address prefix checked against the
+# roster, and "overheard" is what is left. A line can be in the room's
+# conversation without being any of the bot's business.
+TO_YOU = "to you"
+OVERHEARD = "overheard"
+
+
+def addressed_elsewhere(claim: str) -> bool:
+    return claim not in (TO_YOU, OVERHEARD)
+
+
 FOLLOW_NOTE = (
     " You are following a conversation you were drawn into rather than being asked a direct question. "
+    "Each line is marked with its claim on you: `to you` named you, `overheard` named nobody, and "
+    "`to <nick>` was addressed to somebody else and is none of your business -- read it for context and "
+    "do not answer it. "
     f"If the latest messages do not need anything from you, reply with exactly {SILENT} and nothing else. "
     "Prefer silence over filler: do not acknowledge, agree, or comment merely to be present."
 )
@@ -38,14 +54,14 @@ class Engagement:
     # talking to it, and replacing the name left whoever spoke first being
     # ignored mid-conversation.
     who: set[str] = field(default_factory=set)
-    pending: list[tuple[str, str, str, bool]] = field(default_factory=list)  # nick, account, text, addressed
+    pending: list[tuple[str, str, str, str]] = field(default_factory=list)  # nick, account, text, claim
     silences: int = 0
     timer: asyncio.Task | None = None
 
-    def add(self, nick: str, account: str, text: str, addressed: bool = False) -> None:
-        self.pending.append((nick, account, text, addressed))
+    def add(self, nick: str, account: str, text: str, claim: str = OVERHEARD) -> None:
+        self.pending.append((nick, account, text, claim))
 
-    def take(self) -> list[tuple[str, str, str, bool]]:
+    def take(self) -> list[tuple[str, str, str, str]]:
         held, self.pending = self.pending, []
         return held
 
@@ -57,7 +73,7 @@ class Attention:
         follow_seconds: int = 60,
         pause_seconds: float = 5.0,
         max_silences: int = 3,
-        on_ready: Callable[[str, list[tuple[str, str, str, bool]]], Awaitable[None]] | None = None,
+        on_ready: Callable[[str, list[tuple[str, str, str, str]]], Awaitable[None]] | None = None,
     ) -> None:
         self.follow_seconds = follow_seconds
         self.pause_seconds = pause_seconds
@@ -111,17 +127,18 @@ class Attention:
 
     # -- buffering ---------------------------------------------------------
 
-    def hold(self, key: str, nick: str, account: str, text: str, addressed: bool = False) -> None:
+    def hold(self, key: str, nick: str, account: str, text: str, claim: str = OVERHEARD) -> None:
         """Keep the line and wait for a pause before deciding anything.
 
-        `addressed` marks a question put to the bot directly. A burst of those
-        is a press conference: the answer is one considered reply to the lot,
-        not one reply per shout.
+        `claim` is how much of the bot's business this line is. A burst of
+        questions put to it directly is a press conference: the answer is one
+        considered reply to the lot, not one reply per shout. A line opening
+        `eggbot:` is in the room but not in the conversation.
         """
         spot = self.rooms.get(key)
         if spot is None:
             return
-        spot.add(nick, account, text, addressed)
+        spot.add(nick, account, text, claim)
         if spot.timer is not None:
             spot.timer.cancel()
         spot.timer = asyncio.create_task(self._wait_then_fire(key))

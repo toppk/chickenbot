@@ -184,7 +184,7 @@ async def test_who_shows_both_halves_marked(bar, store):
         is_owner=True,
         in_channel=True,
     )
-    await COMMANDS["who"].run(h, c)
+    await COMMANDS["dossier"].run(h, c)
     said = " ".join(text for _room, text in tr.sent)
     assert "noted: runs the server" in said
     assert "noticed: release engineering alone" in said
@@ -205,7 +205,7 @@ async def test_who_can_write_the_trusted_half(bar, store):
         is_owner=True,
         in_channel=True,
     )
-    await COMMANDS["who"].run(h, c)
+    await COMMANDS["dossier"].run(h, c)
     assert "maintains chonkline" in store.person("fake", "chrisk")
 
 
@@ -223,11 +223,11 @@ async def test_who_says_when_it_has_nothing(bar, store):
         is_owner=True,
         in_channel=True,
     )
-    await COMMANDS["who"].run(h, c)
+    await COMMANDS["dossier"].run(h, c)
     assert "nothing on stranger" in tr.sent[-1][1]
 
 
 def test_who_is_partyline_work():
     from chickenbot.commands import COMMANDS
 
-    assert COMMANDS["who"].owner is True and COMMANDS["who"].tier == "all"
+    assert COMMANDS["dossier"].owner is True and COMMANDS["dossier"].tier == "all"

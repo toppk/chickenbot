@@ -110,9 +110,9 @@ def test_the_heading_shows_every_name(store):
 def test_nicknames_are_searchable_from_the_cli(tmp_path):
     from .test_dossier import cli
 
-    cli(tmp_path, "who", "irc:host", "chrisk", "runs the server")
-    cli(tmp_path, "who", "irc:host", "chrisk", "--alias", "nick/chris")
-    out = cli(tmp_path, "who", "chris")[1]
+    cli(tmp_path, "dossier", "irc:host", "chrisk", "runs the server")
+    cli(tmp_path, "dossier", "irc:host", "chrisk", "--alias", "nick/chris")
+    out = cli(tmp_path, "dossier", "chris")[1]
     assert "runs the server" in out and "nick/chris" in out
 
 

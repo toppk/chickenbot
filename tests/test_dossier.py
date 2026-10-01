@@ -136,44 +136,44 @@ def cli(tmp_path, *args) -> tuple[int, str]:
 
 
 def test_who_lists_nobody_at_first(tmp_path):
-    code, out = cli(tmp_path, "who")
+    code, out = cli(tmp_path, "dossier")
     assert code == 0 and "nobody yet" in out
 
 
 def test_who_round_trips_a_person(tmp_path):
-    assert cli(tmp_path, "who", "irc.chonkbase.net", "chrisk", "GitHub: iconidentify")[0] == 0
-    assert "iconidentify" in cli(tmp_path, "who", "irc.chonkbase.net", "chrisk")[1]
-    assert "irc.chonkbase.net/chrisk" in cli(tmp_path, "who")[1]
+    assert cli(tmp_path, "dossier", "irc.chonkbase.net", "chrisk", "GitHub: iconidentify")[0] == 0
+    assert "iconidentify" in cli(tmp_path, "dossier", "irc.chonkbase.net", "chrisk")[1]
+    assert "irc.chonkbase.net/chrisk" in cli(tmp_path, "dossier")[1]
 
 
 def test_who_links_handles_and_finds_either(tmp_path):
-    cli(tmp_path, "who", "irc:host", "chrisk", "runs the server")
-    assert cli(tmp_path, "who", "irc:host", "chrisk", "--alias", "github/iconidentify")[0] == 0
+    cli(tmp_path, "dossier", "irc:host", "chrisk", "runs the server")
+    assert cli(tmp_path, "dossier", "irc:host", "chrisk", "--alias", "github/iconidentify")[0] == 0
     for handle in ("chrisk", "iconidentify"):
-        out = cli(tmp_path, "who", handle)[1]
+        out = cli(tmp_path, "dossier", handle)[1]
         assert "runs the server" in out
         assert "github/iconidentify" in out and "irc:host/chrisk" in out
 
 
 def test_linking_to_an_unknown_person_is_refused(tmp_path):
-    assert cli(tmp_path, "who", "irc:host", "nobody", "--alias", "github/x")[0] == 1
+    assert cli(tmp_path, "dossier", "irc:host", "nobody", "--alias", "github/x")[0] == 1
 
 
 def test_a_malformed_alias_is_refused(tmp_path):
-    cli(tmp_path, "who", "irc:host", "chrisk", "notes")
-    assert cli(tmp_path, "who", "irc:host", "chrisk", "--alias", "noslash")[0] == 1
+    cli(tmp_path, "dossier", "irc:host", "chrisk", "notes")
+    assert cli(tmp_path, "dossier", "irc:host", "chrisk", "--alias", "noslash")[0] == 1
 
 
 def test_who_can_forget(tmp_path):
-    cli(tmp_path, "who", "irc", "gone", "notes")
-    assert "forgotten" in cli(tmp_path, "who", "irc", "gone", "--forget")[1]
-    assert "nothing known" in cli(tmp_path, "who", "irc", "gone")[1]
+    cli(tmp_path, "dossier", "irc", "gone", "notes")
+    assert "forgotten" in cli(tmp_path, "dossier", "irc", "gone", "--forget")[1]
+    assert "nothing known" in cli(tmp_path, "dossier", "irc", "gone")[1]
 
 
 def test_who_needs_a_realm_with_an_account(tmp_path):
     # argparse fills realm first, so a bare account is a realm with no account:
     # listing that realm, which is the harmless reading.
-    assert cli(tmp_path, "who", "chrisk")[0] == 0
+    assert cli(tmp_path, "dossier", "chrisk")[0] == 0
 
 
 def test_soul_seeds_then_shows_then_sets(tmp_path):
@@ -254,18 +254,18 @@ def test_printing_an_old_revision_does_not_change_anything(tmp_path):
 
 def test_a_revision_of_something_else_is_refused(tmp_path):
     cli(tmp_path, "soul", "mine")
-    cli(tmp_path, "who", "irc", "someone", "theirs")
+    cli(tmp_path, "dossier", "irc", "someone", "theirs")
     code, _ = cli(tmp_path, "soul", "--revision", "99999")
     assert code == 1
 
 
 def test_a_person_can_be_rolled_back(tmp_path):
-    cli(tmp_path, "who", "irc", "chrisk", "gh: wrong")
-    cli(tmp_path, "who", "irc", "chrisk", "gh: iconidentify")
-    code, out = cli(tmp_path, "who", "irc", "chrisk", "--history")
+    cli(tmp_path, "dossier", "irc", "chrisk", "gh: wrong")
+    cli(tmp_path, "dossier", "irc", "chrisk", "gh: iconidentify")
+    code, out = cli(tmp_path, "dossier", "irc", "chrisk", "--history")
     first = int(out.strip().splitlines()[-1].split()[0])
-    cli(tmp_path, "who", "irc", "chrisk", "--restore", str(first))
-    assert "gh: wrong" in cli(tmp_path, "who", "irc", "chrisk")[1]
+    cli(tmp_path, "dossier", "irc", "chrisk", "--restore", str(first))
+    assert "gh: wrong" in cli(tmp_path, "dossier", "irc", "chrisk")[1]
 
 
 def test_the_old_two_column_table_migrates_to_aliases(tmp_path):

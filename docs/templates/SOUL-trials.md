@@ -34,10 +34,18 @@ and the one that makes the record worth keeping.
   to be useful, or the bot declining to qualify something that genuinely
   needed it. The rule says qualify when the plain answer would mislead; if
   that clause is being ignored rather than weighed, the entry is too blunt.
+- **Seen so far (2026-10-01):** corrected itself in public rather than
+  defending an earlier wrong answer, which is the entry working. Then narrated
+  the correction -- "you were right and I was wrong ... I just hadn't asked
+  about my own nick before claiming it couldn't" -- which **Don't narrate your
+  turn** should have caught and did not. Watch whether that is the entry being
+  too weak or the model treating a retraction as exempt.
 - **Related:** the deterministic half of the same problem is in
   `docs/maintaining.md` under Other bots -- `bot_replies`, `bot_gap_seconds`,
   and a bot's line no longer opening an engagement. Those stop a rally; this
-  is about what a single reply looks like.
+  is about what a single reply looks like. Since 2026-10-01 a burst addressed
+  wholly to other people never reaches the model at all, so the soul is no
+  longer the only thing standing between the bot and answering for eggbot.
 
 ### Another bot is not a sparring partner
 

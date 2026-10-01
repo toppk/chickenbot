@@ -802,7 +802,7 @@ def main(argv: list[str] | None = None) -> int:
 
     soul = versioned(sub.add_parser("soul", help="show, set or roll back the bot's voice"))
     soul.add_argument("text", nargs="?", help="new text, @file, or - for stdin; omit to show")
-    who = versioned(sub.add_parser("who", help="show, set or roll back what is known about a person"))
+    who = versioned(sub.add_parser("dossier", help="show, set or roll back what is known about a person"))
     who.add_argument("realm", nargs="?", help="e.g. irc.chonkbase.net; omit to list everyone")
     who.add_argument("account", nargs="?")
     who.add_argument("text", nargs="?", help="new notes, @file, or - for stdin; omit to show")
