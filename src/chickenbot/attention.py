@@ -105,6 +105,21 @@ class Attention:
         if who:
             spot.who.add(who)
 
+    def spoke(self, key: str) -> None:
+        """It answered here, so interest runs from its own last word.
+
+        Being named was the only thing that renewed an engagement, and the
+        clock kept running through the reply: it answered at 00:38:02 on a
+        window opened at 00:37:21, stopped listening at 00:38:21, and ignored
+        the next question at 00:38:59. Holding up one end of a conversation is
+        better evidence the conversation is live than anything else it has.
+        """
+        spot = self.rooms.get(key)
+        if spot is None:
+            return
+        spot.until = time.monotonic() + self.follow_seconds
+        spot.silences = 0
+
     def drawn_in_by(self, key: str) -> set[str]:
         spot = self.rooms.get(key)
         return spot.who if spot else set()

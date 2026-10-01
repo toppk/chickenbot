@@ -73,3 +73,43 @@ def test_the_model_is_told_which_lines_are_its_business():
     from chickenbot.attention import FOLLOW_NOTE
 
     assert "to you" in FOLLOW_NOTE and "none of your business" in FOLLOW_NOTE
+
+
+# -- how long it keeps listening -----------------------------------------
+
+
+async def test_answering_keeps_the_conversation_open(cfg, store):
+    """Asked at T, answered at T+40, asked again at T+70 -- and ignored,
+    because the window ran from the mention rather than from the reply."""
+    from .test_commands import StubProvider
+
+    cfg.llm.follow = True
+    cfg.llm.follow_seconds = 60
+    h = Handler(cfg, store, StubProvider("sure"), None)
+    h.attention.follow_seconds = 60
+    tr = FakeTransport(owners=("toppk",))
+    key = f"{tr.realm}/#chan"
+
+    await h.dispatch(tr.envelope("chickenbot: hello", sender="toppk", account="toppk"))
+    await h.drain()
+    opened = h.attention.rooms[key].until
+
+    await h.dispatch(tr.envelope("chickenbot: and another thing", sender="toppk", account="toppk"))
+    await h.drain()
+    assert h.attention.rooms[key].until > opened
+
+
+async def test_a_reply_clears_the_silence_streak(cfg, store):
+    """Three declines close the room. Two declines and an answer must not."""
+    from .test_commands import StubProvider
+
+    cfg.llm.follow = True
+    h = Handler(cfg, store, StubProvider("sure"), None)
+    tr = FakeTransport(owners=("toppk",))
+    key = f"{tr.realm}/#chan"
+    await h.dispatch(tr.envelope("chickenbot: hello", sender="toppk", account="toppk"))
+    await h.drain()
+    h.attention.rooms[key].silences = 2
+    await h.dispatch(tr.envelope("chickenbot: still there?", sender="toppk", account="toppk"))
+    await h.drain()
+    assert h.attention.rooms[key].silences == 0

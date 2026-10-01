@@ -907,6 +907,8 @@ async def cmd_ask(h: Handler, ctx: Context, *, following: bool = False) -> None:
     # the asker's name in front of that gives "toppk: biff: ...", which names
     # the wrong person first.
     ctx.say(answer if addressed_to_somebody(ctx, answer) else f"{ctx.nick}: {answer}")
+    if ctx.in_channel:
+        h.attention.spoke(f"{ctx.transport.realm}/{ctx.channel}")
 
 
 @command("watching", blurb="repos watched here")
