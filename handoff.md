@@ -655,6 +655,21 @@ Note that an owner in a direct message reaches the *whole* command set --
 room policies gate rooms, and a DM is not one. That is the point of the narrow
 default.
 
+## When nobody has vouched for the asker
+
+An unidentified speaker has no account, so nothing used to reach the prompt
+about them -- and the model, asked by `chrisk` about "my github", tried the
+nick as a login. There is a real GitHub user of that name; it reported a
+stranger's repositories as his, then retracted a true statement about
+`iconidentify/vkQuake` on the strength of the wrong account.
+
+So the file is now found by nick when there is no account, and marked: *this
+is the file for that nick, but they are not logged in to services, so it may
+not be them.* The `<context>` line says `asking=chrisk (not logged in to
+services)`. Nothing privileged rests on it -- owner checks read the account
+and only the account -- but knowing that `chrisk` here is `iconidentify`
+there is what stops a confident answer about somebody else.
+
 ## Identities, not nicks
 
 `identity.py`. A nick is a label somebody is using this minute; a services

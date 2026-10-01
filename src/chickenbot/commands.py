@@ -150,14 +150,17 @@ def compose(h: Handler, ctx: Context, scrollback: str, *, following: bool = Fals
     now = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime())
     situation = (
         f"<context>network={ctx.transport.name} room={ctx.channel} kind={where}"
-        f" asking={ctx.nick} you={'/'.join(h.wake_words(ctx.transport))}"
+        f" asking={ctx.nick}{'' if ctx.account else ' (not logged in to services)'}"
+        f" you={'/'.join(h.wake_words(ctx.transport))}"
         f" now={now} running_for={ago(int(h.started))} model={_model(h)}</context>"
     )
     # What it can actually do here, right now. Without this the model finds out
     # by proposing a kick it has no power to perform and relaying the refusal.
     head_lines = [situation, powers(h, ctx)]
     # Owner-written notes about whoever is here. Trusted, unlike scrollback.
-    people = h.dossiers.block(realm=ctx.transport.realm, account=ctx.account, text=f"{ctx.args} {scrollback}")
+    people = h.dossiers.block(
+        realm=ctx.transport.realm, account=ctx.account, text=f"{ctx.args} {scrollback}", nick=ctx.nick
+    )
     # ...and about the room itself, which has a character of its own.
     room = h.rooms.block(ctx.transport.realm, ctx.channel, *who_is_here(ctx)) if ctx.in_channel else ""
     head = "\n".join(part for part in (*head_lines, room, people) if part)
@@ -763,14 +766,23 @@ async def cmd_ask(h: Handler, ctx: Context, *, following: bool = False) -> None:
 
     note(llm=h.provider.name)
     try:
-        answer = await h.provider.reply(
-            system=system,
-            history=[],
-            prompt=prompt,
-            search=True,
-            toolbox=toolbox,
-            session=f"{ctx.transport.name}:{ctx.channel}",
-        )
+        # A deadline on the exchange, not on one request: the tool loop can
+        # run several, and a greeting that answers nine minutes later has
+        # already failed whatever it eventually says.
+        async with asyncio.timeout(h.cfg.llm.deadline_seconds):
+            answer = await h.provider.reply(
+                system=system,
+                history=[],
+                prompt=prompt,
+                search=True,
+                toolbox=toolbox,
+                session=f"{ctx.transport.name}:{ctx.channel}",
+            )
+    except TimeoutError:
+        note(outcome="too-slow")
+        if not following:
+            ctx.say(f"{ctx.nick}: that is taking too long; ask me again")
+        return
     except ProviderError as exc:
         note(outcome="llm-error", error=str(exc)[:60])
         ctx.say(f"{ctx.nick}: {exc}")

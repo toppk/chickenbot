@@ -129,7 +129,14 @@ TOOLS = [
             "Their recent public activity and their repositories. Use it for somebody "
             "who is not on the watch list -- the other tools only know the people this "
             "instance mirrors. It costs an API call or two and is not stored, so for "
-            "watched people the cheaper tools are better."
+            "watched people the cheaper tools are better.\n\n"
+            "It takes a GITHUB LOGIN, which is often not the name somebody uses in chat: "
+            "look for their github handle in what you have been told about them, and if "
+            "you do not have one, ask rather than trying their nick. A nick handed to this "
+            "tool usually belongs to a different person entirely.\n\n"
+            "It returns repositories and counts of recent public events. It cannot tell "
+            "you commits per repository, who authored an issue or pull request, or totals "
+            "for anything -- say so rather than inferring."
         ),
         "params": {
             "type": "object",
@@ -344,7 +351,10 @@ class Tool:
         "ten repos" counted four forks as if they were all theirs."""
         marks = [m for m, on in (("fork", r["fork"]), ("archived", r["archived"])) if on]
         marks.append(f"{r['stars']} stars")
-        marks.append(f"{r['open_issues']} open")
+        # GitHub's open_issues_count includes pull requests. Rendered as bare
+        # "open" it was read as open PRs, and somebody conceded to a number
+        # that was never about them.
+        marks.append(f"{r['open_issues']} open issues+PRs")
         marks.append(f"pushed {ago(now - r['pushed_at'])} ago")
         described = f": {r['description'][:DESCRIPTION]}" if r["description"] else ""
         return f"{r['full_name']} ({', '.join(marks)}){described}"
@@ -439,7 +449,7 @@ class Tool:
         if len(self._looked_up) > LOOKUP_MEMOS:
             oldest = min(self._looked_up, key=lambda k: self._looked_up[k][0])
             self._looked_up.pop(oldest, None)
-        return f"{answer} [live, not mirrored]"
+        return f"{answer} [live, not mirrored; repos and recent public events only, no per-repo commits or authorship]"
 
     def _describe(self, user: str, repos: list[dict], events: list) -> str:
         busiest = sorted(repos, key=lambda r: (-r["stars"], -r["pushed_at"]))[:3]

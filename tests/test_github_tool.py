@@ -160,7 +160,8 @@ def test_repos_reports_stars_and_recency(gh):
         }
     )
     out = gh.github_repos({"user": "toppk"})
-    assert out == "toppk/chickenbot (3 stars, 2 open, pushed 1h ago): d"  # call() adds the age
+    # "open" alone was read as open pull requests; the count is both.
+    assert out == "toppk/chickenbot (3 stars, 2 open issues+PRs, pushed 1h ago): d"
 
 
 def test_declared_schemas_are_valid_for_the_protocol(gh):

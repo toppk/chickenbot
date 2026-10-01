@@ -193,6 +193,10 @@ class LLMConfig:
     history_lines: int = 20  # the most scrollback to hand over
     history_minutes: int = 180  # ...and how far back of it still counts as the conversation
     per_user_per_min: int = 4
+    # The whole exchange, not one HTTP call. A stalling provider ran eight
+    # tool turns at ninety seconds each and answered a greeting nine minutes
+    # later, which reads as broken however good the eventual answer is.
+    deadline_seconds: float = 75.0
     # Merged into every openai-compatible request body: OpenRouter's `provider`
     # routing policy lives here.
     body_params: dict = field(default_factory=dict)
