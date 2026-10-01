@@ -1176,6 +1176,13 @@ async def cmd_dossier(h: Handler, ctx: Context) -> None:
 
     found = h.store.whois(handle) or ([pid] if (pid := h.store.person_id(realm, handle)) else [])
     if not found:
+        # Writing the first note is how somebody gets a dossier. Refusing
+        # until one exists left no way to start one from the partyline at
+        # all, and biff -- who never identifies -- could never have had one.
+        if notes.strip():
+            h.store.set_person(realm, handle, notes.strip(), author=ctx.account or ctx.nick)
+            ctx.say(f"{ctx.nick}: noted, and {handle} has a dossier now")
+            return
         ctx.say(f"{ctx.nick}: i have nothing on {handle}")
         return
     if len(found) > 1:

@@ -143,6 +143,7 @@ class ToolBox:
             return f"error: {name} failed ({type(exc).__name__})"
 
 
+NOTE_MAX = 200  # one line; a dossier is facts, not a transcript
 WHO_SHOWN = 25  # a busy channel is a wall of text; the roster is the cheap way
 
 
@@ -497,6 +498,48 @@ async def tool_who_link(h: Handler, ctx: Context, args: dict) -> str:
         h.aliases_changed(realm)
         return f"recorded: {ctx.nick} is {handle} on {realm}"
     return "error: could not record that"
+
+
+@tool(
+    "dossier_note",
+    owner=True,
+    description=(
+        "Write down a durable fact somebody has told you about a person -- where they live, what "
+        "they work on, what they go by. Goes in the trusted half of their dossier, so only use it "
+        "for something stated as fact, never for an impression you formed. Starts a dossier if "
+        "they have none. Not for passing moods or anything about health, money or relationships."
+    ),
+    params={
+        "type": "object",
+        "properties": {
+            "person": {"type": "string", "description": "Their nick or handle here."},
+            "fact": {"type": "string", "description": "One line, as a statement."},
+        },
+        "required": ["person", "fact"],
+    },
+)
+async def tool_dossier_note(h: Handler, ctx: Context, args: dict) -> str:
+    """Owner-gated like `who_link_other`: the model may propose this from
+    anything said in the room, and whether it lands turns on who asked."""
+    person = str(args.get("person") or "").strip()
+    fact = " ".join(str(args.get("fact") or "").split())
+    if not person or not fact:
+        return "error: both person and fact are needed"
+    if len(fact) > NOTE_MAX:
+        return f"error: one line, under {NOTE_MAX} characters"
+    realm = ctx.transport.realm
+    found = h.store.whois(person) or ([pid] if (pid := h.store.person_id(realm, person)) else [])
+    if len(found) > 1:
+        return f"{person} is ambiguous; {len(found)} people answer to it"
+    author = ctx.account or ctx.nick
+    if not found:
+        h.store.set_person(realm, person, fact, author=author)
+        return f"recorded, and {person} has a dossier now"
+    existing = h.store.person_notes(found[0])
+    if fact.casefold() in existing.casefold():
+        return f"already written down about {person}"
+    h.store.set_person(realm, person, f"{existing}\n{fact}".strip(), author=author)
+    return f"recorded about {person}"
 
 
 @tool(

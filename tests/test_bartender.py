@@ -231,3 +231,107 @@ def test_who_is_partyline_work():
     from chickenbot.commands import COMMANDS
 
     assert COMMANDS["dossier"].owner is True and COMMANDS["dossier"].tier == "all"
+
+
+# -- filing a fact somebody states ---------------------------------------
+
+
+def _box(handler, transport, *, account="toppk", is_owner=True):
+    from chickenbot.commands import Context
+    from chickenbot.tools import ToolBox
+
+    return ToolBox(
+        handler,
+        Context(
+            handler=handler,
+            transport=transport,
+            nick=account,
+            account=account,
+            channel="#chan",
+            args="",
+            is_owner=is_owner,
+            in_channel=True,
+        ),
+    )
+
+
+async def test_a_fact_about_a_stranger_starts_a_dossier(cfg, store, transport):
+    """chrisk said biff is in lake oswego and it went nowhere: biff never
+    identifies, so the bartender would never have given him one."""
+    from chickenbot.commands import Handler
+
+    h = Handler(cfg, store, None, None)
+    result = await _box(h, transport).run("dossier_note", {"person": "biff", "fact": "lives in Lake Oswego, Oregon"})
+    assert "dossier now" in result
+    assert "Lake Oswego" in store.person(transport.realm, "biff")
+
+
+async def test_facts_accumulate_rather_than_replace(cfg, store, transport):
+    from chickenbot.commands import Handler
+
+    h = Handler(cfg, store, None, None)
+    box = _box(h, transport)
+    await box.run("dossier_note", {"person": "biff", "fact": "lives in Lake Oswego, Oregon"})
+    await box.run("dossier_note", {"person": "biff", "fact": "runs on xai"})
+    notes = store.person(transport.realm, "biff")
+    assert "Lake Oswego" in notes and "xai" in notes
+
+
+async def test_the_same_fact_twice_is_not_written_twice(cfg, store, transport):
+    from chickenbot.commands import Handler
+
+    h = Handler(cfg, store, None, None)
+    box = _box(h, transport)
+    await box.run("dossier_note", {"person": "biff", "fact": "lives in Oregon"})
+    assert "already written" in await box.run("dossier_note", {"person": "biff", "fact": "lives in Oregon"})
+
+
+async def test_only_an_owner_may_write_the_trusted_half(cfg, store, transport):
+    """The model may propose it from anything said; the gate is the asker."""
+    from chickenbot.commands import Handler
+
+    h = Handler(cfg, store, None, None)
+    result = await _box(h, transport, account="chrisk", is_owner=False).run(
+        "dossier_note", {"person": "biff", "fact": "lives in Antarctica"}
+    )
+    assert "owner-only" in result
+    assert store.person_id(transport.realm, "biff") is None
+
+
+async def test_it_is_not_even_offered_to_a_non_owner(cfg, store, transport):
+    from chickenbot.commands import Handler
+
+    h = Handler(cfg, store, None, None)
+    names = {s["function"]["name"] for s in _box(h, transport, is_owner=False).schemas}
+    assert "dossier_note" not in names
+
+
+async def test_a_transcript_is_not_a_fact(cfg, store, transport):
+    from chickenbot.commands import Handler
+    from chickenbot.tools import NOTE_MAX
+
+    h = Handler(cfg, store, None, None)
+    result = await _box(h, transport).run("dossier_note", {"person": "biff", "fact": "x" * (NOTE_MAX + 1)})
+    assert "one line" in result
+
+
+async def test_the_partyline_can_start_one_too(cfg, store):
+    from chickenbot.commands import COMMANDS, Context, Handler
+
+    from .conftest import FakeTransport
+
+    h = Handler(cfg, store, None, None)
+    tr = FakeTransport(owners=("toppk",))
+    ctx = Context(
+        handler=h,
+        transport=tr,
+        nick="toppk",
+        account="toppk",
+        channel="#chan",
+        args="biff lives in Lake Oswego, Oregon",
+        is_owner=True,
+        in_channel=True,
+    )
+    await COMMANDS["dossier"].run(h, ctx)
+    assert "dossier now" in tr.sent[0][1]
+    assert "Lake Oswego" in store.person(tr.realm, "biff")
