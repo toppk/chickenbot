@@ -185,3 +185,51 @@ async def test_it_is_offered_to_anybody(cfg, store):
     handler = Handler(cfg, store, None, None)
     names = {s["function"]["name"] for s in box(handler, FakeTransport()).schemas}
     assert "chan_who" in names
+
+
+# -- a command word in a sentence ----------------------------------------
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "who is chickenbot",
+        "who is chickenbot?",
+        "who is b* account?",
+        "seen the new guy?",
+        "help me with this",
+        "history of this channel",
+    ],
+)
+def test_a_sentence_is_not_a_command(body):
+    from chickenbot.commands import reads_as_english
+
+    assert reads_as_english(body)
+
+
+@pytest.mark.parametrize("body", ["who biff", "seen nate", "help", "uptime", "history deploy", "tune bots all"])
+def test_an_invocation_still_is_one(body):
+    from chickenbot.commands import reads_as_english
+
+    assert not reads_as_english(body)
+
+
+async def test_asked_in_words_it_answers_rather_than_running_who(cfg, store):
+    """`.who` is owner-only and about dossiers; "who is biff" is a question."""
+    from .test_commands import StubProvider
+
+    cfg.prefix = "."
+    h = Handler(cfg, store, StubProvider("biff is another bot"), None)
+    tr = FakeTransport(owners=("toppk",))
+    await h.dispatch(tr.envelope("chickenbot: who is biff?", sender="toppk", account="toppk"))
+    await h.drain()
+    assert "another bot" in tr.said()[0]
+
+
+async def test_spelled_with_the_prefix_it_is_still_the_command(cfg, store):
+    cfg.prefix = "."
+    h = Handler(cfg, store, None, None)
+    tr = FakeTransport(owners=("toppk",))
+    await h.dispatch(tr.envelope(".who is biff", sender="toppk", account="toppk"))
+    await h.drain()
+    assert "nothing on is" in tr.said()[0]

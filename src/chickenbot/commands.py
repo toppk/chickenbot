@@ -270,6 +270,27 @@ def _is_for_somebody_else(tr: Transport, room: str, text: str) -> bool:
     return tr.fold(head) in here - {tr.fold(tr.me)}
 
 
+# Words English puts after a verb and no command takes as its first argument.
+# Several command names are ordinary words -- who, seen, help, history, jobs --
+# and "chickenbot: who is biff?" was being answered as `.who is`, which is the
+# same trap that got `.set` renamed to `.tune`.
+_PROSE = (
+    "a an the is are was were am be been do does did can could will would should "
+    "you your my me i we us it its that this these those there here of to in on at "
+    "for from about with has have had not no yes"
+)
+PROSE = frozenset(_PROSE.split())
+
+
+def reads_as_english(body: str) -> bool:
+    """Whether a command word at the start of an unprefixed line is prose."""
+    _name, _, rest = body.partition(" ")
+    rest = rest.strip()
+    if not rest:
+        return False
+    return rest.endswith("?") or rest.partition(" ")[0].strip(",'\"").lower() in PROSE
+
+
 def names(line: str, word: str) -> bool:
     """Whether `word` appears as a word of its own.
 
@@ -610,6 +631,12 @@ class Handler:
             return
 
         cmd = COMMANDS.get(name.lower().removeprefix(self.cfg.prefix))
+        # Spelled with the prefix it is a command, whatever it looks like.
+        # Addressed by name alone, a sentence is a sentence.
+        spelled = name.startswith(self.cfg.prefix) or env.text.startswith(self.cfg.prefix)
+        if cmd is not None and not spelled and reads_as_english(body):
+            note(prose=name)
+            cmd = None
         ctx = self._context(event, args.strip())
         # Asked before engaging, because engaging is what makes it true.
         mid_conversation = self.cfg.llm.follow and env.is_group and self.attention.engaged(key)
