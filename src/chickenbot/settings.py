@@ -42,6 +42,8 @@ SETTABLE = (
     "llm.reply_lines",
     "llm.block_lines",
     "llm.history_lines",
+    "llm.follow_seconds",
+    "llm.follow_max_seconds",
     "llm.history_minutes",
     "llm.per_user_per_min",
     "llm.deadline_seconds",

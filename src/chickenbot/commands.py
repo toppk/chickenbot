@@ -11,6 +11,7 @@ from collections import defaultdict, deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
+from . import version
 from .attention import FOLLOW_NOTE, OVERHEARD, SILENT, TO_YOU, Attention, addressed_elsewhere
 from .brain import Provider, ProviderError
 from .config import Config
@@ -178,7 +179,10 @@ def compose(h: Handler, ctx: Context, scrollback: str, *, following: bool = Fals
         f"<context>network={ctx.transport.name} room={ctx.channel} kind={where}"
         f" asking={ctx.nick}{'' if ctx.account else ' (not logged in to services)'}"
         f" you={'/'.join(h.wake_words(ctx.transport))}"
-        f" now={now} running_for={ago(int(h.started))} model={_model(h)}</context>"
+        # Its own version, because asked for one it invented a commit hash
+        # rather than saying it had no way to know. Anything it should be able
+        # to state about itself belongs here, not in its guesses.
+        f" now={now} running_for={ago(int(h.started))} version={version()} model={_model(h)}</context>"
     )
     # What it can actually do here, right now. Without this the model finds out
     # by proposing a kick it has no power to perform and relaying the refusal.
@@ -445,6 +449,29 @@ class Handler:
         Either name will do: an account is stabler, a nick is what you can see."""
         return self.store.is_bot(realm, nick) or self.store.is_bot(realm, account)
 
+    def follow_window(self, tr: Transport, room: str) -> float:
+        """How long a pause here still counts as the same conversation.
+
+        A room's own pace decides it. Sixty seconds is a long silence in a
+        busy channel and nothing at all in one where people answer when they
+        next sit down: Wraps was greeted, asked "what happened" ninety-nine
+        seconds later, and was no longer being listened to.
+        """
+        cfg = self.cfg.llm
+        lines = self.store.lines_since(tr.realm, room, int(time.time()) - 3600)
+        gap = 3600.0 / max(lines, 1)  # the room's recent pace, seconds per line
+        return min(max(float(cfg.follow_seconds), gap * 2), float(cfg.follow_max_seconds))
+
+    def opened_with(self, tr: Transport, room: str, said: str) -> None:
+        """It spoke first. Having said something to a room is reason enough to
+        listen for the answer -- greeting somebody and then not hearing them
+        is worse than not greeting them."""
+        self.remember_own(tr, room, said)
+        if self.cfg.llm.follow:
+            key = f"{tr.realm}/{room}"
+            self._rooms[key] = (tr, room)
+            self.attention.engage(key, tr.me, self.follow_window(tr, room))
+
     def remember_own(self, tr: Transport, room: str, text: str, kind: str = "self") -> None:
         """Fire and forget: the reply has already gone out, logging must not block it."""
         task = asyncio.create_task(self.store.log_line(tr.realm, room, tr.me, "", text, kind))
@@ -560,7 +587,7 @@ class Handler:
             return
         note(outcome="greeted")
         tr.say(event.room, hello)
-        self.remember_own(tr, event.room, hello)
+        self.opened_with(tr, event.room, hello)
 
     async def _handle_change(self, event: Event) -> None:
         """A room's modes changed. Channel state is already updated by the
@@ -601,7 +628,7 @@ class Handler:
             self.store.note_presence(tr.realm, env.room)
             if hello:
                 tr.say(env.room, hello)
-                self.remember_own(tr, env.room, hello)
+                self.opened_with(tr, env.room, hello)
 
         if body is None:
             # Not addressed. If this room is mid-conversation with us, hold the
@@ -629,7 +656,7 @@ class Handler:
         # A bot naming us does not open an engagement: answering it once is a
         # courtesy, being drawn into following it is a rally.
         if self.cfg.llm.follow and env.is_group and not from_a_bot:
-            self.attention.engage(key, env.sender)
+            self.attention.engage(key, env.sender, self.follow_window(tr, env.room))
 
         if cmd is None:
             # Addressed by name with no command word: send the lot to the model.
@@ -908,7 +935,7 @@ async def cmd_ask(h: Handler, ctx: Context, *, following: bool = False) -> None:
     # the wrong person first.
     ctx.say(answer if addressed_to_somebody(ctx, answer) else f"{ctx.nick}: {answer}")
     if ctx.in_channel:
-        h.attention.spoke(f"{ctx.transport.realm}/{ctx.channel}")
+        h.attention.spoke(f"{ctx.transport.realm}/{ctx.channel}", h.follow_window(ctx.transport, ctx.channel))
 
 
 @command("watching", blurb="repos watched here")

@@ -176,6 +176,28 @@ tool for it: it is set from the CLI, which means shell access to the instance
 directory. A bot cannot edit its own character, and nothing said in a channel
 can either -- which is the point, given that scrollback is untrusted input.
 
+## When it is listening
+
+Being named opens an engagement; while one is open, anything said in the room
+is a candidate and a pause is when it decides. Two things set how long:
+
+- `llm.follow_seconds` (60) is the floor, for a room where people are talking.
+- `llm.follow_max_seconds` (600) is the ceiling. The actual window is stretched
+  towards it by how quiet the room has been in the last hour, because a pause
+  only means "over" relative to the room's own pace.
+
+It also keeps listening after *it* speaks -- answering, greeting somebody, or
+making a remark of its own -- rather than from the last time it was named.
+Greeting someone and then not hearing their reply is worse than not greeting
+them. `journalctl` says exactly when both happen:
+
+```
+following irc:…/#lobby for 600s, drawn in by chickenbot
+stopped following irc:…/#lobby (lapsed), open 600s
+```
+
+Three declines in a row also close it, whatever the clock says.
+
 ## Other bots
 
 ```bash

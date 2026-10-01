@@ -113,3 +113,61 @@ async def test_a_reply_clears_the_silence_streak(cfg, store):
     await h.dispatch(tr.envelope("chickenbot: still there?", sender="toppk", account="toppk"))
     await h.drain()
     assert h.attention.rooms[key].silences == 0
+
+
+# -- how long a pause means the conversation is over ---------------------
+
+
+def test_a_quiet_room_is_given_longer(cfg, store, transport):
+    """Wraps was greeted, asked "what happened" 99 seconds later, and was no
+    longer being listened to. In a room this cold, 60 seconds is not a pause."""
+    h = Handler(cfg, store, None, None)
+    cfg.llm.follow_seconds = 60
+    cfg.llm.follow_max_seconds = 600
+    assert h.follow_window(transport, "#chan") == 600  # nothing said in an hour
+
+
+async def test_a_busy_room_is_not(cfg, store, transport):
+    h = Handler(cfg, store, None, None)
+    cfg.llm.follow_seconds = 60
+    for n in range(120):
+        await store.log_line(transport.realm, "#chan", "nate", "nate", f"line {n}")
+    assert h.follow_window(transport, "#chan") == 60
+
+
+def test_the_window_never_runs_past_the_cap(cfg, store, transport):
+    h = Handler(cfg, store, None, None)
+    cfg.llm.follow_max_seconds = 120
+    assert h.follow_window(transport, "#chan") == 120
+
+
+async def test_greeting_somebody_is_listening_for_the_answer(cfg, store):
+    """It said "late one, Wraps" and then ignored him."""
+    from .test_commands import StubProvider
+
+    cfg.llm.follow = True
+    h = Handler(cfg, store, StubProvider("hi"), None)
+    tr = FakeTransport()
+    h.opened_with(tr, "#chan", "late one, Wraps")
+    await h.drain()
+    assert h.attention.engaged(f"{tr.realm}/#chan")
+
+
+def test_its_own_version_is_in_the_context_it_is_given(cfg, store, transport):
+    """Asked for a version it invented a commit hash. It should not have to."""
+    from chickenbot import version
+    from chickenbot.commands import Context, compose
+
+    h = Handler(cfg, store, None, None)
+    ctx = Context(
+        handler=h,
+        transport=transport,
+        nick="toppk",
+        account="toppk",
+        channel="#chan",
+        args="what version are you?",
+        is_owner=True,
+        in_channel=True,
+    )
+    _system, prompt = compose(h, ctx, "")
+    assert f"version={version()}" in prompt

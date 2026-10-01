@@ -109,4 +109,4 @@ class Barfly:
                 return
             note(outcome="remarked")
             tr.say(room, said)
-            self.h.remember_own(tr, room, said)
+            self.h.opened_with(tr, room, said)

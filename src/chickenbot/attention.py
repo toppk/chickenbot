@@ -93,20 +93,25 @@ class Attention:
             return False
         return True
 
-    def engage(self, key: str, who: str = "") -> None:
-        """Being addressed opens or renews interest in this room."""
+    def engage(self, key: str, who: str = "", window: float = 0.0) -> None:
+        """Being addressed opens or renews interest in this room.
+
+        `window` lets the caller say how long, because how long a pause means
+        "over" is a property of the room and not of the bot.
+        """
+        window = window or self.follow_seconds
         spot = self.rooms.get(key)
         if spot is None:
-            spot = Engagement(until=time.monotonic() + self.follow_seconds)
+            spot = Engagement(until=time.monotonic() + window)
             self.rooms[key] = spot
-            log.info("following %s for %ss, drawn in by %s", key, self.follow_seconds, who or "-")
+            log.info("following %s for %.0fs, drawn in by %s", key, window, who or "-")
         else:
-            spot.until = time.monotonic() + self.follow_seconds
+            spot.until = time.monotonic() + window
             spot.silences = 0
         if who:
             spot.who.add(who)
 
-    def spoke(self, key: str) -> None:
+    def spoke(self, key: str, window: float = 0.0) -> None:
         """It answered here, so interest runs from its own last word.
 
         Being named was the only thing that renewed an engagement, and the
@@ -118,7 +123,7 @@ class Attention:
         spot = self.rooms.get(key)
         if spot is None:
             return
-        spot.until = time.monotonic() + self.follow_seconds
+        spot.until = time.monotonic() + (window or self.follow_seconds)
         spot.silences = 0
 
     def drawn_in_by(self, key: str) -> set[str]:

@@ -177,6 +177,10 @@ class LLMConfig:
     # Keep listening after being addressed, instead of needing the name every time.
     follow: bool = True
     follow_seconds: int = 60  # interest lapses this long after the last mention
+    # ...in a room where people are talking. A channel where somebody answers
+    # when they next sit down needs longer, so the window is stretched towards
+    # this by how quiet the room has actually been.
+    follow_max_seconds: int = 600
     pause_seconds: float = 5.0  # wait for a gap, so a burst is one exchange
     max_silences: int = 3  # consecutive "nothing to add" before it stops listening
     # Voice lives in a file so it can be edited without touching the config.
