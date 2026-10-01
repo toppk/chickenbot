@@ -12,7 +12,15 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 from . import version
-from .attention import FOLLOW_NOTE, OVERHEARD, SILENT, TO_YOU, Attention, addressed_elsewhere
+from .attention import (
+    FOLLOW_NOTE,
+    OVERHEARD,
+    SILENCE_NOTE,
+    SILENT,
+    TO_YOU,
+    Attention,
+    addressed_elsewhere,
+)
 from .brain import Provider, ProviderError
 from .config import Config
 from .dossier import Dossiers
@@ -169,7 +177,7 @@ def compose(h: Handler, ctx: Context, scrollback: str, *, following: bool = Fals
     can show the real thing rather than an approximation of it.
     """
     # The suffix is a safety rail, not personality: the soul may not edit it.
-    system = h.soul.text() + SYSTEM_SUFFIX + (FOLLOW_NOTE if following else "")
+    system = h.soul.text() + SYSTEM_SUFFIX + SILENCE_NOTE + (FOLLOW_NOTE if following else "")
 
     # Volatile context goes in the user turn, not the system prompt, so the
     # stable prefix stays cacheable.
@@ -200,6 +208,20 @@ def compose(h: Handler, ctx: Context, scrollback: str, *, following: bool = Fals
             f"{head}\n<channel_scrollback>\n{scrollback}\n</channel_scrollback>\n\n{ctx.nick} asks: {ctx.args}",
         )
     return system, f"{head}\n\n{ctx.args}"
+
+
+def is_silence(answer: str) -> bool:
+    """Whether the model declined, however it spelled it.
+
+    A line wrapped whole in brackets is an aside -- stage direction, not
+    speech -- and "(no reply: the line is addressed to chrisk)" is the bot
+    narrating its own turn, which is the thing being declined, not a message
+    to pass on.
+    """
+    said = answer.strip()
+    if len(said) > 1 and said[0] in "([" and said[-1] in ")]":
+        return True
+    return said.strip("*_\"'").rstrip(".").strip() == SILENT
 
 
 def addressed_to_somebody(ctx: Context, answer: str) -> bool:
@@ -919,7 +941,7 @@ async def cmd_ask(h: Handler, ctx: Context, *, following: bool = False) -> None:
         note(outcome="llm-error", error=str(exc)[:60])
         ctx.say(f"{ctx.nick}: {exc}")
         return
-    if answer.strip() == SILENT:
+    if is_silence(answer):
         # Silence, whichever way it was reached. Only a followed conversation
         # is *invited* to decline, but being named in passing -- someone asking
         # a third party about it -- is exactly when it might anyway, and the

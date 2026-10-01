@@ -34,6 +34,15 @@ def addressed_elsewhere(claim: str) -> bool:
     return claim not in (TO_YOU, OVERHEARD)
 
 
+# The token is honoured on every path -- a reply that is only this is never
+# said out loud. It was only ever *offered* while following, so a direct line
+# that needed no answer left the model to invent its own way of declining, and
+# it wrote "(no reply -- the line is addressed to chrisk)" into the channel.
+SILENCE_NOTE = (
+    f" If a line names you but needs nothing from you, reply with exactly {SILENT} and nothing else: "
+    "someone quoting you, or asking a third party about you, is not a question put to you. "
+    "Never write out that you are not replying, or why. That is still replying."
+)
 FOLLOW_NOTE = (
     " You are following a conversation you were drawn into rather than being asked a direct question. "
     "Each line is marked with its claim on you: `to you` named you, `overheard` named nobody, and "

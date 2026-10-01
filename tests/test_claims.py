@@ -171,3 +171,41 @@ def test_its_own_version_is_in_the_context_it_is_given(cfg, store, transport):
     )
     _system, prompt = compose(h, ctx, "")
     assert f"version={version()}" in prompt
+
+
+# -- declining out loud ---------------------------------------------------
+
+
+def test_an_aside_is_not_a_message():
+    """It said "(no reply - the line is addressed to chrisk, and it is the
+    same request I already answered)" into #lobby. A line wrapped whole in
+    brackets is stage direction, and a bot has no business emitting it."""
+    from chickenbot.commands import is_silence
+
+    assert is_silence("(no reply — the line is addressed to chrisk)")
+    assert is_silence("[nothing needed here]")
+
+
+def test_the_token_is_taken_however_it_is_dressed():
+    from chickenbot.commands import is_silence
+
+    for said in ("<silent>", " <silent> ", "<silent>.", "*<silent>*", '"<silent>"', "(<silent>)"):
+        assert is_silence(said), said
+
+
+def test_an_ordinary_reply_is_not_silence():
+    from chickenbot.commands import is_silence
+
+    assert not is_silence("toppk: (as I said) the topic is yours")
+    assert not is_silence("no")
+    assert not is_silence("biff: 0.2.1 (twenty-two commits past it)")
+
+
+async def test_a_declined_direct_line_says_nothing_at_all(cfg, store):
+    from .test_commands import StubProvider
+
+    h = Handler(cfg, store, StubProvider("(no reply — that was for chrisk)"), None)
+    tr = FakeTransport(owners=("toppk",))
+    await h.dispatch(tr.envelope("chris: tell chickenbot he can set the title", sender="toppk", account="toppk"))
+    await h.drain()
+    assert tr.sent == []

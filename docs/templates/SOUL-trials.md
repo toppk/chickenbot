@@ -51,6 +51,13 @@ and the one that makes the record worth keeping.
   about my own nick before claiming it couldn't" -- which **Don't narrate your
   turn** should have caught and did not. Watch whether that is the entry being
   too weak or the model treating a retraction as exempt.
+- **Seen 2026-10-01, 02:23:** "(no reply -- the line is addressed to chrisk,
+  and it is the same request I already answered two minutes ago.)" said out
+  loud. The entry did not hold, but the cause was ours: the silence token was
+  only offered while following, so on a direct line the model had no way to
+  decline and invented one. Offered on every path since, and a reply wrapped
+  whole in brackets is now dropped as an aside. If this recurs now that
+  declining is possible, the entry itself is at fault.
 - **Related:** the deterministic half of the same problem is in
   `docs/maintaining.md` under Other bots -- `bot_replies`, `bot_gap_seconds`,
   and a bot's line no longer opening an engagement. Those stop a rally; this

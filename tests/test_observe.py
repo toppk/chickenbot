@@ -217,7 +217,7 @@ def test_the_prompt_command_needs_a_room(tmp_path):
     assert code == 1 and "give a room" in out.getvalue()
 
 
-def test_following_adds_the_silence_instruction(tmp_path):
+def test_silence_is_offered_on_every_path(tmp_path):
     import io
     from contextlib import redirect_stdout
 
@@ -236,5 +236,9 @@ def test_following_adds_the_silence_instruction(tmp_path):
     with redirect_stdout(followed):
         main(["-c", str(toml), "prompt", "irc:host/#soup", "--following"])
 
-    assert "<silent>" not in plain.getvalue()
-    assert "<silent>" in followed.getvalue()
+    # Offered on both paths: a direct line can name it and still need
+    # nothing, and with no way to decline the model wrote its refusal out.
+    assert "<silent>" in plain.getvalue()
+    assert "needs nothing from you" in plain.getvalue()
+    # What following adds is the framing, not the token.
+    assert "drawn into" in followed.getvalue() and "drawn into" not in plain.getvalue()
