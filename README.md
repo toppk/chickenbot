@@ -49,6 +49,10 @@ people and rooms, what it has been doing and what it cost. `docs/deploying.md`
 covers instances and deploys, `docs/reviewing.md` how to review an episode,
 and `docs/authority.md` who is allowed to do what.
 
+`docs/principles.md` is why any of it is the way it is -- the claims the
+behaviours are meant to arrive at, so a rule can be held against something
+other than how it felt at the time. Read it before changing one.
+
 ## Talking to it
 
 `docs/chatting.md` is the guide for anybody sharing a channel with it:
