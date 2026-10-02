@@ -28,6 +28,7 @@ async def settle():
 async def test_the_first_question_is_answered_at_once(handler):
     tr = FakeTransport()
     await handler.dispatch(tr.envelope("chickenbot: what is six by seven"))
+    await handler.drain()
     assert tr.sent
 
 
@@ -41,6 +42,7 @@ async def test_a_burst_of_questions_gets_one_answer(handler):
 
     for question in ("chickenbot: who killed jfk", "chickenbot: can you search google", "chickenbot: which llm"):
         await handler.dispatch(tr.envelope(question))
+        await handler.drain()
     assert handler.provider.prompts == []  # nothing answered yet
 
     await settle()
@@ -57,6 +59,7 @@ async def test_a_question_in_a_burst_is_still_answered(handler):
     tr.sent.clear()
 
     await handler.dispatch(tr.envelope("chickenbot: and what about this"))
+    await handler.drain()
     await settle()
     assert tr.sent  # it did not go quiet on somebody asking it something
 
@@ -71,6 +74,7 @@ async def test_being_merely_present_still_allows_silence(handler):
     handler.provider.prompts.clear()
 
     await handler.dispatch(tr.envelope("just chatting amongst ourselves"))
+    await handler.drain()
     await settle()
     assert FOLLOW_NOTE in handler.provider.system
 
@@ -84,7 +88,9 @@ async def test_a_direct_question_removes_that_option(handler):
     handler.provider.prompts.clear()
 
     await handler.dispatch(tr.envelope("chatter"))
+    await handler.drain()
     await handler.dispatch(tr.envelope("chickenbot: but what about this"))
+    await handler.drain()
     await settle()
     assert FOLLOW_NOTE not in handler.provider.system
 
@@ -96,6 +102,7 @@ async def test_commands_are_never_held_up(handler):
     await handler.drain()
     tr.sent.clear()
     await handler.dispatch(tr.envelope("!uptime"))
+    await handler.drain()
     assert "up " in tr.sent[-1][1]
 
 
@@ -213,6 +220,7 @@ async def test_the_silence_word_never_reaches_the_room(cfg, store):
     tr = FakeTransport()
     h = Handler(cfg, store, StubProvider(SILENT), None)
     await h.dispatch(tr.envelope("biff what is your iq compared to chickenbot's"))
+    await h.drain()
     assert tr.sent == []
 
 
@@ -226,6 +234,7 @@ async def test_silence_in_a_followed_conversation_still_counts(cfg, store):
     tr = FakeTransport()
     h = Handler(cfg, store, StubProvider(SILENT), None)
     await h.dispatch(tr.envelope("chickenbot: hello"))
+    await h.drain()
     assert tr.sent == []
 
 
@@ -266,3 +275,89 @@ async def test_a_later_remark_is_its_own_utterance(cfg, store):
     store._db.commit()
     await store.log_line("fake", "#chan", "nate", "nate", "second", "privmsg")
     assert render_scrollback(await store.recent("fake", "#chan")).count("<nate>") == 2
+
+
+# -- a slow answer holds up nothing else ---------------------------------
+
+
+async def test_a_fast_command_does_not_queue_behind_a_slow_answer(cfg, store):
+    """`.spend` waited 36 seconds behind a 75-second model call in the same
+    room. Handling stays in order; only the thinking runs loose."""
+    import asyncio
+
+    from chickenbot.commands import Handler
+
+    from .conftest import FakeTransport
+
+    held = asyncio.Event()
+
+    class Slow:
+        name, supports_tools = "slow", False
+
+        async def reply(self, **kw) -> str:
+            await held.wait()
+            return "eventually"
+
+        async def aclose(self) -> None:
+            pass
+
+    h = Handler(cfg, store, Slow(), None)
+    tr = FakeTransport(owners=("toppk",))
+    await h.dispatch(tr.envelope("chickenbot: something hard", sender="toppk", account="toppk"))
+    await h.dispatch(tr.envelope(f"{cfg.prefix}uptime", sender="toppk", account="toppk"))
+    assert any("up " in said for _room, said in tr.sent), "the quick command waited its turn"
+    held.set()
+    await h.drain()
+
+
+async def test_one_room_thinks_one_thought_at_a_time(cfg, store):
+    """Two questions must not have their answers overtake each other."""
+    import asyncio
+
+    from chickenbot.commands import Handler
+
+    from .conftest import FakeTransport
+
+    order: list[str] = []
+
+    class Counting:
+        name, supports_tools = "counting", False
+
+        def __init__(self) -> None:
+            self.n = 0
+
+        async def reply(self, **kw) -> str:
+            self.n += 1
+            mine = self.n
+            await asyncio.sleep(0.02 if mine == 1 else 0)
+            order.append(f"a{mine}")
+            return f"answer {mine}"
+
+        async def aclose(self) -> None:
+            pass
+
+    cfg.llm.follow = False
+    h = Handler(cfg, store, Counting(), None)
+    tr = FakeTransport(owners=("toppk",))
+    await h.dispatch(tr.envelope("chickenbot: first", sender="toppk", account="toppk"))
+    await h.dispatch(tr.envelope("chickenbot: second", sender="toppk", account="toppk"))
+    await h.drain()
+    assert order == ["a1", "a2"]
+
+
+async def test_the_answer_is_still_one_line_in_the_record(cfg, store, caplog):
+    """Handing the work to a task must not split one question into two rows."""
+    import logging
+
+    from chickenbot.commands import Handler
+
+    from .conftest import FakeTransport
+    from .test_commands import StubProvider
+
+    h = Handler(cfg, store, StubProvider("42"), None)
+    tr = FakeTransport(owners=("toppk",))
+    with caplog.at_level(logging.INFO, logger="chickenbot.activity"):
+        await h.dispatch(tr.envelope("chickenbot: six by seven?", sender="toppk", account="toppk"))
+        await h.drain()
+    rows = [r.getMessage() for r in caplog.records if "command=ask" in r.getMessage()]
+    assert len(rows) == 1 and "outcome=answered" in rows[0]

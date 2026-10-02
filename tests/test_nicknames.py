@@ -43,6 +43,7 @@ def handler(cfg, store) -> Handler:
 )
 async def test_a_nickname_wakes_it_like_the_full_name(handler, transport, line):
     await handler.dispatch(transport.envelope(line))
+    await handler.drain()
     assert handler.provider.prompts, f"{line!r} did not reach the model"
     assert "what is up" in handler.provider.prompts[-1]
 
@@ -50,11 +51,13 @@ async def test_a_nickname_wakes_it_like_the_full_name(handler, transport, line):
 @pytest.mark.parametrize("line", ["cbx: not me", "chickens: not me", "incubator: not me", "just chatting"])
 async def test_a_near_miss_does_not(handler, transport, line):
     await handler.dispatch(transport.envelope(line))
+    await handler.drain()
     assert handler.provider.prompts == []
 
 
 async def test_the_body_is_stripped_of_whichever_name_was_used(handler, transport):
     await handler.dispatch(transport.envelope("cb: set the topic"))
+    await handler.drain()
     assert handler.provider.prompts[-1].endswith("set the topic")
 
 
@@ -69,19 +72,23 @@ def test_longer_names_win(cfg, store, transport):
 
 async def test_a_nickname_engages_the_room_too(handler, transport):
     await handler.dispatch(transport.envelope("cb: hello"))
+    await handler.drain()
     assert handler.attention.engaged(f"{transport.realm}/#chan")
 
 
 async def test_the_model_is_told_what_it_answers_to(handler, transport):
     await handler.dispatch(transport.envelope("cb: hello"))
+    await handler.drain()
     assert "you=chickenbot/chicken/cb" in handler.provider.prompts[-1]
 
 
 async def test_with_no_nicknames_only_the_nick_works(cfg, store, transport):
     handler = Handler(cfg, store, Spy(), None)
     await handler.dispatch(transport.envelope("cb: hello"))
+    await handler.drain()
     assert handler.provider.prompts == []
     await handler.dispatch(transport.envelope("chickenbot: hello"))
+    await handler.drain()
     assert handler.provider.prompts
 
 
@@ -145,6 +152,7 @@ async def test_a_name_given_in_chat_becomes_a_wake_word(cfg, store, transport):
     assert handler._extract(transport, "chick: hello", True) == "hello"
 
     await handler.dispatch(transport.envelope("chick: hello"))
+    await handler.drain()
     assert handler.provider.prompts
 
 
@@ -213,6 +221,7 @@ async def test_a_name_somebody_else_goes_by_is_refused(cfg, store, transport):
 async def test_being_named_mid_sentence_is_being_addressed(handler, transport, line):
     """Both of these were ignored: the name only counted as the first word."""
     await handler.dispatch(transport.envelope(line))
+    await handler.drain()
     assert handler.provider.prompts, f"ignored: {line}"
 
 
@@ -227,18 +236,21 @@ async def test_being_named_mid_sentence_is_being_addressed(handler, transport, l
 )
 async def test_a_name_glued_into_a_word_is_somebody_elses_business(handler, transport, line):
     await handler.dispatch(transport.envelope(line))
+    await handler.drain()
     assert handler.provider.prompts == []
 
 
 async def test_a_name_first_still_strips_it(handler, transport):
     """`chickenbot: uptime` is a command, not a question about uptime."""
     await handler.dispatch(transport.envelope("chickenbot: uptime"))
+    await handler.drain()
     assert "up " in transport.sent[-1][1]
     assert handler.provider.prompts == []
 
 
 async def test_a_name_later_keeps_the_whole_line(handler, transport):
     await handler.dispatch(transport.envelope("hello chickenbot do you know biff"))
+    await handler.drain()
     assert "hello chickenbot do you know biff" in handler.provider.prompts[-1]
 
 

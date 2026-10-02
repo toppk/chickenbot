@@ -14,6 +14,7 @@ def handler(cfg, store) -> Handler:
 
 async def send(h, tr, text, **kw):
     await h.dispatch(tr.envelope(text, **kw))
+    await h.drain()
 
 
 def lines(caplog) -> list[str]:
@@ -148,6 +149,8 @@ async def test_an_ask_logs_the_same_either_way(cfg, transport, store, caplog):
         await send(handler, transport, "!ask what is six by seven")
         await send(handler, transport, "chickenbot: what is six by seven")
 
+    # Still one row each, though the answer is now written by the task that
+    # finished it rather than by the frame that started it.
     typed, addressed = lines(caplog)
     for line in (typed, addressed):
         assert "command=ask" in line

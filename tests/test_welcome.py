@@ -155,6 +155,7 @@ async def test_a_regular_walking_in_is_greeted_out_loud(cfg, store):
     tr = FakeTransport()
     h = Handler(cfg, store, None, None)
     await h.dispatch(arrival(tr, "nate"))
+    await h.drain()
     assert tr.sent and "nate" in tr.sent[0][1]
 
 
@@ -165,6 +166,7 @@ async def test_a_guest_greets_nobody(cfg, store):
     tr = FakeTransport()
     h = Handler(cfg, store, None, None)
     await h.dispatch(arrival(tr, "nate"))
+    await h.drain()
     assert tr.sent == []
 
 
@@ -172,6 +174,7 @@ async def test_a_stranger_walking_in_is_met_with_silence(cfg, store):
     tr = FakeTransport()
     h = Handler(cfg, store, None, None)
     await h.dispatch(arrival(tr, "drive-by"))
+    await h.drain()
     assert tr.sent == []
 
 
@@ -180,6 +183,7 @@ async def test_leaving_is_never_remarked_on(cfg, store):
     tr = FakeTransport()
     h = Handler(cfg, store, None, None)
     await h.dispatch(arrival(tr, "nate", Kind.DEPARTURE))
+    await h.drain()
     assert tr.sent == []
 
 
@@ -227,5 +231,7 @@ async def test_the_engine_remembers_who_it_watched_leave(cfg, store):
     tr = FakeTransport()
     h = Handler(cfg, store, None, None)
     await h.dispatch(arrival(tr, "nate", Kind.DEPARTURE))
+    await h.drain()
     await h.dispatch(arrival(tr, "nate"))
+    await h.drain()
     assert tr.sent == []

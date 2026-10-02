@@ -132,6 +132,7 @@ async def test_joining_is_one_line_in_the_record(handler, store):
     set_sink(store.record_activity)
     try:
         await handler.dispatch(Event(kind=Kind.ROSTER, transport=tr, room="#chan", sender=tr.me, account="", text=""))
+        await handler.drain()
     finally:
         set_sink(None)
     rows = store.activity(kind="roster")

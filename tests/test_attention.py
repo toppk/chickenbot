@@ -96,6 +96,7 @@ async def test_a_burst_becomes_one_batch():
 
 async def send(h, tr, text, **kw):
     await h.dispatch(tr.envelope(text, **kw))
+    await h.drain()
 
 
 async def test_plain_chat_is_ignored_until_the_bot_is_addressed(fast, transport, store):

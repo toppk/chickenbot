@@ -181,6 +181,18 @@ tool for it: it is set from the CLI, which means shell access to the instance
 directory. A bot cannot edit its own character, and nothing said in a channel
 can either -- which is the point, given that scrollback is untrusted input.
 
+## When it is slow
+
+A model call can take a minute. Inbound messages are handled strictly in
+order -- logging, attention, who a line is for -- but the thinking is handed
+off, so a 75-second answer does not stop `.spend` from running meanwhile. One
+room thinks one thought at a time, so two answers cannot overtake each other.
+
+The activity record still carries one line per question: the row is handed to
+the task that finishes it, and `ms=` spans the whole thing. A question that
+times out (`llm.deadline_seconds`, 75) reads `outcome=too-slow` with the
+elapsed time on it.
+
 ## When it is listening
 
 Being named opens an engagement; while one is open, anything said in the room

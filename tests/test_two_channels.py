@@ -43,10 +43,12 @@ def said(store, room, text, *, nick="nate", ago_seconds=60) -> None:
 async def test_a_dot_command_works_in_the_partyline_only(both):
     h, tr = both
     await h.dispatch(tr.envelope("!uptime", room="#soup", account="alice"))
+    await h.drain()
     assert tr.sent and tr.sent[0][0] == "#soup"
 
     tr.sent.clear()
     await h.dispatch(tr.envelope("!uptime", room="#lobby", account="alice"))
+    await h.drain()
     assert tr.sent == []
 
 
@@ -55,12 +57,14 @@ async def test_being_named_works_in_both(both):
     for room in ("#soup", "#lobby"):
         tr.sent.clear()
         await h.dispatch(tr.envelope("chickenbot: uptime", room=room, account="alice"))
+        await h.drain()
         assert tr.sent and tr.sent[0][0] == room
 
 
 async def test_ordinary_chat_in_the_lobby_is_only_logged(both, store):
     h, tr = both
     await h.dispatch(tr.envelope("the printer is out of cyan again", room="#lobby"))
+    await h.drain()
     assert tr.sent == []
     assert store.conversation("fake", "#lobby")[0][4] == "the printer is out of cyan again"
 
@@ -83,6 +87,7 @@ async def test_it_greets_nobody_in_a_room_it_is_new_to(both, store):
     h, tr = both
     said(store, "#lobby", "hello", ago_seconds=30 * 3600)
     await h.dispatch(tr.envelope("morning all", room="#lobby"))
+    await h.drain()
     assert tr.sent == []
 
 
@@ -111,6 +116,7 @@ async def test_it_cannot_touch_the_lobbys_topic(both):
 async def test_the_owner_command_will_not_either(both):
     h, tr = both
     await h.dispatch(tr.envelope("chickenbot: topic printer fixed", room="#lobby", account="alice"))
+    await h.drain()
     assert "not in this room" in tr.sent[-1][1]
     assert not any(a[0] == TOPIC for a in tr.actions)
 
@@ -143,7 +149,9 @@ async def test_once_the_lobby_has_talked_it_is_read(both, store):
 async def test_the_two_rooms_keep_their_own_scrollback(both, store):
     h, tr = both
     await h.dispatch(tr.envelope("soup business", room="#soup"))
+    await h.drain()
     await h.dispatch(tr.envelope("chickenbot: what is going on", room="#lobby", account="alice"))
+    await h.drain()
     assert "soup business" not in h.provider.prompts[-1]
 
 
@@ -160,6 +168,7 @@ async def test_it_joins_the_conversation_it_is_already_in(both, store):
     h.provider.prompts.clear()
 
     await h.dispatch(tr.envelope("anyone know of an aol server?", room="#lobby", sender="chrisk", account="chrisk"))
+    await h.drain()
     await asyncio.sleep(0.05)
     assert h.provider.prompts, "it ignored a line in a conversation it was part of"
 
@@ -174,6 +183,7 @@ async def test_it_may_still_decide_that_line_was_not_for_it(both):
     await h.dispatch(tr.envelope("chickenbot: you back?", room="#lobby", sender="toppk", account="toppk"))
     await h.drain()
     await h.dispatch(tr.envelope("unrelated chatter", room="#lobby", sender="chrisk", account="chrisk"))
+    await h.drain()
     await asyncio.sleep(0.05)
     assert FOLLOW_NOTE in h.provider.system
 

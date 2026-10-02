@@ -24,7 +24,9 @@ def handler(cfg, store) -> Handler:
 async def test_scrollback_does_not_cross_rooms(handler, store):
     tr = FakeTransport()
     await handler.dispatch(tr.envelope("secret in one", room="#one"))
+    await handler.drain()
     await handler.dispatch(tr.envelope("!ask what was said", room="#two"))
+    await handler.drain()
     assert "secret in one" not in handler.provider.prompts[-1]
 
 
@@ -32,15 +34,19 @@ async def test_scrollback_does_not_cross_networks(handler, store):
     one, two = FakeTransport(), FakeTransport()
     two.name = "other"
     await handler.dispatch(one.envelope("said on fake", room="#one"))
+    await handler.drain()
     await handler.dispatch(two.envelope("!ask what was said", room="#one"))
+    await handler.drain()
     assert "said on fake" not in handler.provider.prompts[-1]
 
 
 async def test_each_room_gets_its_own_model_session(handler):
     tr = FakeTransport()
     await handler.dispatch(tr.envelope("!ask hi", room="#one"))
+    await handler.drain()
     first = handler.provider.session
     await handler.dispatch(tr.envelope("!ask hi", room="#two"))
+    await handler.drain()
     assert first != handler.provider.session
 
 
@@ -48,8 +54,10 @@ async def test_attention_in_one_room_does_not_answer_another(handler, store):
     """Being addressed in #one must not make it answer everything in #two."""
     tr = FakeTransport()
     await handler.dispatch(tr.envelope("chickenbot: hello", room="#one"))
+    await handler.drain()
     before = len(tr.sent)
     await handler.dispatch(tr.envelope("just chatting", room="#two"))
+    await handler.drain()
     assert len(tr.sent) == before
 
 

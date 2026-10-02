@@ -19,6 +19,7 @@ def handler(cfg, store) -> Handler:
 
 async def dm(handler, tr, text, *, sender="nate", account="nate"):
     await handler.dispatch(tr.envelope(text, sender=sender, account=account, room=sender, is_group=False))
+    await handler.drain()
 
 
 async def test_an_owner_is_answered(handler):
@@ -100,6 +101,7 @@ async def test_a_channel_is_unaffected(handler):
     """The gate is on private messages; rooms have their own policy."""
     tr = FakeTransport()
     await handler.dispatch(tr.envelope("!uptime", sender="nate", account="nate"))
+    await handler.drain()
     assert "up " in tr.sent[-1][1]
 
 

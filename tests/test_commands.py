@@ -39,6 +39,7 @@ def handler(cfg, store) -> Handler:
 
 async def send(h, tr, text, **kw):
     await h.dispatch(tr.envelope(text, **kw))
+    await h.drain()
 
 
 async def test_logs_room_chat_even_when_not_addressed(handler, transport, store):
@@ -76,6 +77,7 @@ async def test_moderation_a_network_cannot_do_is_refused(cfg, store):
     tr = FakeTransport(caps=frozenset())
     handler = Handler(cfg, store, None, None)
     await handler.dispatch(tr.envelope("!kick nate", account="alice"))
+    await handler.drain()
     assert "cannot kick" in tr.said()[0]
     assert tr.actions == []
 
@@ -162,7 +164,9 @@ async def test_a_watch_belongs_to_one_room_on_one_network(handler, store):
     irc, signal = FakeTransport(), FakeTransport()
     signal.name = "signal"
     await handler.dispatch(irc.envelope("!watch a/b", account="alice"))
+    await handler.drain()
     await handler.dispatch(signal.envelope("!watch a/b", account="alice", room="group1"))
+    await handler.drain()
 
     assert len(await store.watches()) == 2
     assert [w.realm for w in await store.watches()] == ["fake", "signal"]
@@ -193,6 +197,7 @@ async def test_ignore_lists_cover_networks_without_bot_flags(cfg, store):
     tr = FakeTransport(ignored=["OtherBot"])
     handler = Handler(cfg, store, None, None)
     await handler.dispatch(tr.envelope("!topic hijacked", sender="otherbot", account="alice"))
+    await handler.drain()
     assert tr.sent == []
 
 
@@ -205,9 +210,11 @@ async def test_an_owner_on_one_network_is_not_an_owner_on_another(cfg, store):
 
     declare(handler, "signal", "g1", "partyline")
     await handler.dispatch(signal.envelope("!topic nope", account="alice", room="g1"))
+    await handler.drain()
     assert "owner-only" in signal.said()[0]
 
     await handler.dispatch(irc.envelope("!topic yes", account="alice"))
+    await handler.drain()
     assert irc.actions == [(TOPIC, "#chan", "yes", "")]
 
 
@@ -305,6 +312,7 @@ async def test_a_reply_that_already_names_somebody_is_left_alone(cfg, store):
     tr = FakeTransport(here=[("biff", "biff", ""), ("toppk", "toppk", "")])
     handler = Handler(cfg, store, StubProvider("biff: toppk would like a drawing"), None)
     await handler.dispatch(tr.envelope("chickenbot: ask biff to draw", sender="toppk", account="toppk"))
+    await handler.drain()
     assert tr.sent[-1][1] == "biff: toppk would like a drawing"
 
 
@@ -312,6 +320,7 @@ async def test_an_ordinary_answer_still_names_the_asker(cfg, store):
     tr = FakeTransport(here=[("nate", "nate", "")])
     handler = Handler(cfg, store, StubProvider("42"), None)
     await handler.dispatch(tr.envelope("chickenbot: what is six by seven"))
+    await handler.drain()
     assert tr.sent[-1][1] == "nate: 42"
 
 
@@ -320,6 +329,7 @@ async def test_a_sentence_that_opens_with_a_colon_is_not_an_address(cfg, store):
     tr = FakeTransport(here=[("nate", "nate", "")])
     handler = Handler(cfg, store, StubProvider("note: the printer is still broken"), None)
     await handler.dispatch(tr.envelope("chickenbot: how is the printer"))
+    await handler.drain()
     assert tr.sent[-1][1].startswith("nate: note:")
 
 
@@ -327,6 +337,7 @@ async def test_naming_somebody_who_is_not_here_is_not_an_address(cfg, store):
     tr = FakeTransport(here=[("nate", "nate", "")])
     handler = Handler(cfg, store, StubProvider("mallory: hello"), None)
     await handler.dispatch(tr.envelope("chickenbot: greet mallory for me"))
+    await handler.drain()
     assert tr.sent[-1][1].startswith("nate: mallory:")
 
 
@@ -334,4 +345,5 @@ async def test_addressing_the_asker_is_not_doubled(cfg, store):
     tr = FakeTransport(here=[("nate", "nate", "")])
     handler = Handler(cfg, store, StubProvider("nate: 42"), None)
     await handler.dispatch(tr.envelope("chickenbot: what is six by seven"))
+    await handler.drain()
     assert tr.sent[-1][1] == "nate: 42"

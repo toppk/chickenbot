@@ -48,20 +48,25 @@ async def test_somebody_changing_it_is_recorded_with_their_name(irc):  # noqa: F
 async def test_the_handler_keeps_the_history(handler, store):
     tr = FakeTransport()
     await handler.dispatch(tr.envelope("first topic", kind_topic=True, sender=""))
+    await handler.drain()
     assert [t[1] for t in store.topics("fake", "#chan")] == ["first topic"]
 
 
 async def test_the_same_topic_again_is_not_history(handler, store):
     tr = FakeTransport()
     await handler.dispatch(tr.envelope("same", kind_topic=True, sender=""))
+    await handler.drain()
     await handler.dispatch(tr.envelope("same", kind_topic=True, sender=""))
+    await handler.drain()
     assert len(store.topics("fake", "#chan")) == 1
 
 
 async def test_what_it_displaced_is_kept(handler, store):
     tr = FakeTransport()
     await handler.dispatch(tr.envelope("the printer joke", kind_topic=True, sender=""))
+    await handler.drain()
     await handler.dispatch(tr.envelope("something dull", kind_topic=True, sender="nate"))
+    await handler.drain()
     assert [t[1] for t in store.topics("fake", "#chan")] == ["something dull", "the printer joke"]
 
 

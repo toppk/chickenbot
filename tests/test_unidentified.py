@@ -29,6 +29,7 @@ async def test_an_unidentified_asker_still_finds_their_file(handler, store):
     linked(store)
     tr = FakeTransport()
     await handler.dispatch(tr.envelope("chickenbot: what does my github look like", sender="chrisk", account=""))
+    await handler.drain()
     prompt = handler.provider.prompts[-1]
     assert "iconidentify" in prompt  # the handle it should have looked up
 
@@ -37,6 +38,7 @@ async def test_the_file_says_nobody_vouched_for_them(handler, store):
     linked(store)
     tr = FakeTransport()
     await handler.dispatch(tr.envelope("chickenbot: hello", sender="chrisk", account=""))
+    await handler.drain()
     prompt = handler.provider.prompts[-1]
     assert "not logged in to services, so it may not be them" in prompt
 
@@ -45,6 +47,7 @@ async def test_the_context_says_so_too(handler, store):
     linked(store)
     tr = FakeTransport()
     await handler.dispatch(tr.envelope("chickenbot: hello", sender="chrisk", account=""))
+    await handler.drain()
     assert "asking=chrisk (not logged in to services)" in handler.provider.prompts[-1]
 
 
@@ -52,6 +55,7 @@ async def test_an_identified_asker_carries_no_caveat(handler, store):
     linked(store)
     tr = FakeTransport()
     await handler.dispatch(tr.envelope("chickenbot: hello", sender="chrisk", account="chrisk"))
+    await handler.drain()
     prompt = handler.provider.prompts[-1]
     assert "may not be them" not in prompt
     assert "(not logged in" not in prompt
@@ -76,4 +80,5 @@ async def test_nothing_privileged_rests_on_it(handler, store):
     linked(store)
     tr = FakeTransport()
     await handler.dispatch(tr.envelope("chickenbot: topic something", sender="chrisk", account=""))
+    await handler.drain()
     assert "owner-only" in tr.sent[-1][1] or "cannot see your account" in tr.sent[-1][1]

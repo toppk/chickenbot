@@ -26,7 +26,7 @@ from .config import Config
 from .dossier import Dossiers
 from .events import Event, Kind
 from .identity import Identities
-from .observe import activity, note, note_default
+from .observe import activity, carry, note, note_default, resumed
 from .policy import ALL, BASIC, EITHER, NAME, NONE, PREFIX, Policies, rooms_from
 from .restraint import Refused, Restraint
 from .rhythm import Rhythm
@@ -102,16 +102,17 @@ class Command:
     usage: str
     blurb: str
     tier: str = BASIC  # BASIC everywhere it is allowed at all; ALL only where it administers
+    slow: bool = False  # calls the model, so it is handed off rather than held in the queue
 
 
 COMMANDS: dict[str, Command] = {}
 
 
 def command(
-    name: str, *, owner: bool = False, usage: str = "", blurb: str = "", tier: str = BASIC
+    name: str, *, owner: bool = False, usage: str = "", blurb: str = "", tier: str = BASIC, slow: bool = False
 ) -> Callable[[Runner], Runner]:
     def register(fn: Runner) -> Runner:
-        COMMANDS[name] = Command(name, fn, owner, usage or name, blurb, tier)
+        COMMANDS[name] = Command(name, fn, owner, usage or name, blurb, tier, slow)
         return fn
 
     return register
@@ -377,6 +378,9 @@ class Handler:
         self._turned_away: dict[str, float] = {}
         self._bot_replies: dict[str, deque[float]] = defaultdict(deque)
         self._bot_last: dict[str, float] = {}
+        # Model calls in flight, and one lock per room to keep them in turn.
+        self._thinking: set[asyncio.Task] = set()
+        self._thought: dict[str, asyncio.Lock] = {}
 
     # -- entry point -----------------------------------------------------
 
@@ -524,8 +528,34 @@ class Handler:
     async def drain(self) -> None:
         """Wait for fire-and-forget log writes. For shutdown and for tests:
         those writes go through a worker thread, so yielding once is not enough."""
-        while self._writes:
-            await asyncio.gather(*tuple(self._writes), return_exceptions=True)
+        while self._writes or self._thinking:
+            await asyncio.gather(*tuple(self._writes), *tuple(self._thinking), return_exceptions=True)
+
+    def alone(self, key: str) -> asyncio.Lock:
+        """One room thinks one thought at a time, so answers cannot overtake."""
+        return self._thought.setdefault(key, asyncio.Lock())
+
+    def consider(self, key: str, ctx: Context, work: Awaitable[None]) -> None:
+        """Run something slow without holding the queue behind it.
+
+        Inbound messages are handled strictly in order, which is right for
+        bookkeeping and wrong for a model call: a 75-second answer in #soup
+        left `.spend` -- which needs no model at all -- waiting 36 seconds for
+        its turn. Deciding what to do stays in order; only the thinking runs
+        loose, and it carries its own record because by the time it finishes
+        the row that started it is long closed.
+        """
+
+        record = carry()
+
+        async def thinking() -> None:
+            async with self.alone(key):
+                with resumed(record):
+                    await work
+
+        task = asyncio.create_task(thinking())
+        self._thinking.add(task)
+        task.add_done_callback(self._thinking.discard)
 
     def _context(self, event: Event, args: str) -> Context:
         tr = event.transport
@@ -555,6 +585,11 @@ class Handler:
         if cmd.owner and not ctx.is_owner:
             note(outcome="denied")
             ctx.say(self._denial(ctx))
+            return
+        if cmd.slow:
+            # `.ask foo` and `chickenbot: foo` are the same work and must not
+            # read differently, nor hold the queue differently.
+            self.consider(f"{ctx.transport.realm}/{ctx.channel}", ctx, cmd.run(self, ctx))
             return
         try:
             await cmd.run(self, ctx)
@@ -597,7 +632,8 @@ class Handler:
             note(asked=len(asked), held=len(held), claim=",".join(sorted({line[3] for line in held})))
             # Silence is for a conversation it was merely party to. A question
             # put to it directly gets an answer.
-            await cmd_ask(self, ctx, following=not asked)
+            async with self.alone(key):
+                await cmd_ask(self, ctx, following=not asked)
 
     async def _handle_topic(self, event: Event) -> None:
         """A topic is a fact about the room worth keeping, not a line of chat.
@@ -708,7 +744,7 @@ class Handler:
                     return
                 ctx.args = body
                 note(command="ask", owner=ctx.is_owner)
-                await cmd_ask(self, ctx)
+                self.consider(key, ctx, cmd_ask(self, ctx))
             else:
                 note(outcome="no-such-command", command=name)
             return
@@ -912,7 +948,7 @@ async def cmd_history(h: Handler, ctx: Context) -> None:
         ctx.say(f"{ago(line.ts)} ago <{line.nick}> {line.text}")
 
 
-@command("ask", usage="ask <question>", blurb="ask the model; it searches when it needs to")
+@command("ask", usage="ask <question>", blurb="ask the model; it searches when it needs to", slow=True)
 async def cmd_ask(h: Handler, ctx: Context, *, following: bool = False) -> None:
     if h.provider is None:
         ctx.say("no model is configured")

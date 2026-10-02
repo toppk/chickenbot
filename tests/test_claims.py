@@ -36,6 +36,7 @@ async def test_a_line_to_another_bot_is_never_answered(cfg, store):
     await h.drain()
     said = len(tr.sent)
     await h.dispatch(tr.envelope("eggbot: what version are you?", sender="nate", account="nate"))
+    await h.drain()
     await asyncio.sleep(0.1)
     await h.drain()
     assert len(tr.sent) == said, "answered a question put to eggbot"
@@ -53,6 +54,7 @@ async def test_an_overheard_line_still_reaches_the_model(cfg, store):
     await h.drain()
     before = p.asked
     await h.dispatch(tr.envelope("then run who on yourself", sender="nate", account="nate"))
+    await h.drain()
     await asyncio.sleep(0.1)
     await h.drain()
     assert p.asked > before

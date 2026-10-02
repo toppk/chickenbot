@@ -104,6 +104,7 @@ async def test_what_we_know_reaches_the_prompt(cfg, transport, store):
     provider = StubProvider()
     handler = Handler(cfg, store, provider, None)
     await handler.dispatch(transport.envelope("!ask what am i working on", sender="toppk", account="toppk"))
+    await handler.drain()
 
     assert "<known_people>" in provider.prompts[-1]
     assert "toppk-gh" in provider.prompts[-1]
@@ -115,6 +116,7 @@ async def test_nothing_is_added_when_nobody_is_known(cfg, transport, store):
     provider = StubProvider()
     handler = Handler(cfg, store, provider, None)
     await handler.dispatch(transport.envelope("!ask hello"))
+    await handler.drain()
     assert "<known_people>" not in provider.prompts[-1]
 
 

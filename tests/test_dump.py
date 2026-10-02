@@ -27,6 +27,7 @@ def handler(cfg, store) -> Handler:
 async def dump(h, tr, section, **kw):
     tr.sent.clear()
     await h.dispatch(tr.envelope(f"!dump {section}", account="alice", **kw))
+    await h.drain()
     return tr.said()
 
 
@@ -37,6 +38,7 @@ async def test_dump_needs_a_section(handler, transport):
 
 async def test_dump_is_owner_only(handler, transport):
     await handler.dispatch(transport.envelope("!dump comms", account="nate"))
+    await handler.drain()
     assert "owner-only" in transport.said()[0]
 
 

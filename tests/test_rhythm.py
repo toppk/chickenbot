@@ -87,10 +87,12 @@ async def test_ordinary_chat_teaches_it(cfg, transport, store):
     handler = Handler(cfg, store, None, None)
     for _ in range(MIN_LINES + 1):
         await handler.dispatch(transport.envelope("just chatting"))
+        await handler.drain()
     assert store.presence(transport.realm, "#chan")
 
 
 async def test_a_direct_message_is_not_a_room(cfg, transport, store):
     handler = Handler(cfg, store, None, None)
     await handler.dispatch(transport.envelope("hello", room="nate", is_group=False))
+    await handler.drain()
     assert store.presence() == {}

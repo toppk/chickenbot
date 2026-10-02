@@ -134,36 +134,42 @@ async def test_a_bare_prefix_works_in_the_partyline(handler):
     declare(handler, "fake", "#soup", PARTYLINE)
     tr = FakeTransport()
     await handler.dispatch(tr.envelope("!ask what is six by seven", room="#soup"))
+    await handler.drain()
     assert tr.sent
 
 
 async def test_a_bare_prefix_is_ignored_in_somebody_elses_channel(handler):
     tr = FakeTransport()
     await handler.dispatch(tr.envelope("!ask what is six by seven", room="#public"))
+    await handler.drain()
     assert tr.sent == []
 
 
 async def test_being_named_still_works_there(handler):
     tr = FakeTransport()
     await handler.dispatch(tr.envelope("chickenbot: what is six by seven", room="#public"))
+    await handler.drain()
     assert tr.sent
 
 
 async def test_an_administrative_command_is_not_offered_outside_the_partyline(handler):
     tr = FakeTransport()
     await handler.dispatch(tr.envelope("chickenbot: kick nate", room="#public", account="alice"))
+    await handler.drain()
     assert "not in this room" in tr.sent[-1][1]
 
 
 async def test_a_basic_command_still_works_there(handler):
     tr = FakeTransport()
     await handler.dispatch(tr.envelope("chickenbot: uptime", room="#public", account="alice"))
+    await handler.drain()
     assert "up " in tr.sent[-1][1]
 
 
 async def test_a_non_owner_is_not_told_where_the_bot_takes_orders(handler):
     tr = FakeTransport()
     await handler.dispatch(tr.envelope("chickenbot: kick nate", room="#public", account="nate"))
+    await handler.drain()
     assert tr.sent == []
 
 
@@ -171,6 +177,7 @@ async def test_a_quiet_room_answers_nothing(handler):
     declare(handler, "fake", "#hush", QUIET)
     tr = FakeTransport()
     await handler.dispatch(tr.envelope("chickenbot: uptime", room="#hush", account="alice"))
+    await handler.drain()
     assert tr.sent == []
 
 

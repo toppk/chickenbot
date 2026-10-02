@@ -31,7 +31,9 @@ def recorded(cfg, store, transport):
 async def test_every_event_lands_in_the_table(recorded, store):
     handler, tr = recorded
     await handler.dispatch(tr.envelope("just chatting"))
+    await handler.drain()
     await handler.dispatch(tr.envelope("!ask what is six by seven"))
+    await handler.drain()
     await handler.dispatch(tr.envelope("!topic nope"))  # denied, nate is not an owner
 
     rows = store.activity()
@@ -43,7 +45,9 @@ async def test_every_event_lands_in_the_table(recorded, store):
 async def test_filtering_by_outcome_and_command(recorded, store):
     handler, tr = recorded
     await handler.dispatch(tr.envelope("chatter"))
+    await handler.drain()
     await handler.dispatch(tr.envelope("!ask hi"))
+    await handler.drain()
     assert len(store.activity(outcome="chat")) == 1
     assert len(store.activity(command="ask")) == 1
 
@@ -110,6 +114,7 @@ async def test_filtering_by_kind_isolates_what_it_did_unbidden(recorded, store):
     somebody else said."""
     handler, tr = recorded
     await handler.dispatch(tr.envelope("chatter"))
+    await handler.drain()
     store.record_activity({"ts": int(time.time()), "kind": "barfly", "room": "#chan", "outcome": "remarked"})
     store.record_activity({"ts": int(time.time()), "kind": "vibe", "room": "#chan", "outcome": "noted"})
 
@@ -121,6 +126,7 @@ async def test_filtering_by_kind_isolates_what_it_did_unbidden(recorded, store):
 async def test_filtering_by_room(recorded, store):
     handler, tr = recorded
     await handler.dispatch(tr.envelope("chatter"))
+    await handler.drain()
     store.record_activity({"ts": int(time.time()), "kind": "barfly", "room": "#other", "outcome": "remarked"})
 
     assert [r["room"] for r in store.activity(room="#chan")] == ["#chan"]
@@ -155,6 +161,7 @@ async def test_excluding_the_bookkeeping_a_restart_produces(recorded, store):
     behaviour means not wading through eight restarts' worth."""
     handler, tr = recorded
     await handler.dispatch(tr.envelope("chatter"))
+    await handler.drain()
     for kind in ("mode", "topic", "roster"):
         store.record_activity({"ts": int(time.time()), "kind": kind, "room": "#chan", "outcome": "observed"})
 
@@ -166,6 +173,7 @@ async def test_excluding_the_bookkeeping_a_restart_produces(recorded, store):
 async def test_excluding_nothing_leaves_everything(recorded, store):
     handler, tr = recorded
     await handler.dispatch(tr.envelope("chatter"))
+    await handler.drain()
     assert len(store.activity(exclude=[])) == 1
     assert len(store.activity(exclude=[""])) == 1  # an empty --exclude is not a filter
 

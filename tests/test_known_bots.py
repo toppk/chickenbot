@@ -67,6 +67,7 @@ async def test_a_marked_bot_is_logged_but_never_answered(handler, store):
     tr = FakeTransport()
     store.mark_bot("fake", "eggbot")
     await handler.dispatch(tr.envelope("!ask what is six by seven", sender="eggbot", account="eggbot"))
+    await handler.drain()
     assert tr.sent == []
     lines = store.conversation("fake", "#chan")
     assert [line[3] for line in lines] == ["bot"]
@@ -78,6 +79,7 @@ async def test_an_unmarked_sender_is_still_answered(handler, store, cfg):
     handler.provider = StubProvider("42")
     tr = FakeTransport()
     await handler.dispatch(tr.envelope("!ask what is six by seven"))
+    await handler.drain()
     assert tr.sent
 
 
@@ -217,6 +219,7 @@ async def test_seeing_it_is_still_not_answering_it(handler, store):
     tr = FakeTransport()
     store.mark_bot("fake", "biff")
     await handler.dispatch(tr.envelope("chickenbot: answer me", sender="biff", account="biff"))
+    await handler.drain()
     assert tr.sent == []
     assert (await store.recent("fake", "#chan"))[-1].text == "chickenbot: answer me"
 
@@ -230,6 +233,7 @@ async def test_the_model_is_told_which_room_lines_came_from_a_bot(cfg, store):
     h = Handler(cfg, store, StubProvider("ok"), None)
     tr = FakeTransport()
     await h.dispatch(tr.envelope("chickenbot: is the printer fine"))
+    await h.drain()
     prompt = h.provider.prompts[-1]
     assert "biff (bot" in prompt and "printer is fine actually" in prompt
 
@@ -280,6 +284,7 @@ async def test_a_line_addressed_to_another_bot_is_not_for_us(cfg, store):
     h = Handler(cfg, store, StubProvider("ok"), None)
     tr = FakeTransport(here=[("eggbot", "", ""), ("nate", "nate", ""), ("chickenbot", "", "")])
     await h.dispatch(tr.envelope("eggbot: tell chickenbot a joke", sender="nate"))
+    await h.drain()
     assert tr.sent == []
 
 
@@ -289,6 +294,7 @@ async def test_being_addressed_ourselves_still_works(cfg, store):
     h = Handler(cfg, store, StubProvider("ok"), None)
     tr = FakeTransport(here=[("eggbot", "", ""), ("chickenbot", "", "")])
     await h.dispatch(tr.envelope("chickenbot: tell eggbot a joke", sender="nate"))
+    await h.drain()
     assert tr.sent
 
 
@@ -299,6 +305,7 @@ async def test_a_url_is_not_somebody_being_addressed(cfg, store):
     h = Handler(cfg, store, StubProvider("ok"), None)
     tr = FakeTransport(here=[("nate", "nate", ""), ("chickenbot", "", "")])
     await h.dispatch(tr.envelope("https://example.com/x what do you make of that chickenbot", sender="nate"))
+    await h.drain()
     assert tr.sent
 
 
@@ -306,6 +313,7 @@ async def test_a_bot_is_ignored_by_default(handler, store):
     store.mark_bot("fake", "eggbot")
     tr = FakeTransport()
     await handler.dispatch(tr.envelope("chickenbot: hello", sender="eggbot", account="eggbot"))
+    await handler.drain()
     assert tr.sent == []
 
 
@@ -317,6 +325,7 @@ async def test_addressed_lets_a_bot_through(cfg, store):
     store.mark_bot("fake", "eggbot")
     tr = FakeTransport()
     await h.dispatch(tr.envelope("chickenbot: hello", sender="eggbot", account="eggbot"))
+    await h.drain()
     assert tr.sent
 
 
@@ -328,6 +337,7 @@ async def test_addressed_still_ignores_a_bot_talking_to_the_room(cfg, store):
     store.mark_bot("fake", "eggbot")
     tr = FakeTransport()
     await h.dispatch(tr.envelope("just saying things", sender="eggbot", account="eggbot"))
+    await h.drain()
     assert tr.sent == []
 
 
@@ -343,6 +353,7 @@ async def test_two_bots_cannot_talk_forever(cfg, store):
     tr = FakeTransport()
     for _ in range(cfg.bot_replies + 3):
         await h.dispatch(tr.envelope("chickenbot: again", sender="eggbot", account="eggbot"))
+        await h.drain()
     assert len(tr.sent) == cfg.bot_replies
 
 
@@ -357,6 +368,7 @@ async def test_one_answer_then_a_quiet_spell(cfg, store):
     tr = FakeTransport()
     for _ in range(4):
         await h.dispatch(tr.envelope("chickenbot: again", sender="biff", account="biff"))
+        await h.drain()
     assert len(tr.sent) == 1
 
 
@@ -379,6 +391,7 @@ async def test_what_a_bot_says_is_logged_either_way(handler, store):
     store.mark_bot("fake", "eggbot")
     tr = FakeTransport()
     await handler.dispatch(tr.envelope("a remark", sender="eggbot", account="eggbot"))
+    await handler.drain()
     assert (await store.recent("fake", "#chan"))[-1].text == "a remark"
 
 

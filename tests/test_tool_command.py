@@ -12,6 +12,7 @@ def handler(cfg, store) -> Handler:
 async def run(h, tr, text, **kw):
     tr.sent.clear()
     await h.dispatch(tr.envelope(text, **kw))
+    await h.drain()
     return tr.said()
 
 
