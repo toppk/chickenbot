@@ -26,6 +26,53 @@ the prompt labelled as impressions rather than rules, and it is never treated
 as instruction. If it has fixed on something wrong, clear it — it rewrites
 itself nightly.
 
+## Identity on IRC
+
+Being identified is a knob, never a requirement: chickenbot joins and works
+with no account at all, with a password, with a client certificate, or with
+both as fallbacks for each other. What identifying buys is a stable cloak, a
+services-vouched account other people's dossiers can hang off, and in
+`#lobby` the difference between `identified=1` and `identified=8`.
+
+```bash
+chickenbot -c <config> cert          # a client certificate for SASL EXTERNAL
+```
+
+chonkline binds the SHA-256 of the leaf certificate's DER to an account and
+checks neither a chain nor an expiry, so a self-signed leaf is the whole
+credential. Reissuing changes the fingerprint, so a certificate is rotated
+rather than renewed; eight fit on one account, which is what makes rotating
+without a gap possible.
+
+The path goes in the toml, not the `.env`:
+
+```toml
+[irc]
+tls_cert = "chickenbot.pem"   # beside this file, 0600
+```
+
+A path is not a secret; the file is. A file can be `0600` and owned, where an
+environment variable is readable from `/proc`, printed by `systemctl show -p
+Environment`, and inherited by every tool process. A PEM could not live in the
+`.env` anyway -- that parser is line-based.
+
+Enrollment happens on the server and nothing local can do it: point the toml
+at the certificate, restart so the connection presents it, `/msg NickServ CERT
+ADD`, then `CERT LIST` to check the fingerprint `chickenbot cert` printed is
+there. The next connection picks EXTERNAL by itself.
+
+Both mechanisms stay wired permanently. EXTERNAL is used when a certificate is
+configured *and* the server offers it; a server that has not been restarted
+with certificate support simply does not advertise it, so holding a
+certificate costs nothing until the day it works. A refused EXTERNAL falls
+back to PLAIN before `CAP END`, and if that fails too it joins unidentified
+rather than sitting outside. `journalctl` says which was used:
+
+```
+authenticating with SASL EXTERNAL
+SASL EXTERNAL refused: ... / authenticating with SASL PLAIN
+```
+
 ## The soul
 
 Its voice, its manners, what it refuses. The bot cannot write this, on
@@ -160,6 +207,53 @@ behind the address -- right when the address is the problem, wrong for one
 misbehaving client, because a cloaked host is shared: `chrisk`, `chrisk_` and
 `biff` have appeared on chonkbase under one cloak. Either form tells you who
 else the mask catches.
+
+## Identity on IRC
+
+Being identified is a knob, never a requirement: chickenbot joins and works
+with no account at all, with a password, with a client certificate, or with
+both as fallbacks for each other. What identifying buys is a stable cloak, a
+services-vouched account other people's dossiers can hang off, and in
+`#lobby` the difference between `identified=1` and `identified=8`.
+
+```bash
+chickenbot -c <config> cert          # a client certificate for SASL EXTERNAL
+```
+
+chonkline binds the SHA-256 of the leaf certificate's DER to an account and
+checks neither a chain nor an expiry, so a self-signed leaf is the whole
+credential. Reissuing changes the fingerprint, so a certificate is rotated
+rather than renewed; eight fit on one account, which is what makes rotating
+without a gap possible.
+
+The path goes in the toml, not the `.env`:
+
+```toml
+[irc]
+tls_cert = "chickenbot.pem"   # beside this file, 0600
+```
+
+A path is not a secret; the file is. A file can be `0600` and owned, where an
+environment variable is readable from `/proc`, printed by `systemctl show -p
+Environment`, and inherited by every tool process. A PEM could not live in the
+`.env` anyway -- that parser is line-based.
+
+Enrollment happens on the server and nothing local can do it: point the toml
+at the certificate, restart so the connection presents it, `/msg NickServ CERT
+ADD`, then `CERT LIST` to check the fingerprint `chickenbot cert` printed is
+there. The next connection picks EXTERNAL by itself.
+
+Both mechanisms stay wired permanently. EXTERNAL is used when a certificate is
+configured *and* the server offers it; a server that has not been restarted
+with certificate support simply does not advertise it, so holding a
+certificate costs nothing until the day it works. A refused EXTERNAL falls
+back to PLAIN before `CAP END`, and if that fails too it joins unidentified
+rather than sitting outside. `journalctl` says which was used:
+
+```
+authenticating with SASL EXTERNAL
+SASL EXTERNAL refused: ... / authenticating with SASL PLAIN
+```
 
 ## The soul
 

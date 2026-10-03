@@ -281,6 +281,7 @@ class Client:
         server_password: str = "",
         sasl_user: str = "",
         sasl_password: str = "",
+        tls_cert: str = "",
         send_interval: float = 0.6,
         claim_bot_mode: bool = True,
         flood_messages: int = 5,
@@ -302,6 +303,16 @@ class Client:
         self.server_password = server_password
         self.sasl_user = sasl_user
         self.sasl_password = sasl_password
+        self.tls_cert = tls_cert
+        # What the server says it will take, and what we have already tried on
+        # this connection. Old and new both stay wired: EXTERNAL when there is
+        # a certificate and the server offers it, PLAIN when there is not, and
+        # PLAIN again if EXTERNAL is refused -- chonkline allows that before
+        # CAP END, and a bot that cannot get in is worse than one using a
+        # password.
+        self._sasl_mechs: set[str] = set()
+        self._sasl_tried: set[str] = set()
+        self._sasl_now = ""
         self.send_interval = send_interval
         self.claim_bot_mode = claim_bot_mode
         self.flood_messages = flood_messages
@@ -441,6 +452,11 @@ class Client:
 
     async def _connect_once(self) -> None:
         context: ssl.SSLContext | None = ssl.create_default_context() if self.tls else None
+        if context is not None and self.tls_cert:
+            # One PEM holding the leaf and its key, as the server's own
+            # walkthrough assumes. A failure here is worth dying on: carrying
+            # on without it would quietly fall back to a password.
+            context.load_cert_chain(self.tls_cert)
         log.info("connecting to %s:%d", self.host, self.port)
         self._reader, self._writer = await asyncio.open_connection(self.host, self.port, ssl=context)
         self.ready.clear()
@@ -449,6 +465,9 @@ class Client:
         self.caps.clear()
         self._offered.clear()
         self._pending_caps.clear()
+        self._sasl_mechs.clear()
+        self._sasl_tried.clear()
+        self._sasl_now = ""
         self._bot_mode_set = False
         self._registered_sent = False
         self.umodes = set()
@@ -464,7 +483,7 @@ class Client:
             # With SASL, NICK/USER are held back until authentication finishes:
             # a server that marks the connection registered as soon as they pair
             # up will refuse AUTHENTICATE with 907.
-            if not self.sasl_password:
+            if not self._may_authenticate():
                 self._send_registration()
             await self._read_loop()
         finally:
@@ -655,8 +674,12 @@ class Client:
             case "903":
                 self._end_caps()
             case "902" | "904" | "905" | "906" | "907":
-                log.error("SASL failed: %s", msg.text)
-                self._end_caps()
+                log.warning("SASL %s refused: %s", self._sasl_now or "?", msg.text)
+                # chonkline allows PLAIN after a failed EXTERNAL, before CAP
+                # END. Falling back beats sitting outside the channel.
+                if not self._try_next_sasl():
+                    log.error("SASL failed: %s", msg.text)
+                    self._end_caps()
 
     def _claim_bot_mode(self) -> None:
         """Tell the network we are a bot so other bots can leave us alone.
@@ -730,11 +753,17 @@ class Client:
         if sub == "LS":
             more = len(msg.params) > 3 and msg.params[2] == "*"
             for token in msg.text.split():
-                self._offered.add(token.split("=", 1)[0])
+                name, _, value = token.partition("=")
+                self._offered.add(name)
+                if name == "sasl" and value:
+                    # The advertised list is the only way to know whether
+                    # EXTERNAL is on the table; this connection is told only
+                    # if it actually presented a certificate.
+                    self._sasl_mechs.update(m.upper() for m in value.split(","))
             if more:
                 return
             want = sorted(WANTED_CAPS & self._offered)
-            if not self.sasl_password:
+            if not self._may_authenticate():
                 want = [c for c in want if c != "sasl"]
             if not want:
                 self._end_caps()
@@ -745,9 +774,9 @@ class Client:
             acked = msg.text.split()
             self.caps.update(acked)
             self._pending_caps -= set(acked)
-            if "sasl" in acked and self.sasl_password:
-                self.send("AUTHENTICATE", "PLAIN")
-            elif not self._pending_caps:
+            if "sasl" in acked and self._try_next_sasl():
+                return
+            if not self._pending_caps:
                 self._end_caps()
         elif sub == "NAK":
             self._pending_caps -= set(msg.text.split())
@@ -760,8 +789,39 @@ class Client:
         elif sub == "DEL":
             self.caps -= set(msg.text.split())
 
+    def _may_authenticate(self) -> bool:
+        return bool(self.sasl_password or self.tls_cert)
+
+    def _next_sasl(self) -> str:
+        """EXTERNAL if we brought a certificate and it is on offer, else PLAIN.
+
+        A server that has not been restarted with certificate support simply
+        does not list EXTERNAL, so holding a certificate costs nothing until
+        the day it works.
+        """
+        offered = self._sasl_mechs or {"PLAIN"}
+        if self.tls_cert and "EXTERNAL" in offered and "EXTERNAL" not in self._sasl_tried:
+            return "EXTERNAL"
+        if self.sasl_password and "PLAIN" in offered and "PLAIN" not in self._sasl_tried:
+            return "PLAIN"
+        return ""
+
+    def _try_next_sasl(self) -> bool:
+        mech = self._next_sasl()
+        if not mech:
+            return False
+        self._sasl_now = mech
+        self._sasl_tried.add(mech)
+        log.info("authenticating with SASL %s", mech)
+        self.send("AUTHENTICATE", mech)
+        return True
+
     def _handle_authenticate(self, msg: Message) -> None:
         if not msg.params or msg.params[0] != "+":
+            return
+        if self._sasl_now == "EXTERNAL":
+            # The certificate was the credential; there is nothing to send.
+            self.send("AUTHENTICATE", "+")
             return
         user = self.sasl_user or self.wanted_nick
         payload = f"{user}\0{user}\0{self.sasl_password}".encode()

@@ -52,6 +52,7 @@ class IRCTransport:
             nick=cfg.nick,
             username=cfg.username or cfg.nick,
             realname=cfg.realname,
+            tls_cert=cfg.tls_cert,
             server_password=cfg.password,
             sasl_user=cfg.sasl_user,
             sasl_password=cfg.sasl_password,

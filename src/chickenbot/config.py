@@ -92,6 +92,13 @@ class IRCConfig:
     password_env: str = "CHICKENBOT_SERVER_PASSWORD"
     sasl_user: str = ""
     sasl_password_env: str = "CHICKENBOT_SASL_PASSWORD"
+    # A client certificate for SASL EXTERNAL: PEM, key and all, relative to
+    # this toml. chonkline binds the SHA-256 of the leaf DER to an account, so
+    # a self-signed leaf is the whole credential -- no CA, and no expiry check.
+    # A path here is not a secret; the file is, and a file can be 0600 where an
+    # environment variable is readable from /proc and inherited by every child.
+    # Empty means PLAIN only, and PLAIN stays the fallback either way.
+    tls_cert: str = ""
 
     @property
     def password(self) -> str:
@@ -354,6 +361,9 @@ def load(path: str | Path) -> Config:
     if not sock.is_absolute():
         cfg.tools.socket = str((path.parent / sock).resolve())
     # Paths in the toml are relative to the toml, not the working directory.
+    if cfg.irc.tls_cert:
+        cert = Path(cfg.irc.tls_cert).expanduser()
+        cfg.irc.tls_cert = str(cert if cert.is_absolute() else (path.parent / cert).resolve())
     db = Path(cfg.db_path)
     if not db.is_absolute():
         cfg.db_path = str((path.parent / db).resolve())

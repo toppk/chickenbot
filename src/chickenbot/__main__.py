@@ -19,6 +19,9 @@ from pathlib import Path
 from . import brain, config
 from .barfly import Barfly
 from .bartender import Bartender
+from .cert import DAYS as CERT_DAYS
+from .cert import NAME as CERT_NAME
+from .cert import generate as generate_cert
 from .commands import Handler
 from .observe import TRACE, set_sink
 from .scheduler import Scheduler
@@ -354,6 +357,9 @@ def manage(cfg: config.Config, args: argparse.Namespace) -> int:
         if args.what == "tune":
             return manage_settings(Settings(store, cfg), args)
 
+        if args.what == "cert":
+            return make_cert(cfg, args)  # args.config is the toml this sits beside
+
         if args.what == "soul":
             seed_soul(store)
             return _document(store, "soul", "", args, lambda text: store.set_soul(text), store.soul())
@@ -600,6 +606,36 @@ def export(cfg: config.Config, args: argparse.Namespace) -> int:
         return 0
     finally:
         store.close()
+
+
+def make_cert(cfg, args) -> int:
+    """Write a certificate beside the config, and say what to do with it.
+
+    Deliberately does not touch the toml. Enrollment is a step on the server
+    that nobody here can do, and a config pointing at a certificate the
+    account has never seen would fail over to PLAIN silently.
+    """
+    where = Path(args.config).expanduser().resolve().parent / CERT_NAME
+    if where.exists() and not args.force:
+        print(f"{where} exists; --force to replace it", file=sys.stderr)
+        print("replacing the key locks the bot out of any account it is enrolled on", file=sys.stderr)
+        return 1
+    try:
+        fp = generate_cert(where, cfg.irc.nick or "chickenbot", args.days)
+    except RuntimeError as exc:
+        print(exc, file=sys.stderr)
+        return 1
+    print(f"wrote {where} (0600)")
+    print(f"fingerprint: {fp}")
+    print()
+    print("Enrollment happens on the server, with this certificate presented:")
+    print(f'  1. point the toml at it:  [irc] tls_cert = "{CERT_NAME}"')
+    print("  2. restart, so the connection presents it; SASL stays on PLAIN")
+    print("  3. /msg NickServ CERT ADD      (enrolls the session's certificate)")
+    print("  4. /msg NickServ CERT LIST     (check the fingerprint above is listed)")
+    print("Once listed, the next connection uses EXTERNAL on its own. PLAIN")
+    print("stays as the fallback and as the recovery credential.")
+    return 0
 
 
 def _document(cfg_store: Store, kind: str, key: str, args: argparse.Namespace, write, current: str = "") -> int:
@@ -850,6 +886,10 @@ def main(argv: list[str] | None = None) -> int:
     who.add_argument("--forget", action="store_true")
     who.add_argument("--alias", metavar="REALM/HANDLE", help="another name the same person goes by")
     who.add_argument("--unlink", metavar="REALM/HANDLE", help="drop one handle, e.g. a mistyped one")
+
+    cert_cmd = sub.add_parser("cert", help="make a client certificate for SASL EXTERNAL")
+    cert_cmd.add_argument("--force", action="store_true", help="replace an existing one")
+    cert_cmd.add_argument("--days", type=int, default=CERT_DAYS, help=f"lifetime (default {CERT_DAYS})")
 
     bot_cmd = sub.add_parser("bot", help="mark an account as a bot, for networks that do not")
     bot_cmd.add_argument("realm", nargs="?", help="e.g. irc:irc.chonkbase.net; omit to list")
