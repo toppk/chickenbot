@@ -357,6 +357,9 @@ def manage(cfg: config.Config, args: argparse.Namespace) -> int:
         if args.what == "tune":
             return manage_settings(Settings(store, cfg), args)
 
+        if args.what == "transcript":
+            return show_transcript(store, args)
+
         if args.what == "cert":
             return make_cert(cfg, args)  # args.config is the toml this sits beside
 
@@ -606,6 +609,31 @@ def export(cfg: config.Config, args: argparse.Namespace) -> int:
         return 0
     finally:
         store.close()
+
+
+def show_transcript(store: Store, args: argparse.Namespace) -> int:
+    """The one thing the activity record never held: the words themselves."""
+    rows = store.exchanges(room=args.room, limit=args.last, one=args.id or 0)
+    if not rows:
+        print("nothing recorded; `tune llm.transcript 20` turns it on", file=sys.stderr)
+        return 1
+    if args.id:
+        row = rows[0]
+        when = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(row["ts"]))
+        print(f"#{row['id']}  {when}  {row['realm']}/{row['room']}  {row['nick']}")
+        print(f"trigger={row['trigger']} model={row['model']} served={row['served']} ms={row['ms']}")
+        if row["tools"]:
+            print(f"tools={row['tools']}")
+        for label, body in (("SYSTEM", row["system"]), ("PROMPT", row["prompt"]), ("REPLY", row["reply"])):
+            print(f"\n----- {label} " + "-" * (60 - len(label)))
+            print(body)
+        return 0
+    for row in rows:
+        when = time.strftime("%m-%d %H:%M:%S", time.localtime(row["ts"]))
+        asked = " ".join(str(row["asked"]).split())[:60]
+        print(f"{row['id']:5}  {when}  {row['trigger']:11} {row['room']:12} {row['nick']:10} {asked}")
+    print(f"\n`transcript <id>` for one in full ({len(rows)} shown)")
+    return 0
 
 
 def make_cert(cfg, args) -> int:
@@ -939,6 +967,11 @@ def main(argv: list[str] | None = None) -> int:
     act.add_argument("--cost", action="store_true", help="just the model spend")
     act.add_argument("--json", action="store_true", help="one object per line, for something other than a person")
     act.add_argument("--limit", type=int, default=40)
+
+    tx = sub.add_parser("transcript", help="what was actually sent to the model, and what came back")
+    tx.add_argument("id", nargs="?", type=int, help="one exchange, in full; omit to list")
+    tx.add_argument("--room", default="", help="only this room")
+    tx.add_argument("--last", type=int, default=10, help="how many to list (default 10)")
 
     pr = sub.add_parser("prompt", help="show exactly what the model would be sent")
     pr.add_argument("room", nargs="?", help="realm/#room, as `log` lists them")

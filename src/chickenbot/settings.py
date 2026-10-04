@@ -47,6 +47,7 @@ SETTABLE = (
     "llm.history_minutes",
     "llm.per_user_per_min",
     "llm.deadline_seconds",
+    "llm.transcript",
     "llm.follow",
     "llm.follow_seconds",
     "llm.pause_seconds",

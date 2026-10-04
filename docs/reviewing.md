@@ -7,6 +7,35 @@ another machine with a copy of `chickenbot.db`.
 The durable record is the database, not the log. Logs are for watching it work
 now; `chatlog` and `activity` are for working out later why it did something.
 
+## Why did it say that
+
+The activity record says a model was called, what it cost and which tools it
+reached for. It has never held the words. For that:
+
+```bash
+chickenbot -c <config> tune llm.transcript 20   # keep the last 20 exchanges
+chickenbot -c <config> transcript               # list them
+chickenbot -c <config> transcript 7             # one, in full
+chickenbot -c <config> transcript --room '#lobby'
+chickenbot -c <config> tune llm.transcript 0    # off again
+```
+
+One exchange prints the system prompt (soul and all), the user turn with its
+context, room dossier, people and scrollback, and the reply exactly as the
+model produced it -- before chunking, before the nick prefix, and including a
+`<silent>` that never reached the room. `trigger=` says what set it off:
+`ask` for a direct question, `follow` for a batch it was drawn into,
+`second-look` for a question re-asked because a tool said better was coming.
+
+**Off by default, and worth turning off again.** A prompt carries the room's
+scrollback and what is written down about the people in it. It is a ring of
+the last N, not a log: it answers "what just happened", and the activity
+record is the history.
+
+`chickenbot prompt <realm>/<room> "<question>"` is the other half -- it builds
+a prompt for a question nobody asked, which is how you test a soul edit
+without waiting for somebody to say something.
+
 ## The two questions
 
 `log` is what was **said**. `activity` is what the bot **decided**, spent and

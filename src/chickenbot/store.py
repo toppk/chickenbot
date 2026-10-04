@@ -168,6 +168,28 @@ CREATE INDEX IF NOT EXISTS revision_key ON revision (kind, key, id DESC);
 
 -- One row per handled event: what the bot decided, what it spent, what it
 -- called. The channel shows what was said; this shows what happened.
+-- What was actually sent to the model and what came back. Off by default and
+-- capped: a prompt carries the room's scrollback and what is written down
+-- about the people in it, so this is a debugging facility somebody turns on,
+-- not a record the bot keeps. `llm.transcript` is how many to keep.
+CREATE TABLE IF NOT EXISTS exchange (
+    id      INTEGER PRIMARY KEY,
+    ts      INTEGER NOT NULL,
+    realm   TEXT NOT NULL DEFAULT '',
+    room    TEXT NOT NULL DEFAULT '',
+    nick    TEXT NOT NULL DEFAULT '',
+    trigger TEXT NOT NULL DEFAULT '',   -- what made this call happen
+    asked   TEXT NOT NULL DEFAULT '',   -- the line, or the batch, that set it off
+    system  TEXT NOT NULL DEFAULT '',
+    prompt  TEXT NOT NULL DEFAULT '',
+    reply   TEXT NOT NULL DEFAULT '',
+    model   TEXT NOT NULL DEFAULT '',
+    served  TEXT NOT NULL DEFAULT '',
+    tools   TEXT NOT NULL DEFAULT '',
+    ms      INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS exchange_ts ON exchange (ts DESC);
+
 CREATE TABLE IF NOT EXISTS activity (
     id      INTEGER PRIMARY KEY,
     ts      INTEGER NOT NULL,
@@ -461,6 +483,47 @@ class Store:
             changed += cur.rowcount
         self._db.commit()
         return changed
+
+    def record_exchange(self, fields: dict, keep: int) -> None:
+        """Keep the last `keep` exchanges and drop the rest. A ring buffer
+        rather than a log: it exists to answer "what just happened", and
+        anything older is the activity record's job."""
+        if keep <= 0:
+            return
+        columns = (
+            "realm",
+            "room",
+            "nick",
+            "trigger",
+            "asked",
+            "system",
+            "prompt",
+            "reply",
+            "model",
+            "served",
+            "tools",
+            "ms",
+        )
+        self._db.execute(
+            f"INSERT INTO exchange (ts, {', '.join(columns)}) VALUES (?, {', '.join('?' * len(columns))})",
+            (int(time.time()), *(str(fields.get(c, "")) if c != "ms" else int(fields.get("ms", 0)) for c in columns)),
+        )
+        self._db.execute(
+            "DELETE FROM exchange WHERE id NOT IN (SELECT id FROM exchange ORDER BY id DESC LIMIT ?)", (keep,)
+        )
+        self._db.commit()
+
+    def exchanges(self, *, room: str = "", limit: int = 10, one: int = 0) -> list[sqlite3.Row]:
+        sql, args = "SELECT * FROM exchange", []
+        if one:
+            sql += " WHERE id = ?"
+            args.append(one)
+        elif room:
+            sql += " WHERE room = ? COLLATE NOCASE"
+            args.append(room)
+        sql += " ORDER BY id DESC LIMIT ?"
+        args.append(limit)
+        return self._db.execute(sql, args).fetchall()
 
     def record_activity(self, fields: dict) -> None:
         columns = (

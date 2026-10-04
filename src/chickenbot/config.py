@@ -208,6 +208,10 @@ class LLMConfig:
     # tool turns at ninety seconds each and answered a greeting nine minutes
     # later, which reads as broken however good the eventual answer is.
     deadline_seconds: float = 75.0
+    # Keep the last N prompts and replies for inspection, 0 to keep none. Off
+    # by default: a prompt carries the room's scrollback and the notes on the
+    # people in it, so it is turned on to debug something and turned off after.
+    transcript: int = 0
     # Merged into every openai-compatible request body: OpenRouter's `provider`
     # routing policy lives here.
     body_params: dict = field(default_factory=dict)

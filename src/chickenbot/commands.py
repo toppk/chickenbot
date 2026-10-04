@@ -26,7 +26,7 @@ from .config import Config
 from .dossier import Dossiers
 from .events import Event, Kind
 from .identity import Identities
-from .observe import activity, carry, note, note_default, resumed
+from .observe import activity, carry, current, note, note_default, resumed
 from .policy import ALL, BASIC, EITHER, NAME, NONE, PREFIX, Policies, rooms_from
 from .restraint import Refused, Restraint
 from .rhythm import Rhythm
@@ -494,6 +494,35 @@ class Handler:
         """Told to us, for a network that does not set the bot flag itself.
         Either name will do: an account is stabler, a nick is what you can see."""
         return self.store.is_bot(realm, nick) or self.store.is_bot(realm, account)
+
+    def keep_exchange(self, ctx: Context, system: str, prompt: str, answer: str, following: bool, toolbox) -> None:
+        """What was sent and what came back, when somebody has asked to see it.
+
+        The metadata is already in the activity record; this is the part that
+        was not written down anywhere, so "why did it say that" could only be
+        guessed at from the outside.
+        """
+        keep = self.cfg.llm.transcript
+        if keep <= 0:
+            return
+        record = current()
+        self.store.record_exchange(
+            {
+                "realm": ctx.transport.realm,
+                "room": ctx.channel,
+                "nick": ctx.nick,
+                "trigger": "follow" if following else ("second-look" if ctx.again else "ask"),
+                "asked": ctx.args,
+                "system": system,
+                "prompt": prompt,
+                "reply": answer,
+                "model": str(record.fields.get("model", "")) if record else "",
+                "served": str(record.fields.get("served", "")) if record else "",
+                "tools": ",".join(name for name, _args, _out in getattr(toolbox, "log", [])),
+                "ms": record.elapsed_ms() if record else 0,
+            },
+            keep,
+        )
 
     def follow_window(self, tr: Transport, room: str) -> float:
         """How long a pause here still counts as the same conversation.
@@ -1020,6 +1049,7 @@ async def cmd_ask(h: Handler, ctx: Context, *, following: bool = False) -> None:
         note(outcome="llm-error", error=str(exc)[:60])
         ctx.say(f"{ctx.nick}: {exc}")
         return
+    h.keep_exchange(ctx, system, prompt, answer, following, toolbox)
     quiet, how = is_silence(answer)
     if quiet:
         # Silence, whichever way it was reached. The word itself must never
