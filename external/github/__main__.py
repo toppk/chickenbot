@@ -38,6 +38,9 @@ ACTIVITY_SHOWN = 14  # rows per answer; a burst of pushes must not hide a landin
 MERGED_DAYS = 7  # how far back to look for pull requests somebody else merged
 DESCRIPTION = 90  # enough to say what a repo is, not enough to fill the context
 REFRESH_GAP = 60.0  # a forced refresh this soon after the last one is just quota
+# A fetch that outlasts the turn is not a failure, it is just late. This is
+# how long to leave it before the question is worth asking again.
+RETRY_AFTER = 45.0
 LOOKUP_MEMO = 600.0  # an ad-hoc lookup is remembered this long, against being asked twice
 LOOKUP_MEMOS = 32  # ...and only this many, because it is a memo and not a mirror
 _LOGIN = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]{0,38}")
@@ -585,6 +588,15 @@ class Tool:
             f"refreshed {', '.join(who)}: {fresh} new item(s)" if fresh else f"refreshed {', '.join(who)}: nothing new"
         )
 
+    def retry_after(self) -> float:
+        """Seconds until a fetch still running would be worth asking after.
+
+        Only ever set when work really is in flight. The answer just given is
+        the best one available now; this says a better one exists shortly.
+        """
+        task = self._refreshing
+        return RETRY_AFTER if task is not None and not task.done() else 0.0
+
     async def call(self, name: str, args: dict) -> str:
         """Every tool but one answers from the mirror without waiting. The
         exception is `github_refresh`, which is the point of it."""
@@ -680,7 +692,10 @@ async def _pump(tool: Tool, reader: asyncio.StreamReader, send) -> None:
             name = str(message.get("tool", "")).removeprefix("ext_")
             try:
                 content = await tool.call(name, message.get("args") or {})
-                await send({"type": "result", "id": message.get("id"), "ok": True, "content": content})
+                result = {"type": "result", "id": message.get("id"), "ok": True, "content": content}
+                if later := tool.retry_after():
+                    result["retry_after"] = later
+                await send(result)
             except Exception as exc:  # noqa: BLE001 - the bot gets the failure, not a traceback
                 log.exception("call %s failed", name)
                 await send({"type": "result", "id": message.get("id"), "ok": False, "error": type(exc).__name__})

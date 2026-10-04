@@ -125,6 +125,9 @@ class ToolServer:
     ) -> None:
         self.cfg = cfg
         self.transports = transports
+        # Set by the most recent tool result that named one. Read straight
+        # after a call, by whoever made it.
+        self.retry_after = 0.0
         self.dispatch = dispatch
         self._subjects = subjects or (lambda realm: [])
         self._live: set[Connection] = set()
@@ -197,6 +200,11 @@ class ToolServer:
             case "result":
                 waiter = conn.pending.get(str(message.get("id")))
                 if waiter is not None and not waiter.done():
+                    # A tool may say its answer is the best one *for now* and
+                    # name when a better one exists. Whether anybody comes
+                    # back for it is decided above, not here.
+                    later = message.get("retry_after")
+                    self.retry_after = float(later) if isinstance(later, (int, float)) and later > 0 else 0.0
                     if message.get("ok"):
                         waiter.set_result(str(message.get("content", ""))[:1500])
                     else:

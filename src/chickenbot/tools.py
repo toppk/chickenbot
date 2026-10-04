@@ -70,6 +70,8 @@ class ToolBox:
         self.tools = TOOLS if tools is None else tools
         self.calls = 0
         self.log: list[tuple[str, dict, str]] = []
+        # Seconds until this turn would be worth repeating, 0 when it would not.
+        self.retry_after = 0.0
 
     @property
     def schemas(self) -> list[dict]:
@@ -102,6 +104,12 @@ class ToolBox:
     async def run(self, name: str, args: dict) -> str:
         result = await self._run(name, args)
         self.log.append((name, args, result))
+        # A tool may answer with the best it has and say a better answer is
+        # coming. The soonest such moment wins: whoever comes back should
+        # find every late tool landed.
+        server = getattr(self.handler, "tool_server", None)
+        if (later := getattr(server, "retry_after", 0.0)) and (not self.retry_after or later < self.retry_after):
+            self.retry_after = later
         note_many("tools", name if not result.startswith("error:") else f"{name}!")
         log.debug(
             "tool %s by %s (%s) in %s -> %s",

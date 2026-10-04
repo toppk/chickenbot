@@ -337,6 +337,19 @@ mode is self-only, so `/mode chickenbot -B` from your own client is refused by
 the server. On IRC `+B` is a mode a client sets on
 itself, so no amount of ops lets chickenbot set it for somebody else.
 
+## When a tool is late
+
+A tool may answer with the best it has and say a better answer is coming --
+the github tool does this when a fetch outlasts the turn. The engine then
+schedules the same question again, in the same room, to the same person, and
+the second answer stands on its own rather than arriving as a postscript.
+
+The decision is deterministic. The model is never asked whether to follow up,
+because it would always say yes. A scheduled run is marked as a second look
+and cannot schedule a third, which is the whole loop prevention; the wait is
+capped at five minutes however late a tool claims it will be. `retry_in=` in
+the activity log says when one was set.
+
 ## Reading a project
 
 `github_readme` fetches a repository's root README live, trimmed to 12k

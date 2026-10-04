@@ -150,6 +150,12 @@ still in progress, the fact that the thing chrisk was stuck on last night just
 merged. It may not start something because the room has gone quiet, because it
 has not spoken in a while, or because it can. Silence is not a gap.
 
+**Late is not lost.** A tool that cannot answer inside the turn has not
+failed, it is just slow, and the room should not pay for that with a stale
+answer and silence afterwards. The deterministic half carries the question
+across the gap and asks it again. Nothing about that decision belongs to the
+model, which would always vote to follow up.
+
 **Timely or not at all.** News has a shelf life and a search result answers a
 question that was live. Bringing either one three hours late is worse than not
 bringing it, because it reopens something the room had finished with. The

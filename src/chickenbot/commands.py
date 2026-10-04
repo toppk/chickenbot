@@ -49,6 +49,7 @@ HISTORY_FLOOR = 4
 
 # Seconds within which consecutive lines from one speaker are one utterance.
 # Our own replies chunk at 400 characters and so does everybody else's.
+RETRY_CAP = 300  # however late a tool says it will be, stop waiting here
 BREATH = 8
 
 # How often a stranger who messages privately is told why nothing happens.
@@ -74,6 +75,9 @@ class Context:
     # Moderation actions taken while serving this one request. One Context is
     # one request, whether it came as a command or through the model.
     moved: int = 0
+    # This request is itself a second look at an earlier one. A second look
+    # never earns a third: that is the whole loop prevention.
+    again: bool = False
 
     def say(self, text: str) -> None:
         self.transport.say(self.channel, text)
@@ -415,6 +419,7 @@ class Handler:
         """A job came due. Authority is re-checked now, not when it was set."""
         name, _, args = event.text.partition(" ")
         ctx = self._context(event, args.strip())
+        ctx.again = True
         cmd = COMMANDS.get(name.lower().removeprefix(self.cfg.prefix))
         if cmd is None:
             note(outcome="unknown-command", command=name)
@@ -1008,8 +1013,36 @@ async def cmd_ask(h: Handler, ctx: Context, *, following: bool = False) -> None:
     # the asker's name in front of that gives "toppk: biff: ...", which names
     # the wrong person first.
     ctx.say(answer if addressed_to_somebody(ctx, answer) else f"{ctx.nick}: {answer}")
+    await come_back_to_it(h, ctx, toolbox)
     if ctx.in_channel:
         h.attention.spoke(f"{ctx.transport.realm}/{ctx.channel}", h.follow_window(ctx.transport, ctx.channel))
+
+
+async def come_back_to_it(h: Handler, ctx: Context, toolbox: ToolBox | None) -> None:
+    """A tool answered with what it had and said better is coming. Ask again.
+
+    The alternative is what happened to toppk: a refresh kicked off, the turn
+    answered from a stale mirror, and the fetch landing into a room nobody
+    told. The scheduler already exists to carry a question across a gap; this
+    is a question worth carrying.
+
+    Deterministic on purpose. The model is not asked whether to follow up --
+    it would always say yes -- and a second look never earns a third, because
+    a scheduled run is marked and cannot schedule another.
+    """
+    later = getattr(toolbox, "retry_after", 0.0)
+    if not later or ctx.again or not ctx.in_channel or not ctx.args.strip():
+        return
+    await h.store.add_job(
+        due_at=int(time.time() + min(later, RETRY_CAP)),
+        realm=ctx.transport.realm,
+        room=ctx.channel,
+        nick=ctx.nick,
+        account=ctx.account,
+        is_group=True,
+        command=f"{h.cfg.prefix}ask {ctx.args.strip()}",
+    )
+    note(retry_in=int(min(later, RETRY_CAP)))
 
 
 @command("watching", blurb="repos watched here")
