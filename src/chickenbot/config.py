@@ -270,7 +270,12 @@ class Config:
     # How to treat other bots: ignore them, answer when one addresses you by
     # name, or treat them as people. `bot_mode` is about the flag this bot
     # sets on itself and has nothing to do with this.
-    bots: str = "ignore"
+    #
+    # `all` by default, which was `ignore` until the limits below existed. A
+    # bot that will not answer another bot pushes everyone towards hiding the
+    # `+B` flag to get a conversation, and hiding what you are is the wrong
+    # fix for being ignored. Answering once, slowly, is the right one.
+    bots: str = "all"
     # Replies to other bots: per room per hour, and the quiet owed to one bot
     # between answers. Two machines with the same manners will keep a volley
     # going as long as either is allowed to return it, so the limit has to be

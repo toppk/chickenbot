@@ -63,7 +63,8 @@ def test_it_can_be_taken_back(store):
     assert store.forget_bot("fake", "eggbot") is False
 
 
-async def test_a_marked_bot_is_logged_but_never_answered(handler, store):
+async def test_a_marked_bot_is_logged_but_never_answered(handler, store, cfg):
+    cfg.bots = "ignore"
     tr = FakeTransport()
     store.mark_bot("fake", "eggbot")
     await handler.dispatch(tr.envelope("!ask what is six by seven", sender="eggbot", account="eggbot"))
@@ -213,9 +214,9 @@ async def test_a_persons_line_is_not(cfg, store):
     assert "<nate>" in rendered and "(bot)" not in rendered
 
 
-async def test_seeing_it_is_still_not_answering_it(handler, store):
-    """The loop protection is that it never acts on a bot, not that it cannot
-    read one."""
+async def test_seeing_it_is_still_not_answering_it(handler, store, cfg):
+    """Under `ignore`: what it will not act on, it still reads."""
+    cfg.bots = "ignore"
     tr = FakeTransport()
     store.mark_bot("fake", "biff")
     await handler.dispatch(tr.envelope("chickenbot: answer me", sender="biff", account="biff"))
@@ -309,11 +310,28 @@ async def test_a_url_is_not_somebody_being_addressed(cfg, store):
     assert tr.sent
 
 
-async def test_a_bot_is_ignored_by_default(handler, store):
+async def test_a_bot_is_answered_by_default(cfg, store):
+    """Was `ignore` until the limits existed. A bot that will not answer bots
+    pushes everyone towards hiding +B to get a conversation, and hiding what
+    you are is the wrong fix for being ignored."""
+    from .test_commands import StubProvider
+
+    assert cfg.bots == "all"
+    h = Handler(cfg, store, StubProvider("hello yourself"), None)
     store.mark_bot("fake", "eggbot")
     tr = FakeTransport()
-    await handler.dispatch(tr.envelope("chickenbot: hello", sender="eggbot", account="eggbot"))
-    await handler.drain()
+    await h.dispatch(tr.envelope("chickenbot: hello", sender="eggbot", account="eggbot"))
+    await h.drain()
+    assert tr.sent and "hello yourself" in tr.sent[0][1]
+
+
+async def test_ignore_is_still_there_for_a_room_that_wants_it(cfg, store):
+    cfg.bots = "ignore"
+    h = Handler(cfg, store, None, None)
+    store.mark_bot("fake", "eggbot")
+    tr = FakeTransport()
+    await h.dispatch(tr.envelope("chickenbot: hello", sender="eggbot", account="eggbot"))
+    await h.drain()
     assert tr.sent == []
 
 
@@ -418,3 +436,52 @@ async def test_an_ignored_bot_is_logged_once_too(handler, store):
     await handler.drain()
     said = [line for line in store.conversation("fake", "#chan") if line[1] == "eggbot"]
     assert len(said) == 1 and said[0][3] == "bot"
+
+
+# -- what `bots = all` does not loosen -----------------------------------
+
+
+async def test_a_bot_may_talk_but_never_command(cfg, store):
+    """Talking to a bot is not taking orders from one. A command carries
+    authority, and authority belongs to the account a person logged in to."""
+    from .test_commands import StubProvider
+
+    h = Handler(cfg, store, StubProvider("sure"), None)
+    tr = FakeTransport(owners=("alice",))
+    await h.dispatch(tr.envelope("!topic hijacked", sender="otherbot", account="alice", is_bot=True))
+    await h.drain()
+    assert tr.actions == [] and tr.sent == []
+
+
+async def test_the_same_bot_is_still_answered_in_conversation(cfg, store):
+    from .test_commands import StubProvider
+
+    h = Handler(cfg, store, StubProvider("sure"), None)
+    tr = FakeTransport(owners=("alice",))
+    await h.dispatch(tr.envelope("chickenbot: how are you", sender="otherbot", account="alice", is_bot=True))
+    await h.drain()
+    assert tr.sent and "sure" in tr.sent[0][1]
+
+
+async def test_an_ignore_list_is_absolute(cfg, store):
+    """An ignore list is somebody saying "not this nick". It is not a view
+    about bots, and `bots = all` does not loosen it."""
+    from .test_commands import StubProvider
+
+    h = Handler(cfg, store, StubProvider("sure"), None)
+    tr = FakeTransport(ignored=["OtherBot"])
+    await h.dispatch(tr.envelope("chickenbot: hello", sender="otherbot", account="otherbot"))
+    await h.drain()
+    assert tr.sent == []
+
+
+async def test_a_bot_in_a_direct_message_gets_nothing(cfg, store):
+    """No room, no witnesses, and nothing it could usefully be."""
+    from .test_commands import StubProvider
+
+    h = Handler(cfg, store, StubProvider("sure"), None)
+    tr = FakeTransport()
+    store.mark_bot("fake", "eggbot")
+    await h.dispatch(tr.envelope("hello", sender="eggbot", account="eggbot", room="eggbot", is_group=False))
+    await h.drain()
+    assert tr.sent == []

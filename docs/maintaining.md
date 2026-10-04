@@ -317,7 +317,10 @@ chickenbot -c <config> bot irc:irc.chonkbase.net eggbot        # mark one
 chickenbot -c <config> bot irc:irc.chonkbase.net eggbot --forget
 ```
 
-`.tune bots ignore|addressed|all` says whether to answer one at all, and two
+`.tune bots all|addressed|ignore` says whether to answer one at all. `all` is
+the default: a bot that will not answer bots pushes everyone towards turning
+off their own `+B` to get a conversation, and hiding what you are is the wrong
+fix for being ignored. Leave `bot_mode` on and let this do the work. Two
 further knobs keep an answer from becoming a rally: `.tune bot_gap_seconds`
 (quiet owed to one bot between answers, default 180) and `.tune bot_replies`
 (per room per hour, default 3). A bot also never opens a conversation, so
@@ -329,6 +332,13 @@ return every volley you send.
 flags, so `B` is visible without opening a client. chickenbot's own realname
 carries its version, which WHO shows; another bot's realname is whatever that
 bot chose.
+
+Three things `bots = all` does not loosen, whatever it is set to: an ignore
+list is absolute, a bot in a direct message gets nothing, and **a bot's line
+is never run as a command**. Talking to a bot is not taking orders from one --
+authority belongs to the account a person logged in to, and a `+B` client
+claiming an owner's account must not be able to run `.topic`. That shows as
+`outcome=no-commands-from-bots` in the record.
 
 IRCv3 bot mode and the platform flags are honoured automatically; this is for
 the ones that do not flag themselves. Whether chickenbot flags *itself* is

@@ -72,10 +72,14 @@ async def test_a_command_that_runs_records_it(handler, transport, caplog):
     assert "command=topic" in line and "outcome=ran" in line and "owner=true" in line
 
 
-async def test_a_flagged_bot_is_recorded_as_ignored(handler, transport, caplog):
+async def test_a_command_from_a_flagged_bot_is_recorded_as_refused(handler, transport, caplog):
+    """Answering bots is the default now, so this is the rule that stops one
+    from issuing commands -- and the record says which rule fired."""
     with caplog.at_level(logging.INFO):
         await send(handler, transport, "!topic hijack", account="alice", is_bot=True)
-    assert "outcome=bot-ignored" in lines(caplog)[0]
+        await handler.drain()
+    assert "outcome=no-commands-from-bots" in lines(caplog)[0]
+    assert transport.sent == []
 
 
 async def test_a_failing_command_still_produces_exactly_one_line(handler, transport, caplog):

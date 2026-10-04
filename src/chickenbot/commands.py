@@ -459,13 +459,15 @@ class Handler:
     def answers_bots(self, tr: Transport, env: Event) -> bool:
         """Whether to answer another bot at all.
 
-        `ignore` is the default and the safe one. `addressed` answers a bot
-        that names us, which is the interesting case and still bounded three
-        ways: a quiet spell owed to that bot, a budget per room per hour, and
-        the rule that a bot never opens an engagement. Two machines with the
-        same manners will return a volley for as long as either is allowed to.
+        `all` is the default: being honest about being a bot should not cost
+        you the conversation, and a bot that will not answer bots pushes
+        everyone towards hiding `+B` to get one. `ignore` remains for a room
+        where it would be wrong. Either way an answer is bounded three ways:
+        a quiet spell owed to that bot, a budget per room per hour, and the
+        rule that a bot never opens an engagement. Two machines with the same
+        manners will return a volley for as long as either is allowed to.
         """
-        how = (self.cfg.bots or "ignore").lower()
+        how = (self.cfg.bots or "all").lower()
         if how == "ignore":
             return False
         if how == "addressed" and self._extract(tr, env.text, env.is_group, env.room) is None:
@@ -673,11 +675,26 @@ class Handler:
 
     async def _handle_message(self, event: Event) -> None:
         tr, env = event.transport, event
-        from_a_bot = env.is_bot or tr.is_ignored(env.sender) or self.known_bot(tr.realm, env.sender, env.account)
-        if from_a_bot and not self.answers_bots(tr, env):
-            note(outcome="bot-ignored")
+        from_a_bot = env.is_bot or self.known_bot(tr.realm, env.sender, env.account)
+
+        async def keep_quiet(why: str) -> None:
+            note(outcome=why)
             if env.is_group and env.text:
                 await self.store.log_line(tr.realm, env.room, env.sender, env.account, env.text, "bot")
+
+        # Three rules that hold whatever `bots` is set to. They used to be
+        # true only because the default was `ignore`, which hid them.
+        if tr.is_ignored(env.sender):
+            # An ignore list is a person saying "not this nick". It is not a
+            # view about bots and `bots` does not loosen it.
+            await keep_quiet("ignored")
+            return
+        if from_a_bot and not env.is_group:
+            # A bot in a direct message, where no one can see either of us.
+            await keep_quiet("bot-dm")
+            return
+        if from_a_bot and not self.answers_bots(tr, env):
+            await keep_quiet("bot-ignored")
             return
         if from_a_bot:
             note(from_bot=env.sender)
@@ -727,6 +744,13 @@ class Handler:
             return
 
         cmd = COMMANDS.get(name.lower().removeprefix(self.cfg.prefix))
+        # Talking to a bot is not taking orders from one. `bots = all` is
+        # about conversation; a command carries authority, and authority
+        # belongs to the account a person is logged in to. Without this, a
+        # bot flagged `+B` claiming an owner's account could run `.topic`.
+        if cmd is not None and from_a_bot:
+            note(outcome="no-commands-from-bots", command=cmd.name)
+            return
         ctx = self._context(event, args.strip())
         # Asked before engaging, because engaging is what makes it true.
         mid_conversation = self.cfg.llm.follow and env.is_group and self.attention.engaged(key)
