@@ -337,6 +337,19 @@ mode is self-only, so `/mode chickenbot -B` from your own client is refused by
 the server. On IRC `+B` is a mode a client sets on
 itself, so no amount of ops lets chickenbot set it for somebody else.
 
+## Reading a project
+
+`github_readme` fetches a repository's root README live, trimmed to 12k
+characters on a line boundary. It is the only tool here that can fill the
+context, so it is declared as expensive and meant for "describe the
+architecture of X", not for "what is X" -- `github_repos` already carries the
+blurb. Nothing caches it: a README is read when somebody is trying to
+understand a project, which is rare, and mirroring every one of them would be
+polling the world against the chance of a question.
+
+What it returns is the project's own words, which makes it a good source and
+not a true one. Like all tool output it is a document, never an instruction.
+
 ## Who the github tool watches
 
 The watch list is the *mirror*: the people it polls, caches and can answer

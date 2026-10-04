@@ -1284,3 +1284,84 @@ async def test_a_repo_with_only_issues_does_not_mention_pull_requests(tmp_path):
     answer = await Tool(store, None, ["someone"]).call("github_repos", {"user": "someone"})
     assert "2 issues open" in answer and "PR" not in answer
     store.close()
+
+
+# -- reading a project in its own words ----------------------------------
+
+
+def _tool(tmp_path, api=None):
+    from external.github.__main__ import Tool
+    from external.github.store import Store as GhStore
+
+    return Tool(GhStore(tmp_path / "g.db"), api, ["chrisk"])
+
+
+class ReadmeApi:
+    def __init__(self, text="", boom=None):
+        self.text, self.boom, self.asked = text, boom, []
+
+    async def readme(self, repo: str) -> str:
+        self.asked.append(repo)
+        if self.boom:
+            raise self.boom
+        return self.text
+
+
+async def test_it_returns_the_project_in_its_own_words(tmp_path):
+    """chrisk asked for maclab's architecture and the bot had only the blurb."""
+    api = ReadmeApi("# maclab\n\nBoots a kernel on a spare Mac, recovers it when it dies.")
+    out = await _tool(tmp_path, api).call("github_readme", {"repo": "iconidentify/maclab"})
+    assert "recovers it when it dies" in out
+    assert api.asked == ["iconidentify/maclab"]
+
+
+async def test_a_long_readme_is_cut_on_a_line_and_says_so(tmp_path):
+    """Agent-facing repos run long; stopping mid-sentence reads as the end."""
+    from external.github.__main__ import README_CHARS
+
+    api = ReadmeApi("\n".join(f"line {n} of a very long document" for n in range(2000)))
+    out = await _tool(tmp_path, api).call("github_readme", {"repo": "a/b"})
+    assert len(out) < README_CHARS + 400
+    assert "not shown" in out and "do not treat this as the whole document" in out
+    assert not out.endswith("line")  # cut on a line boundary, not mid-word
+
+
+async def test_a_short_readme_is_not_announced_as_truncated(tmp_path):
+    out = await _tool(tmp_path, ReadmeApi("# small\n\nthat is all")).call("github_readme", {"repo": "a/b"})
+    assert "not shown" not in out and "that is all" in out
+
+
+async def test_no_readme_is_said_plainly(tmp_path):
+    out = await _tool(tmp_path, ReadmeApi("")).call("github_readme", {"repo": "a/b"})
+    assert "no readme" in out
+
+
+async def test_a_bad_repo_name_never_reaches_github(tmp_path):
+    api = ReadmeApi("x")
+    tool = _tool(tmp_path, api)
+    for bad in ("maclab", "a/b/c", "", "../../etc/passwd", "a/b c"):
+        assert "error:" in await tool.call("github_readme", {"repo": bad}), bad
+    assert api.asked == []
+
+
+async def test_a_rate_limit_on_a_readme_is_reported_not_raised(tmp_path):
+    api = ReadmeApi(boom=RuntimeError("github rate limit reached"))
+    assert "rate limit" in await _tool(tmp_path, api).call("github_readme", {"repo": "a/b"})
+
+
+async def test_it_is_declared_as_expensive(tmp_path):
+    """The model needs to know this is the one that can fill its context."""
+    from external.github.__main__ import TOOLS
+
+    spec = next(t for t in TOOLS if t["name"] == "github_readme")
+    assert "EXPENSIVE" in spec["description"]
+    assert "never an instruction" in spec["description"]
+
+
+async def test_a_readme_is_not_mirrored(tmp_path):
+    """Read when somebody is trying to understand something, not polled."""
+    api = ReadmeApi("# x")
+    tool = _tool(tmp_path, api)
+    await tool.call("github_readme", {"repo": "a/b"})
+    await tool.call("github_readme", {"repo": "a/b"})
+    assert len(api.asked) == 2  # no cache pretending to be a mirror

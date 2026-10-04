@@ -51,6 +51,23 @@ class GitHub:
         response.raise_for_status()
         return response.json(), response.headers.get("etag", "")
 
+    async def readme(self, repo: str) -> str:
+        """The repo's root README, rendered as its own markdown.
+
+        The raw media type, because the JSON form is base64 and the HTML form
+        is a page. "" when there is none, which is not an error.
+        """
+        response = await self.client.get(
+            f"{self.base}/repos/{repo}/readme",
+            headers={"Accept": "application/vnd.github.raw+json"},
+        )
+        if response.status_code == 404:
+            return ""
+        if response.status_code == 403 and "rate limit" in response.text.lower():
+            raise RuntimeError("github rate limit reached")
+        response.raise_for_status()
+        return response.text
+
     async def repos(self, user: str) -> list[dict]:
         """Public repos a user owns, normalised for the store."""
         payload, _ = await self.get(f"/users/{user}/repos", per_page=PER_PAGE, sort="pushed", type="owner")
