@@ -1,17 +1,18 @@
-"""What was actually sent to the model, and what came back.
+"""Every call to the model, whatever asked for it.
 
-The activity record held the metadata -- model, cost, tools, outcome -- and
-never the words, so "why did it say that" could only be guessed at from
-outside. Off by default: a prompt carries the room's scrollback and the notes
-on the people in it.
+Wrapped around the provider rather than its callers: the chat path, the
+bartender's daily pass, the room read and a barfly remark all funnel through
+`reply`, and so will whatever is written next.
 """
 
 import io
 from contextlib import redirect_stderr, redirect_stdout
 
-from chickenbot.commands import Handler
+from chickenbot.brain.recorded import Recorded, why
+from chickenbot.config import LLMConfig
+from chickenbot.observe import activity
+from chickenbot.store import LlmCall
 
-from .conftest import FakeTransport
 from .test_commands import StubProvider
 
 
@@ -26,80 +27,110 @@ def cli(tmp_path, *args):
     return code, out.getvalue() + err.getvalue()
 
 
-async def ask(cfg, store, text="what is going on?", reply="not much"):
-    h = Handler(cfg, store, StubProvider(reply), None)
-    tr = FakeTransport(owners=("toppk",))
-    await h.dispatch(tr.envelope(f"chickenbot: {text}", sender="toppk", account="toppk"))
-    await h.drain()
-    return h, tr
+def wrapped(store, reply="not much", keep=100, hours=48) -> Recorded:
+    from chickenbot.config import LLMConfig
+
+    return Recorded(StubProvider(reply), store, LLMConfig(transcript=keep, transcript_hours=hours))
 
 
-# -- off unless asked for ------------------------------------------------
+async def call(provider, **fields):
+    with activity(**(fields or {"kind": "message"})):
+        return await provider.reply(system="SOUL", history=[], prompt="TURN", search=False)
 
 
-async def test_nothing_is_kept_by_default(cfg, store):
-    assert cfg.llm.transcript == 0
-    await ask(cfg, store)
-    assert store.exchanges() == []
+# -- it catches every caller, not just the chat path ---------------------
 
 
-async def test_turning_it_on_keeps_the_words(cfg, store):
-    cfg.llm.transcript = 20
-    await ask(cfg, store, "six by seven?", reply="42")
-    rows = store.exchanges()
-    assert len(rows) == 1
-    assert rows[0]["reply"] == "42"
-    assert "six by seven?" in rows[0]["asked"]
-    assert "<context>" in rows[0]["prompt"]
-    assert rows[0]["system"]
+async def test_a_chat_answer_is_kept(store):
+    await call(wrapped(store), kind="message", command="ask", room="#chan", nick="toppk")
+    row = store.llm_calls()[0]
+    assert row["reason"] == "message/ask" and row["room"] == "#chan"
+    assert "SOUL" in row["request"] and "TURN" in row["request"]
+    assert row["response"] == "not much"
 
 
-async def test_it_is_a_ring_and_not_a_log(cfg, store):
-    """It answers "what just happened"; the activity record is the history."""
-    cfg.llm.transcript = 3
+async def test_the_bartender_is_kept_too(store):
+    """The pass that writes durable state from a prompt nobody could see."""
+    await call(wrapped(store, "chrisk: fighting a cold"), kind="bartender", room="#lobby")
+    row = store.llm_calls()[0]
+    assert row["reason"] == "bartender"
+    assert "cold" in row["response"]
+
+
+async def test_the_reason_needs_nobody_to_pass_it(store):
+    """It is read from the activity record every caller already opens."""
+    assert why({"kind": "message", "command": "ask"}) == "message/ask"
+    assert why({"kind": "bartender"}) == "bartender"
+    assert why({"kind": "vibe", "command": "vibe"}) == "vibe"
+    assert why({}) == "?"
+
+
+async def test_a_call_outside_any_activity_is_still_kept(store):
+    p = wrapped(store)
+    await p.reply(system="S", history=[], prompt="P", search=False)
+    assert len(store.llm_calls()) == 1
+
+
+# -- the two bounds ------------------------------------------------------
+
+
+async def test_the_count_bounds_it(store):
+    p = wrapped(store, keep=3)
     for n in range(6):
-        await ask(cfg, store, f"question {n}")
-    rows = store.exchanges(limit=99)
-    assert len(rows) == 3
-    assert "question 5" in rows[0]["asked"]
+        await call(p, kind="message", nick=f"n{n}")
+    assert len(store.llm_calls(limit=99)) == 3
 
 
-# -- what set it off -----------------------------------------------------
+async def test_age_bounds_it_too(store):
+    """A hundred calls on a quiet weekend reach back a week."""
+    import time
+
+    p = wrapped(store, keep=100, hours=48)
+    await call(p, kind="message")
+    store._db.execute("UPDATE llm_call SET ts = ?", (int(time.time()) - 72 * 3600,))
+    store._db.commit()
+    await call(p, kind="message")
+    assert len(store.llm_calls(limit=99)) == 1
 
 
-async def test_a_direct_question_is_marked_as_one(cfg, store):
-    cfg.llm.transcript = 5
-    await ask(cfg, store)
-    assert store.exchanges()[0]["trigger"] == "ask"
+async def test_zero_keeps_nothing(store):
+    await call(wrapped(store, keep=0), kind="message")
+    assert store.llm_calls() == []
 
 
-async def test_a_second_look_is_marked_apart(cfg, store):
-    """The uncanny one: a follow-up reads differently and should be findable."""
-    from chickenbot.commands import Context, cmd_ask
-
-    cfg.llm.transcript = 5
-    h = Handler(cfg, store, StubProvider("the delta is chonkstep"), None)
-    tr = FakeTransport(owners=("toppk",))
-    ctx = Context(
-        handler=h,
-        transport=tr,
-        nick="toppk",
-        account="toppk",
-        channel="#chan",
-        args="whats my github looking like",
-        is_owner=True,
-        in_channel=True,
-        again=True,
-    )
-    await cmd_ask(h, ctx)
-    await h.drain()
-    assert store.exchanges()[0]["trigger"] == "second-look"
+# -- it must never cost an answer ----------------------------------------
 
 
-async def test_the_model_that_served_it_is_recorded(cfg, store):
-    cfg.llm.transcript = 5
-    await ask(cfg, store)
-    assert store.exchanges()[0]["ms"] >= 0
+async def test_a_failing_provider_is_recorded_and_still_raises(store):
+    import pytest
+
+    class Broken:
+        name, supports_tools = "broken", False
+
+        async def reply(self, **kw):
+            raise RuntimeError("upstream said no")
+
+        async def aclose(self):
+            pass
+
+    p = Recorded(Broken(), store, LLMConfig(transcript=10))
+    with pytest.raises(RuntimeError):
+        await call(p, kind="message")
+    assert "upstream said no" in store.llm_calls()[0]["response"]
+
+
+async def test_a_broken_store_does_not_lose_the_answer(store):
+    """Bookkeeping must never be the reason a reply is dropped."""
+
+    def boom(*_a, **_k):
+        raise sqlite_error()
+
+    def sqlite_error():
+        return RuntimeError("disk full")
+
+    p = wrapped(store)
+    p.store.record_llm_call = boom
+    assert await call(p, kind="message") == "not much"
 
 
 # -- reading it back -----------------------------------------------------
@@ -110,40 +141,108 @@ def test_an_empty_record_says_how_to_turn_it_on(tmp_path):
     assert code == 1 and "llm.transcript" in out
 
 
-def test_one_exchange_prints_all_three_parts(tmp_path):
+def test_one_call_prints_request_and_response(tmp_path):
     from chickenbot.store import Store
 
     st = Store(tmp_path / "c.db")
-    st.record_exchange(
-        {
-            "realm": "irc:x",
-            "room": "#soup",
-            "nick": "toppk",
-            "trigger": "follow",
-            "asked": "hi",
-            "system": "SOULTEXT",
-            "prompt": "PROMPTTEXT",
-            "reply": "REPLYTEXT",
-            "model": "m",
-            "served": "Together",
-            "tools": "chan_who",
-            "ms": 2100,
-        },
-        keep=5,
+    st.record_llm_call(
+        LlmCall(
+            reason="bartender",
+            realm="irc:x",
+            room="#lobby",
+            nick="chickenbot",
+            request="REQUESTTEXT",
+            response="RESPONSETEXT",
+            model="m",
+            served="Together",
+            tool_calls=[{"name": "chan_who", "args": {"target": "biff"}, "result": "biff [bot]"}],
+            ms=4200,
+        ),
+        100,
+        48,
     )
     st.close()
     code, out = cli(tmp_path, "transcript", "1")
     assert code == 0
-    assert "SOULTEXT" in out and "PROMPTTEXT" in out and "REPLYTEXT" in out
-    assert "trigger=follow" in out and "served=Together" in out and "tools=chan_who" in out
+    assert "REQUESTTEXT" in out and "RESPONSETEXT" in out
+    assert "bartender" in out and "served=Together" in out
+    # What it asked for, with what, and what came back.
+    assert "TOOL 1: chan_who" in out
+    assert '"target": "biff"' in out and "biff [bot]" in out
 
 
-def test_a_room_can_be_singled_out(tmp_path):
+def test_reasons_can_be_singled_out(tmp_path):
     from chickenbot.store import Store
 
     st = Store(tmp_path / "c.db")
-    for room in ("#soup", "#lobby"):
-        st.record_exchange({"room": room, "nick": "toppk", "asked": f"in {room}"}, keep=9)
+    for reason in ("message/ask", "bartender", "barfly"):
+        st.record_llm_call(LlmCall(reason=reason, response=f"from {reason}"), 100, 48)
     st.close()
-    assert "in #lobby" in cli(tmp_path, "transcript", "--room", "#lobby")[1]
-    assert "in #soup" not in cli(tmp_path, "transcript", "--room", "#lobby")[1]
+    out = cli(tmp_path, "transcript", "--reason", "bartender")[1]
+    assert "from bartender" in out and "from barfly" not in out
+
+
+# -- what happened inside the turn ---------------------------------------
+
+
+async def test_tool_calls_are_kept_with_their_arguments_and_results(store):
+    """A turn is one row; this is what went on inside it. chrisk's github
+    question was three HTTP calls and the interesting part was the middle."""
+    import json
+
+    class Tooled:
+        name, supports_tools = "tooled", True
+
+        async def reply(self, *, toolbox=None, **kw):
+            toolbox.log.append(("chan_who", {"target": "biff"}, "biff (biff@host) [bot]"))
+            toolbox.log.append(("chan_state", {}, "#lobby: 9 here"))
+            return "three bots, by the flag"
+
+        async def aclose(self):
+            pass
+
+    class Box:
+        log: list = []
+
+    p = Recorded(Tooled(), store, LLMConfig(transcript=10))
+    with activity(kind="message", command="ask", room="#lobby"):
+        await p.reply(system="S", history=[], prompt="P", search=False, toolbox=Box())
+    calls = json.loads(store.llm_calls()[0]["tool_calls"])
+    assert [c["name"] for c in calls] == ["chan_who", "chan_state"]
+    assert calls[0]["args"] == {"target": "biff"}
+    assert "biff@host" in calls[0]["result"]
+
+
+async def test_no_tools_is_an_empty_list_not_a_null(store):
+    """So reading it back never needs a special case."""
+    import json
+
+    await call(wrapped(store), kind="message")
+    assert json.loads(store.llm_calls()[0]["tool_calls"]) == []
+
+
+async def test_a_huge_tool_result_is_cut(store):
+    """github_readme returns twelve thousand characters by design."""
+    import json
+
+    from chickenbot.brain.recorded import RESULT_SHOWN
+
+    class Big:
+        name, supports_tools = "big", True
+
+        async def reply(self, *, toolbox=None, **kw):
+            toolbox.log.append(("ext_github_readme", {"repo": "a/b"}, "x" * 50000))
+            return "it is a test lab"
+
+        async def aclose(self):
+            pass
+
+    class Box:
+        log: list = []
+
+    p = Recorded(Big(), store, LLMConfig(transcript=10))
+    with activity(kind="message"):
+        await p.reply(system="S", history=[], prompt="P", search=False, toolbox=Box())
+    kept = json.loads(store.llm_calls()[0]["tool_calls"])[0]
+    assert len(kept["result"]) == RESULT_SHOWN
+    assert kept["of"] == 50000  # a slice that does not say so reads as the whole

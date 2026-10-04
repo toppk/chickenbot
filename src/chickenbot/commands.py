@@ -26,14 +26,14 @@ from .config import Config
 from .dossier import Dossiers
 from .events import Event, Kind
 from .identity import Identities
-from .observe import activity, carry, current, note, note_default, resumed
+from .observe import activity, carry, note, note_default, resumed
 from .policy import ALL, BASIC, EITHER, NAME, NONE, PREFIX, Policies, rooms_from
 from .restraint import Refused, Restraint
 from .rhythm import Rhythm
 from .rooms import MAX_CHARS as ROOM_NOTES_MAX
 from .rooms import Rooms
 from .scheduler import MAX_DELAY, describe, parse_delay
-from .settings import SETTABLE, Settings, Unsettable
+from .settings import RESTART_ONLY, SETTABLE, Settings, Unsettable
 from .soul import Soul
 from .store import Store
 from .tools import ToolBox
@@ -494,35 +494,6 @@ class Handler:
         """Told to us, for a network that does not set the bot flag itself.
         Either name will do: an account is stabler, a nick is what you can see."""
         return self.store.is_bot(realm, nick) or self.store.is_bot(realm, account)
-
-    def keep_exchange(self, ctx: Context, system: str, prompt: str, answer: str, following: bool, toolbox) -> None:
-        """What was sent and what came back, when somebody has asked to see it.
-
-        The metadata is already in the activity record; this is the part that
-        was not written down anywhere, so "why did it say that" could only be
-        guessed at from the outside.
-        """
-        keep = self.cfg.llm.transcript
-        if keep <= 0:
-            return
-        record = current()
-        self.store.record_exchange(
-            {
-                "realm": ctx.transport.realm,
-                "room": ctx.channel,
-                "nick": ctx.nick,
-                "trigger": "follow" if following else ("second-look" if ctx.again else "ask"),
-                "asked": ctx.args,
-                "system": system,
-                "prompt": prompt,
-                "reply": answer,
-                "model": str(record.fields.get("model", "")) if record else "",
-                "served": str(record.fields.get("served", "")) if record else "",
-                "tools": ",".join(name for name, _args, _out in getattr(toolbox, "log", [])),
-                "ms": record.elapsed_ms() if record else 0,
-            },
-            keep,
-        )
 
     def follow_window(self, tr: Transport, room: str) -> float:
         """How long a pause here still counts as the same conversation.
@@ -1049,7 +1020,6 @@ async def cmd_ask(h: Handler, ctx: Context, *, following: bool = False) -> None:
         note(outcome="llm-error", error=str(exc)[:60])
         ctx.say(f"{ctx.nick}: {exc}")
         return
-    h.keep_exchange(ctx, system, prompt, answer, following, toolbox)
     quiet, how = is_silence(answer)
     if quiet:
         # Silence, whichever way it was reached. The word itself must never
@@ -1241,7 +1211,7 @@ async def cmd_vibe(h: Handler, ctx: Context) -> None:
     ctx.say(f"noted, that is what {ctx.channel} is like")
 
 
-@command("tune", owner=True, tier=ALL, usage="tune [key] [value]", blurb="change behaviour, no restart")
+@command("tune", owner=True, tier=ALL, usage="tune [key] [value|default]", blurb="change behaviour, no restart")
 async def cmd_tune(h: Handler, ctx: Context) -> None:
     """Not `set`: an addressed line starting with a common verb is somebody
     talking, and "chickenbot: set the topic" must not become a command."""
@@ -1254,9 +1224,22 @@ async def cmd_tune(h: Handler, ctx: Context) -> None:
         return
     try:
         if not value.strip():
-            ctx.say(f"{ctx.nick}: {key} = {h.settings.get(key)}")
+            back = h.settings.would_revert_to(key)
+            now = h.settings.get(key)
+            extra = f" (default {back})" if key in h.settings.overridden() and back != now else ""
+            ctx.say(f"{ctx.nick}: {key} = {now}{extra}")
             return
-        ctx.say(f"{ctx.nick}: {key} = {h.settings.set(key, value, author=ctx.account or ctx.nick)}")
+        if value.strip().lower() == "default":
+            # The only way to un-override used to be a shell. You could change
+            # the bot's mind from the partyline but not change it back.
+            gone = h.settings.unset(key)
+            back = h.settings.would_revert_to(key)
+            ctx.say(f"{ctx.nick}: {key} back to {back} at next start" if gone else f"{ctx.nick}: {key} was not tuned")
+            return
+        now = h.settings.set(key, value, author=ctx.account or ctx.nick)
+        # Saying it took when it did not is worse than not having the knob.
+        late = " (needs a restart to bite)" if key in RESTART_ONLY else ""
+        ctx.say(f"{ctx.nick}: {key} = {now}{late}")
     except Unsettable:
         ctx.say(f"{ctx.nick}: {key} is not mine to change; settable: {', '.join(SETTABLE)}")
     except ValueError as exc:

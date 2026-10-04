@@ -73,6 +73,36 @@ authenticating with SASL EXTERNAL
 SASL EXTERNAL refused: ... / authenticating with SASL PLAIN
 ```
 
+## Tuning
+
+```bash
+chickenbot -c <config> tune                     # everything, * on the overrides
+chickenbot -c <config> tune llm.effort high     # override
+chickenbot -c <config> tune llm.effort --unset  # drop the override
+```
+
+An override is a row in the database laid over the config file, so the order
+is **override, then toml, then built-in**. The listing says what dropping one
+would leave behind, which is the question you have while looking at it:
+
+```
+* llm.effort = high  (unset -> low)
+```
+
+In the partyline it is `.tune`, `.tune <key> <value>` and `.tune <key>
+default` to drop one.
+
+**Four settings do not take effect until a restart**, because something took a
+copy of them at startup: `llm.model`, `llm.pause_seconds`, `llm.max_silences`
+and `irc.bot_mode`. Setting one says so rather than letting you think it took.
+`.botmode on|off` is the exception that works live, because it writes
+`irc.bot_mode` *and* asks the server, which is why it exists as its own
+command.
+
+That list is a wart, not a design. Everything else is read from the config
+object each time it is used; these four are values copied into a constructor.
+The fix is one live settings object rather than copies of it.
+
 ## The soul
 
 Its voice, its manners, what it refuses. The bot cannot write this, on
@@ -254,6 +284,36 @@ rather than sitting outside. `journalctl` says which was used:
 authenticating with SASL EXTERNAL
 SASL EXTERNAL refused: ... / authenticating with SASL PLAIN
 ```
+
+## Tuning
+
+```bash
+chickenbot -c <config> tune                     # everything, * on the overrides
+chickenbot -c <config> tune llm.effort high     # override
+chickenbot -c <config> tune llm.effort --unset  # drop the override
+```
+
+An override is a row in the database laid over the config file, so the order
+is **override, then toml, then built-in**. The listing says what dropping one
+would leave behind, which is the question you have while looking at it:
+
+```
+* llm.effort = high  (unset -> low)
+```
+
+In the partyline it is `.tune`, `.tune <key> <value>` and `.tune <key>
+default` to drop one.
+
+**Four settings do not take effect until a restart**, because something took a
+copy of them at startup: `llm.model`, `llm.pause_seconds`, `llm.max_silences`
+and `irc.bot_mode`. Setting one says so rather than letting you think it took.
+`.botmode on|off` is the exception that works live, because it writes
+`irc.bot_mode` *and* asks the server, which is why it exists as its own
+command.
+
+That list is a wart, not a design. Everything else is read from the config
+object each time it is used; these four are values copied into a constructor.
+The fix is one live settings object rather than copies of it.
 
 ## The soul
 

@@ -25,6 +25,11 @@ from .store import Store
 log = logging.getLogger(__name__)
 
 # Dotted paths into Config. Anything not named here cannot be set at runtime.
+# Not every one of these reaches the running bot the moment it is set. Most
+# are read from the config object each time they are used, so they are live;
+# a few were copied into something's constructor at startup and only take
+# effect on a restart. They are marked below, and the real fix is one live
+# settings object rather than values copied out of it -- see RESTART_ONLY.
 SETTABLE = (
     "prefix",
     "direct",
@@ -48,8 +53,8 @@ SETTABLE = (
     "llm.per_user_per_min",
     "llm.deadline_seconds",
     "llm.transcript",
+    "llm.transcript_hours",
     "llm.follow",
-    "llm.follow_seconds",
     "llm.pause_seconds",
     "llm.max_silences",
     # Not a credential and not authority: whether it flags itself as a bot
@@ -57,6 +62,19 @@ SETTABLE = (
     "irc.bot_mode",
     "github.summarize",
     "github.max_per_poll",
+)
+
+# Set them and the database remembers, but the running bot will not notice
+# until it restarts, because something took a copy at startup. `.botmode` is
+# the one exception: it writes `irc.bot_mode` *and* asks the server, which is
+# why it works and `.tune irc.bot_mode` does not.
+RESTART_ONLY = frozenset(
+    {
+        "llm.model",  # the provider resolves it once, in its constructor
+        "llm.pause_seconds",  # copied into Attention
+        "llm.max_silences",  # copied into Attention
+        "irc.bot_mode",  # copied into the IRC client as claim_bot_mode
+    }
 )
 
 
@@ -131,6 +149,24 @@ class Settings:
 
     def overridden(self) -> dict[str, str]:
         return self.store.settings()
+
+    def would_revert_to(self, key: str) -> str:
+        """What `unset` would leave in place: the file, or the built-in.
+
+        Read from a fresh config rather than remembered, because the running
+        one has the override laid over it and no longer knows what it covered.
+        """
+        from .config import Config, load
+
+        try:
+            fresh = load(self.cfg.path) if getattr(self.cfg, "path", "") else Config()
+        except Exception:  # noqa: BLE001 - the file may be mid-edit; the built-in still answers
+            fresh = Config()
+        try:
+            obj, name, _kind = _target(fresh, key)
+        except Unsettable:
+            return ""
+        return str(getattr(obj, name))
 
     def _assign(self, key: str, raw: str) -> object:
         obj, name, kind = _target(self.cfg, key)

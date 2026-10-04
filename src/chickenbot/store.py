@@ -7,8 +7,9 @@ import json
 import sqlite3
 import time
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from . import irccase
 
@@ -168,27 +169,30 @@ CREATE INDEX IF NOT EXISTS revision_key ON revision (kind, key, id DESC);
 
 -- One row per handled event: what the bot decided, what it spent, what it
 -- called. The channel shows what was said; this shows what happened.
--- What was actually sent to the model and what came back. Off by default and
--- capped: a prompt carries the room's scrollback and what is written down
--- about the people in it, so this is a debugging facility somebody turns on,
--- not a record the bot keeps. `llm.transcript` is how many to keep.
-CREATE TABLE IF NOT EXISTS exchange (
-    id      INTEGER PRIMARY KEY,
-    ts      INTEGER NOT NULL,
-    realm   TEXT NOT NULL DEFAULT '',
-    room    TEXT NOT NULL DEFAULT '',
-    nick    TEXT NOT NULL DEFAULT '',
-    trigger TEXT NOT NULL DEFAULT '',   -- what made this call happen
-    asked   TEXT NOT NULL DEFAULT '',   -- the line, or the batch, that set it off
-    system  TEXT NOT NULL DEFAULT '',
-    prompt  TEXT NOT NULL DEFAULT '',
-    reply   TEXT NOT NULL DEFAULT '',
-    model   TEXT NOT NULL DEFAULT '',
-    served  TEXT NOT NULL DEFAULT '',
-    tools   TEXT NOT NULL DEFAULT '',
-    ms      INTEGER NOT NULL DEFAULT 0
+-- Every call to the model, whatever asked for it: the chat, the bartender's
+-- daily pass, the room read, a barfly remark. A ring bounded two ways --
+-- `llm.transcript` calls and `llm.transcript_hours` of them -- because on a
+-- quiet weekend a hundred calls reach back a week, and on a busy evening two
+-- days is four hundred.
+--
+-- An older `exchange` table recorded only the chat path and is not the same
+-- shape. It is left where it is rather than migrated, because pretending the
+-- two are compatible would be worse than an orphan table.
+CREATE TABLE IF NOT EXISTS llm_call (
+    id       INTEGER PRIMARY KEY,
+    ts       INTEGER NOT NULL,
+    reason   TEXT NOT NULL DEFAULT '',   -- what asked: ask, follow, bartender, vibe, barfly
+    realm    TEXT NOT NULL DEFAULT '',
+    room     TEXT NOT NULL DEFAULT '',
+    nick     TEXT NOT NULL DEFAULT '',
+    request  TEXT NOT NULL DEFAULT '',   -- system, history and the turn, as sent
+    response TEXT NOT NULL DEFAULT '',   -- as returned, before chunking or prefixing
+    model    TEXT NOT NULL DEFAULT '',
+    served   TEXT NOT NULL DEFAULT '',
+    tool_calls TEXT NOT NULL DEFAULT '[]',  -- json: name, args and result, in order
+    ms       INTEGER NOT NULL DEFAULT 0
 );
-CREATE INDEX IF NOT EXISTS exchange_ts ON exchange (ts DESC);
+CREATE INDEX IF NOT EXISTS llm_call_ts ON llm_call (ts DESC);
 
 CREATE TABLE IF NOT EXISTS activity (
     id      INTEGER PRIMARY KEY,
@@ -263,6 +267,29 @@ class Line:
     text: str
     kind: str = "privmsg"
     account: str = ""
+
+
+@dataclass(slots=True)
+class LlmCall:
+    """One call to the model, built up as it happens and written when it ends.
+
+    Mutable, unlike the rows around it: the response and the tool calls are
+    not known when the call starts, and a failure still has to be recordable.
+    """
+
+    reason: str = ""  # what asked: message/ask, follow, bartender, vibe, barfly
+    realm: str = ""
+    room: str = ""
+    nick: str = ""
+    request: str = ""  # system, history and the turn, as sent
+    response: str = ""  # as returned, before chunking or prefixing
+    model: str = ""
+    served: str = ""
+    # One entry per tool the model asked for, in the order it asked: what it
+    # called, the arguments it chose, and what came back. Empty when it
+    # answered without reaching for anything.
+    tool_calls: list[dict[str, Any]] = field(default_factory=list)
+    ms: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -484,43 +511,50 @@ class Store:
         self._db.commit()
         return changed
 
-    def record_exchange(self, fields: dict, keep: int) -> None:
-        """Keep the last `keep` exchanges and drop the rest. A ring buffer
-        rather than a log: it exists to answer "what just happened", and
-        anything older is the activity record's job."""
+    def record_llm_call(self, call: LlmCall, keep: int, hours: int) -> None:
+        """Keep the last `keep` calls and the last `hours` of them, whichever
+        bites first. Trimmed on write: there is no sweeper, and a ring that
+        only shrinks when somebody remembers is not a ring."""
         if keep <= 0:
             return
-        columns = (
-            "realm",
-            "room",
-            "nick",
-            "trigger",
-            "asked",
-            "system",
-            "prompt",
-            "reply",
-            "model",
-            "served",
-            "tools",
-            "ms",
+        now = int(time.time())
+        self._db.execute(
+            "INSERT INTO llm_call (ts, reason, realm, room, nick, request, response, model, served,"
+            " tool_calls, ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                now,
+                call.reason,
+                call.realm,
+                call.room,
+                call.nick,
+                call.request,
+                call.response,
+                call.model,
+                call.served,
+                json.dumps(call.tool_calls),
+                int(call.ms),
+            ),
         )
         self._db.execute(
-            f"INSERT INTO exchange (ts, {', '.join(columns)}) VALUES (?, {', '.join('?' * len(columns))})",
-            (int(time.time()), *(str(fields.get(c, "")) if c != "ms" else int(fields.get("ms", 0)) for c in columns)),
-        )
-        self._db.execute(
-            "DELETE FROM exchange WHERE id NOT IN (SELECT id FROM exchange ORDER BY id DESC LIMIT ?)", (keep,)
+            "DELETE FROM llm_call WHERE id NOT IN (SELECT id FROM llm_call ORDER BY id DESC LIMIT ?) OR ts < ?",
+            (keep, now - max(hours, 0) * 3600 if hours > 0 else 0),
         )
         self._db.commit()
 
-    def exchanges(self, *, room: str = "", limit: int = 10, one: int = 0) -> list[sqlite3.Row]:
-        sql, args = "SELECT * FROM exchange", []
+    def llm_calls(self, *, room: str = "", reason: str = "", limit: int = 20, one: int = 0) -> list[sqlite3.Row]:
+        sql, args = "SELECT * FROM llm_call", []
+        where = []
         if one:
-            sql += " WHERE id = ?"
+            where.append("id = ?")
             args.append(one)
-        elif room:
-            sql += " WHERE room = ? COLLATE NOCASE"
+        if room:
+            where.append("room = ? COLLATE NOCASE")
             args.append(room)
+        if reason:
+            where.append("reason LIKE ?")
+            args.append(f"%{reason}%")
+        if where:
+            sql += " WHERE " + " AND ".join(where)
         sql += " ORDER BY id DESC LIMIT ?"
         args.append(limit)
         return self._db.execute(sql, args).fetchall()

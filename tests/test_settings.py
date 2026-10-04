@@ -149,7 +149,9 @@ def test_the_cli_sets_reads_and_unsets(tmp_path, store):
 
     assert run("llm.effort", "high") == (0, "llm.effort = high\n")
     assert store.settings() == {"llm.effort": "high"}
-    assert run("llm.effort")[1] == "llm.effort = high\n"
+    # Reading an override also says what losing it would leave behind, which
+    # is the question you have while looking at one.
+    assert run("llm.effort")[1] == "llm.effort = high  (unset -> low)\n"
     assert "* llm.effort" in run()[1]
     assert run("llm.effort", "--unset")[0] == 0
     assert store.settings() == {}
@@ -162,3 +164,150 @@ def test_the_cli_refuses_a_key_it_does_not_own(tmp_path, store, capsys):
     toml.write_text(f'db_path = "{store.path}"\n[irc]\nenabled = true\nhost = "x"\nowners = ["a"]\n')
     assert main(["-c", str(toml), "tune", "irc.host", "elsewhere"]) == 1
     assert "not settable" in capsys.readouterr().err
+
+
+# -- what unsetting would leave behind -----------------------------------
+
+
+def test_the_listing_says_what_you_would_revert_to(store, cfg, tmp_path):
+    """Looking at an override, the question is what losing it gives you --
+    not whether it came from the file or the built-in."""
+    toml = tmp_path / "c.toml"
+    toml.write_text('db_path = "x.db"\nbots = "addressed"\n[irc]\nenabled=true\nhost="x"\nowners=["a"]\n')
+    from chickenbot.config import load
+
+    settings = Settings(store, load(str(toml)))
+    settings.set("bots", "ignore")
+    # The file said addressed; the built-in says all. The file wins.
+    assert settings.would_revert_to("bots") == "addressed"
+    assert settings.get("bots") == "ignore"
+
+
+def test_a_key_the_file_is_silent_on_reverts_to_the_built_in(store, cfg, tmp_path):
+    toml = tmp_path / "c.toml"
+    toml.write_text('db_path = "x.db"\n[irc]\nenabled=true\nhost="x"\nowners=["a"]\n')
+    from chickenbot.config import load
+
+    settings = Settings(store, load(str(toml)))
+    settings.set("bots", "ignore")
+    assert settings.would_revert_to("bots") == "all"
+
+
+def test_a_config_remembers_where_it_came_from(tmp_path):
+    from chickenbot.config import load
+
+    toml = tmp_path / "c.toml"
+    toml.write_text('db_path = "x.db"\n[irc]\nenabled=true\nhost="x"\nowners=["a"]\n')
+    assert load(str(toml)).path == str(toml)
+
+
+def test_path_is_not_something_the_toml_may_set(tmp_path):
+    import pytest
+
+    from chickenbot.config import ConfigError, load
+
+    toml = tmp_path / "c.toml"
+    toml.write_text('path = "nonsense"\n[irc]\nenabled=true\nhost="x"\nowners=["a"]\n')
+    with pytest.raises(ConfigError, match="unknown keys"):
+        load(str(toml))
+
+
+async def test_the_partyline_can_put_a_setting_back(cfg, store):
+    """You could change the bot's mind from the partyline but not change it
+    back: `--unset` only existed in the shell."""
+    from chickenbot.commands import COMMANDS, Context, Handler
+
+    from .conftest import FakeTransport
+
+    h = Handler(cfg, store, None, None)
+    tr = FakeTransport(owners=("toppk",))
+
+    def say(args):
+        ctx = Context(
+            handler=h,
+            transport=tr,
+            nick="toppk",
+            account="toppk",
+            channel="#chan",
+            args=args,
+            is_owner=True,
+            in_channel=True,
+        )
+        return COMMANDS["tune"].run(h, ctx)
+
+    await say("bots ignore")
+    assert store.settings() == {"bots": "ignore"}
+    await say("bots default")
+    assert store.settings() == {}
+    assert "back to" in tr.sent[-1][1]
+
+
+async def test_putting_back_something_untouched_says_so(cfg, store):
+    from chickenbot.commands import COMMANDS, Context, Handler
+
+    from .conftest import FakeTransport
+
+    h = Handler(cfg, store, None, None)
+    tr = FakeTransport(owners=("toppk",))
+    ctx = Context(
+        handler=h,
+        transport=tr,
+        nick="toppk",
+        account="toppk",
+        channel="#chan",
+        args="bots default",
+        is_owner=True,
+        in_channel=True,
+    )
+    await COMMANDS["tune"].run(h, ctx)
+    assert "was not tuned" in tr.sent[-1][1]
+
+
+async def test_a_live_setting_does_not_claim_to_need_one(cfg, store):
+    from chickenbot.commands import COMMANDS, Context, Handler
+
+    from .conftest import FakeTransport
+
+    h = Handler(cfg, store, None, None)
+    tr = FakeTransport(owners=("toppk",))
+    ctx = Context(
+        handler=h,
+        transport=tr,
+        nick="toppk",
+        account="toppk",
+        channel="#chan",
+        args="bots ignore",
+        is_owner=True,
+        in_channel=True,
+    )
+    await COMMANDS["tune"].run(h, ctx)
+    assert "restart" not in tr.sent[-1][1]
+
+
+async def test_the_copied_ones_are_flagged(cfg, store):
+    from chickenbot.commands import COMMANDS, Context, Handler
+    from chickenbot.settings import RESTART_ONLY
+
+    from .conftest import FakeTransport
+
+    assert "llm.model" in RESTART_ONLY
+    h = Handler(cfg, store, None, None)
+    tr = FakeTransport(owners=("toppk",))
+    ctx = Context(
+        handler=h,
+        transport=tr,
+        nick="toppk",
+        account="toppk",
+        channel="#chan",
+        args="llm.model something/else",
+        is_owner=True,
+        in_channel=True,
+    )
+    await COMMANDS["tune"].run(h, ctx)
+    assert "needs a restart" in tr.sent[-1][1]
+
+
+def test_no_setting_is_listed_twice():
+    from chickenbot.settings import SETTABLE
+
+    assert len(SETTABLE) == len(set(SETTABLE))

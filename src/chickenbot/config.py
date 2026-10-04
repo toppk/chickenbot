@@ -208,10 +208,14 @@ class LLMConfig:
     # tool turns at ninety seconds each and answered a greeting nine minutes
     # later, which reads as broken however good the eventual answer is.
     deadline_seconds: float = 75.0
-    # Keep the last N prompts and replies for inspection, 0 to keep none. Off
-    # by default: a prompt carries the room's scrollback and the notes on the
-    # people in it, so it is turned on to debug something and turned off after.
-    transcript: int = 0
+    # Keep the last N calls to the model, and the last N hours of them,
+    # whichever bites first -- on a quiet weekend a hundred calls reach back a
+    # week, and on a busy evening two days is four hundred. 0 keeps none.
+    # Everything a request contains is already in this database: the soul, the
+    # dossiers, the scrollback. What it adds is being able to see which of it
+    # the model was actually looking at.
+    transcript: int = 100
+    transcript_hours: int = 48
     # Merged into every openai-compatible request body: OpenRouter's `provider`
     # routing policy lives here.
     body_params: dict = field(default_factory=dict)
@@ -286,6 +290,10 @@ class Config:
     # low enough that one exchange is an exchange rather than a rally.
     bot_replies: int = 3
     bot_gap_seconds: float = 180.0
+    # Where this was read from, so anything that needs to re-read it -- or to
+    # put a file beside it -- does not have to be handed the path again. Set
+    # by `load`, and rejected in the toml, where it would mean nothing.
+    path: str = field(default="", compare=False)
     irc: IRCConfig = field(default_factory=IRCConfig)
     signal: SignalConfig = field(default_factory=SignalConfig)
     discord: DiscordConfig = field(default_factory=DiscordConfig)
@@ -331,7 +339,7 @@ def load(path: str | Path) -> Config:
         raise ConfigError("data_dir is gone; a run directory has conf/, data/, cache/ and run/ (see `chickenbot init`)")
 
     top = {k: v for k, v in data.items() if not isinstance(v, dict)}
-    unknown = set(top) - set(Config.__dataclass_fields__)
+    unknown = set(top) - (set(Config.__dataclass_fields__) - {"path"})
     if unknown:
         raise ConfigError(f"unknown keys: {', '.join(sorted(unknown))}")
 
@@ -369,6 +377,7 @@ def load(path: str | Path) -> Config:
     sock = Path(cfg.tools.socket)
     if not sock.is_absolute():
         cfg.tools.socket = str((path.parent / sock).resolve())
+    cfg.path = str(path)
     # Paths in the toml are relative to the toml, not the working directory.
     if cfg.irc.tls_cert:
         cert = Path(cfg.irc.tls_cert).expanduser()

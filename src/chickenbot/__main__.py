@@ -19,13 +19,14 @@ from pathlib import Path
 from . import brain, config
 from .barfly import Barfly
 from .bartender import Bartender
+from .brain.recorded import Recorded
 from .cert import DAYS as CERT_DAYS
 from .cert import NAME as CERT_NAME
 from .cert import generate as generate_cert
 from .commands import Handler
 from .observe import TRACE, set_sink
 from .scheduler import Scheduler
-from .settings import SETTABLE, Settings, Unsettable
+from .settings import RESTART_ONLY, SETTABLE, Settings, Unsettable
 from .soul import seed as seed_soul
 from .store import Store
 from .toolsocket import ToolServer
@@ -93,6 +94,12 @@ async def run(cfg: config.Config) -> int:
     seed_soul(store)
     if applied := Settings(store, cfg).apply_stored():
         log.info("applied %d stored setting(s) over the config file", applied)
+    if provider is not None:
+        # Always wrapped; the ring size is read per call, so turning it on or
+        # off is a `.tune` away rather than a restart away.
+        provider = Recorded(provider, store, cfg.llm)
+        if cfg.llm.transcript:
+            log.info("keeping the last %d model calls (%dh)", cfg.llm.transcript, cfg.llm.transcript_hours)
     handler = Handler(cfg, store, provider, None)
     handler.transports = transports
 
@@ -169,8 +176,12 @@ def manage_settings(settings: Settings, args: argparse.Namespace) -> int:
     stored = settings.overridden()
     if not args.key:
         for key in SETTABLE:
-            mark = "*" if key in stored else " "
-            print(f"{mark} {key} = {settings.get(key)}")
+            if key not in stored:
+                print(f"  {key} = {settings.get(key)}")
+                continue
+            # What `--unset` would leave behind, which is the question you
+            # have while looking at an override, not where it comes from.
+            print(f"* {key} = {settings.get(key)}  (unset -> {settings.would_revert_to(key)})")
         print("\n* overridden here; the rest come from the config file")
         return 0
     try:
@@ -179,9 +190,12 @@ def manage_settings(settings: Settings, args: argparse.Namespace) -> int:
             print("back to the config file at next start" if gone else "was not overridden")
             return 0
         if args.value is None:
-            print(f"{args.key} = {settings.get(args.key)}")
+            revert = f"  (unset -> {settings.would_revert_to(args.key)})" if args.key in stored else ""
+            print(f"{args.key} = {settings.get(args.key)}{revert}")
             return 0
         print(f"{args.key} = {settings.set(args.key, args.value)}")
+        if args.key in RESTART_ONLY:
+            print("(recorded, but something took a copy at startup: restart for it to bite)")
         return 0
     except Unsettable as exc:
         print(f"{exc}. settable: {', '.join(SETTABLE)}", file=sys.stderr)
@@ -613,25 +627,33 @@ def export(cfg: config.Config, args: argparse.Namespace) -> int:
 
 def show_transcript(store: Store, args: argparse.Namespace) -> int:
     """The one thing the activity record never held: the words themselves."""
-    rows = store.exchanges(room=args.room, limit=args.last, one=args.id or 0)
+    rows = store.llm_calls(room=args.room, reason=args.reason, limit=args.last, one=args.id or 0)
     if not rows:
-        print("nothing recorded; `tune llm.transcript 20` turns it on", file=sys.stderr)
+        print("nothing recorded; `tune llm.transcript 100` turns it on", file=sys.stderr)
         return 1
     if args.id:
         row = rows[0]
         when = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(row["ts"]))
-        print(f"#{row['id']}  {when}  {row['realm']}/{row['room']}  {row['nick']}")
-        print(f"trigger={row['trigger']} model={row['model']} served={row['served']} ms={row['ms']}")
-        if row["tools"]:
-            print(f"tools={row['tools']}")
-        for label, body in (("SYSTEM", row["system"]), ("PROMPT", row["prompt"]), ("REPLY", row["reply"])):
-            print(f"\n----- {label} " + "-" * (60 - len(label)))
-            print(body)
+        print(f"#{row['id']}  {when}  {row['reason']}  {row['realm']}/{row['room']}  {row['nick']}")
+        print(f"model={row['model']} served={row['served']} ms={row['ms']}")
+        print("\n===== REQUEST " + "=" * 55)
+        print(row["request"])
+        for n, call in enumerate(json.loads(row["tool_calls"] or "[]"), 1):
+            print(f"\n===== TOOL {n}: {call.get('name', '?')} " + "=" * 40)
+            print(f"  args: {json.dumps(call.get('args', {}))}")
+            if whole := call.get("of"):
+                print(f"  (first {len(str(call.get('result', '')))} of {whole} characters)")
+            for line in str(call.get("result", "")).splitlines() or [""]:
+                print(f"  {line}")
+        print("\n===== RESPONSE " + "=" * 54)
+        print(row["response"])
         return 0
     for row in rows:
         when = time.strftime("%m-%d %H:%M:%S", time.localtime(row["ts"]))
-        asked = " ".join(str(row["asked"]).split())[:60]
-        print(f"{row['id']:5}  {when}  {row['trigger']:11} {row['room']:12} {row['nick']:10} {asked}")
+        says = " ".join(str(row["response"]).split())[:48]
+        used = len(json.loads(row["tool_calls"] or "[]"))
+        marks = f"[{used}]" if used else "   "
+        print(f"{row['id']:5}  {when}  {row['reason']:16} {row['room']:10} {row['ms']:6}ms {marks} {says}")
     print(f"\n`transcript <id>` for one in full ({len(rows)} shown)")
     return 0
 
@@ -968,10 +990,11 @@ def main(argv: list[str] | None = None) -> int:
     act.add_argument("--json", action="store_true", help="one object per line, for something other than a person")
     act.add_argument("--limit", type=int, default=40)
 
-    tx = sub.add_parser("transcript", help="what was actually sent to the model, and what came back")
-    tx.add_argument("id", nargs="?", type=int, help="one exchange, in full; omit to list")
+    tx = sub.add_parser("transcript", help="every call to the model: what was sent, what came back")
+    tx.add_argument("id", nargs="?", type=int, help="one call, in full; omit to list")
     tx.add_argument("--room", default="", help="only this room")
-    tx.add_argument("--last", type=int, default=10, help="how many to list (default 10)")
+    tx.add_argument("--reason", default="", help="only these, e.g. bartender, vibe, barfly, follow")
+    tx.add_argument("--last", type=int, default=20, help="how many to list (default 20)")
 
     pr = sub.add_parser("prompt", help="show exactly what the model would be sent")
     pr.add_argument("room", nargs="?", help="realm/#room, as `log` lists them")
