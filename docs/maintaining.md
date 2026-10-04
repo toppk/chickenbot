@@ -360,6 +360,17 @@ and cannot schedule a third, which is the whole loop prevention; the wait is
 capped at five minutes however late a tool claims it will be. `retry_in=` in
 the activity log says when one was set.
 
+## Branches
+
+`github_branches` lists a repository's branches, one call, on demand. Names
+only: GitHub puts no date on a branch, and a call per branch to find out is
+not worth it -- when each one last moved is already in the mirrored activity,
+which carries the branch on every push.
+
+Branch creations and deletions are mirrored too, from the same events feed
+that was already being fetched. They used to be dropped, which is why a branch
+somebody had just pushed up was invisible until something moved on it.
+
 ## Reading a project
 
 `github_readme` fetches a repository's root README live, trimmed to 12k

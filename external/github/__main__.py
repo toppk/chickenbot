@@ -57,6 +57,7 @@ DEFAULT_INTERVAL = 6 * 3600
 RANGES = {"hour": 3600, "day": 86400, "week": 604800, "month": 2592000, "all": 0}
 
 
+BRANCHES_SHOWN = 30  # a busy fork has hundreds and the names stop meaning anything
 README_CHARS = 12000  # a long README is the point; an unbounded one is a context leak
 
 
@@ -164,6 +165,22 @@ TOOLS = [
             "type": "object",
             "properties": {"user": {"type": "string", "description": "the GitHub login"}},
             "required": ["user"],
+        },
+    },
+    {
+        "name": "github_branches",
+        "description": (
+            "What branches a repository has, live. Use it when somebody mentions work on a "
+            "branch you have not seen -- 'there's a unify branch up', 'did you see the "
+            "m3 work' -- or when asked what is being worked on beyond the default branch.\n\n"
+            "Names only. GitHub puts no date on a branch, so when each one last moved comes "
+            "from github_activity, which carries the branch on every push. A branch that "
+            "exists here but appears in no activity has not been pushed to recently."
+        ),
+        "params": {
+            "type": "object",
+            "properties": {"repo": {"type": "string", "description": "owner/repo"}},
+            "required": ["repo"],
         },
     },
     {
@@ -488,6 +505,24 @@ class Tool:
             return ""
         return f"as of {ago(old)} ago"
 
+    async def github_branches(self, args: dict) -> str:
+        repo = str(args.get("repo") or "").strip().strip("/")
+        if repo.count("/") != 1 or not all(_LOGIN.fullmatch(part) for part in repo.split("/")):
+            return "error: give a repository as owner/repo"
+        if self.api is None:
+            return "error: no github client configured"
+        try:
+            found = await self.api.branches(repo)
+        except RuntimeError as exc:
+            return str(exc)
+        except Exception as exc:  # noqa: BLE001 - reported, not raised at the room
+            return f"could not list {repo}'s branches ({type(exc).__name__})"
+        if not found:
+            return f"no branches visible on {repo}"
+        names = [f"{b['name']}{' (protected)' if b['protected'] else ''}" for b in found[:BRANCHES_SHOWN]]
+        more = f", and {len(found) - len(names)} more" if len(found) > len(names) else ""
+        return f"{repo} has {len(found)} branch(es): {', '.join(names)}{more}"
+
     async def github_readme(self, args: dict) -> str:
         """A project in its own words, trimmed to something a room can hold.
 
@@ -604,6 +639,8 @@ class Tool:
             return await self.github_lookup(args)
         if name == "github_readme":
             return await self.github_readme(args)
+        if name == "github_branches":
+            return await self.github_branches(args)
         if name == "github_refresh":
             user = str(args.get("user") or "")
             return f"{await self.github_refresh(args)} [{self.age(user)}]"

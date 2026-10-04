@@ -5,7 +5,12 @@ A chat bot that does four things, on IRC, Signal, Discord and Telegram at once:
 - **logs the room** to SQLite, so `!seen` and `!history` have something to read
 - **answers questions** with an LLM that can search the web and call tools
 - **keeps order** — op, kick, ban, topic — where the network allows it
-- **watches GitHub repos** and announces releases, commits, issues and PRs
+- **talks to external tools**, each its own process, over a Unix socket
+
+GitHub is not one of those four things. It is an external tool -- a separate
+process, in `external/github/`, that connects to chickenbot and offers what it
+can do. Nothing about GitHub is compiled into the bot, and the same socket is
+how anything else would arrive.
 
 It is not an Eggdrop clone. There is no partyline, no DCC, no user file, and no
 handle/password system.
@@ -160,6 +165,38 @@ scrollback handed to the model.
   provider-specific; put the vendor's parameters in `llm.search_params` and they
   are merged into the request.
 
+## External tools
+
+A tool is a process that connects to chickenbot's socket, says who it is and
+what it can do, and answers calls. chickenbot does not know in advance what
+exists: the tool declares its own names on connect, and they are withdrawn
+when it goes away. `external/github/` is the one that ships, and it is an
+example rather than a special case.
+
+```
+chickenbot              chickenbot-github
+     |                          |
+     |<----- hello: here are my tools -----|
+     |------ welcome: here is who to watch ->|
+     |------ call ext_github_branches ----->|
+     |<----- result ----------------------- |
+```
+
+Three things fall out of it being a separate process:
+
+- **It fails on its own.** The tool crashing, being restarted or being absent
+  is ordinary; its names simply are not offered for a while. The bot does not
+  wait for it at startup and does not die with it.
+- **It is granted, not assumed.** `[tools.grants.*]` in the config says who
+  may call what and where; a tool nobody granted is owner-only. A tool can
+  also be allowed to speak into a named room, which is how repo
+  announcements reach a channel.
+- **Who it watches comes from the bot**, not from its own config, so the
+  people it mirrors stay in step with the identities chickenbot knows.
+
+`docs/tool-protocol.md` is the wire format. It is small on purpose: a hello, a
+call, a result, and an emit.
+
 ## Layout
 
 ```
@@ -169,8 +206,14 @@ src/chickenbot/
   irc.py        asyncio IRC client (IRCv3 tags, SASL, channel state)
   store.py      sqlite: chat log, watches, cursors
   commands.py   command dispatch and owner gating
-  watcher.py    github polling and announcements
+  watcher.py    announcing what an external tool reports
+  toolsocket.py the socket external tools connect to
   brain/        llm providers behind one interface
+
+external/github/
+  __main__.py   the tool: declares what it offers, answers calls
+  github.py     the GitHub API, such as it is used
+  store.py      its own cache, which is not the bot's database
 ```
 
 ## License

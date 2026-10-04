@@ -51,6 +51,17 @@ class GitHub:
         response.raise_for_status()
         return response.json(), response.headers.get("etag", "")
 
+    async def branches(self, repo: str) -> list[dict]:
+        """Branch names for a repo, one call. Names only: GitHub does not put
+        a date on them, and a call per branch to find out is not worth it --
+        when each one last moved is already in the activity we mirror."""
+        payload, _ = await self.get(f"/repos/{repo}/branches", per_page=PER_PAGE)
+        return [
+            {"name": b.get("name", ""), "protected": bool(b.get("protected"))}
+            for b in (payload if isinstance(payload, list) else [])
+            if b.get("name")
+        ]
+
     async def readme(self, repo: str) -> str:
         """The repo's root README, rendered as its own markdown.
 
@@ -175,6 +186,11 @@ def _from_event(raw: dict) -> Item | None:
         "PullRequestEvent": "pr",
         "WatchEvent": "star",
         "ReleaseEvent": "release",
+        # A branch appearing is news even before anything is pushed to it:
+        # "there's an entire unify branch up" was invisible because these
+        # two were dropped on the floor.
+        "CreateEvent": "branch",
+        "DeleteEvent": "branch",
     }
     kind = kind_map.get(raw.get("type", ""))
     if kind is None:
@@ -205,6 +221,14 @@ def _from_event(raw: dict) -> Item | None:
         title = f"{payload.get('action', '')} #{node.get('number', '?')} {node.get('title', '')}".strip()
         url = node.get("html_url", url)
         state = node.get("state", "")
+    elif kind == "branch":
+        what, name = str(payload.get("ref_type", "")), str(payload.get("ref", ""))
+        if what != "branch" or not name:
+            return None  # a tag or a whole repository is not this
+        gone = raw.get("type") == "DeleteEvent"
+        title = f"branch {name} {'deleted' if gone else 'created'}"
+        url = url if gone else f"https://github.com/{repo}/tree/{name}"
+        state = "deleted" if gone else ""
     elif kind == "star":
         title = f"starred {repo}"
     elif kind == "release":

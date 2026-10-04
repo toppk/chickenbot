@@ -1365,3 +1365,85 @@ async def test_a_readme_is_not_mirrored(tmp_path):
     await tool.call("github_readme", {"repo": "a/b"})
     await tool.call("github_readme", {"repo": "a/b"})
     assert len(api.asked) == 2  # no cache pretending to be a mirror
+
+
+# -- branches ------------------------------------------------------------
+
+
+class BranchApi:
+    def __init__(self, names=(), boom=None):
+        self.names, self.boom, self.asked = list(names), boom, []
+
+    async def branches(self, repo: str) -> list[dict]:
+        self.asked.append(repo)
+        if self.boom:
+            raise self.boom
+        return [{"name": n, "protected": n == "main"} for n in self.names]
+
+
+async def test_a_branch_nobody_mentioned_can_be_found(tmp_path):
+    """chrisk: "there's an entire unify branch up w/ m3 support did you see that"."""
+    api = BranchApi(["main", "unify", "fix/sep-jjrpf"])
+    out = await _tool(tmp_path, api).call("github_branches", {"repo": "iconidentify/aurora-linux"})
+    assert "unify" in out and "3 branch(es)" in out
+    assert "main (protected)" in out
+
+
+async def test_a_fork_with_hundreds_is_cut(tmp_path):
+    from external.github.__main__ import BRANCHES_SHOWN
+
+    api = BranchApi([f"wip/{n}" for n in range(200)])
+    out = await _tool(tmp_path, api).call("github_branches", {"repo": "a/b"})
+    assert "200 branch(es)" in out and "and 170 more" in out
+    assert out.count(",") < BRANCHES_SHOWN + 5
+
+
+async def test_a_bad_repo_never_reaches_github_either(tmp_path):
+    api = BranchApi(["main"])
+    tool = _tool(tmp_path, api)
+    for bad in ("aurora-linux", "a/b/c", "", "a/b c"):
+        assert "error:" in await tool.call("github_branches", {"repo": bad}), bad
+    assert api.asked == []
+
+
+async def test_a_repo_with_nothing_visible_says_so(tmp_path):
+    assert "no branches visible" in await _tool(tmp_path, BranchApi()).call("github_branches", {"repo": "a/b"})
+
+
+# -- a branch appearing is news ------------------------------------------
+
+
+def _event(kind, **payload):
+    return {
+        "type": kind,
+        "id": "1",
+        "actor": {"login": "chrisk"},
+        "repo": {"name": "iconidentify/aurora-linux"},
+        "created_at": "2026-10-04T12:00:00Z",
+        "payload": payload,
+    }
+
+
+def test_a_new_branch_is_recorded():
+    """It was dropped on the floor, so "a fresh branch wouldn't show unless
+    it's moving" was true, and need not have been."""
+    from external.github.github import _from_event
+
+    item = _from_event(_event("CreateEvent", ref_type="branch", ref="unify"))
+    assert item is not None and item.kind == "branch"
+    assert "unify" in item.title and "created" in item.title
+    assert item.url.endswith("/tree/unify")
+
+
+def test_a_deleted_branch_is_recorded_as_gone():
+    from external.github.github import _from_event
+
+    item = _from_event(_event("DeleteEvent", ref_type="branch", ref="unify"))
+    assert item is not None and "deleted" in item.title and item.state == "deleted"
+
+
+def test_a_tag_or_a_new_repository_is_not_a_branch():
+    from external.github.github import _from_event
+
+    assert _from_event(_event("CreateEvent", ref_type="tag", ref="v1.0")) is None
+    assert _from_event(_event("CreateEvent", ref_type="repository")) is None
