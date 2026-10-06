@@ -257,6 +257,17 @@ def addressed_to_somebody(ctx: Context, answer: str) -> bool:
     return named in {ctx.transport.fold(n) for n in [*here, ctx.nick]}
 
 
+def already_names(ctx: Context, answer: str) -> bool:
+    """Whether the asker is named anywhere in the first line of the reply.
+
+    `biff: morning, biff` is the prefix doing its job twice. Addressing
+    somebody is a thing you do once per line, and a reply that already says
+    their name has done it.
+    """
+    first = answer.strip().splitlines()[0] if answer.strip() else ""
+    return names(ctx.transport.fold(first), ctx.transport.fold(ctx.nick))
+
+
 def _model(h: Handler) -> str:
     """What is answering. It was asked directly and had to say it could not
     tell, while every activity row it can read carries the answer."""
@@ -1074,7 +1085,8 @@ async def cmd_ask(h: Handler, ctx: Context, *, following: bool = False) -> None:
     # Asked to pass something on, it addresses the other person itself. Adding
     # the asker's name in front of that gives "toppk: biff: ...", which names
     # the wrong person first.
-    ctx.say(answer if addressed_to_somebody(ctx, answer) else f"{ctx.nick}: {answer}")
+    spoken_to = addressed_to_somebody(ctx, answer) or already_names(ctx, answer)
+    ctx.say(answer if spoken_to else f"{ctx.nick}: {answer}")
     await come_back_to_it(h, ctx, toolbox)
     if ctx.in_channel:
         h.attention.spoke(f"{ctx.transport.realm}/{ctx.channel}", h.follow_window(ctx.transport, ctx.channel))

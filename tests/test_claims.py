@@ -219,3 +219,38 @@ async def test_a_declined_direct_line_says_nothing_at_all(cfg, store):
     await h.dispatch(tr.envelope("chris: tell chickenbot he can set the title", sender="toppk", account="toppk"))
     await h.drain()
     assert tr.sent == []
+
+
+# -- saying somebody's name once -----------------------------------------
+
+
+async def test_a_reply_that_already_names_them_is_not_prefixed(cfg, store):
+    """`biff: morning, biff` is the prefix doing its job twice."""
+    from .test_commands import StubProvider
+
+    h = Handler(cfg, store, StubProvider("morning, biff"), None)
+    tr = FakeTransport(here=[("biff", "", ""), ("chickenbot", "", "")])
+    await h.dispatch(tr.envelope("chickenbot: morning", sender="biff", account="biff"))
+    await h.drain()
+    assert tr.sent[-1][1] == "morning, biff"
+
+
+async def test_a_reply_that_names_nobody_still_gets_the_prefix(cfg, store):
+    from .test_commands import StubProvider
+
+    h = Handler(cfg, store, StubProvider("morning to you"), None)
+    tr = FakeTransport(here=[("biff", "", ""), ("chickenbot", "", "")])
+    await h.dispatch(tr.envelope("chickenbot: morning", sender="biff", account="biff"))
+    await h.drain()
+    assert tr.sent[-1][1] == "biff: morning to you"
+
+
+async def test_a_name_inside_a_word_does_not_count(cfg, store):
+    """Word boundaries, as everywhere: `biffle` is not biff."""
+    from .test_commands import StubProvider
+
+    h = Handler(cfg, store, StubProvider("that is a biffle, not a biff thing"), None)
+    tr = FakeTransport(here=[("bo", "", ""), ("chickenbot", "", "")])
+    await h.dispatch(tr.envelope("chickenbot: what", sender="bo", account="bo"))
+    await h.drain()
+    assert tr.sent[-1][1].startswith("bo: ")

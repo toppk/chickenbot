@@ -124,7 +124,7 @@ async def test_after_being_addressed_it_follows_without_its_name(fast, transport
 
 async def test_it_answers_other_people_too(fast, transport, store):
     """A group conversation: whoever started it is not the only participant."""
-    spy = Spy("hi", "answer for chrisk")
+    spy = Spy("hi", "here is the answer")  # not naming anyone, so the prefix does the work
     handler = Handler(fast, store, spy, None)
     await send(handler, transport, "chickenbot: hello", sender="toppk", account="toppk")
     transport.sent.clear()

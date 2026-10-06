@@ -54,7 +54,8 @@ people and rooms, what it has been doing and what it cost. `docs/deploying.md`
 covers instances and deploys, `docs/reviewing.md` how to review an episode,
 and `docs/authority.md` who is allowed to do what.
 
-`docs/principles.md` is why any of it is the way it is -- the claims the
+`docs/outstanding.md` is what has been noticed and not yet done, with what
+was seen in each case. `docs/principles.md` is why any of it is the way it is -- the claims the
 behaviours are meant to arrive at, so a rule can be held against something
 other than how it felt at the time. Read it before changing one.
 
