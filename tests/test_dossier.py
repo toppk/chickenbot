@@ -358,3 +358,44 @@ def test_a_diff_against_nothing_is_refused(tmp_path):
     cli(tmp_path, "soul", "first")
     assert cli(tmp_path, "soul", "--diff", "nonsense")[0] == 1
     assert cli(tmp_path, "soul", "--diff", "9999")[0] == 1
+
+
+# -- both halves, wherever you look --------------------------------------
+
+
+def test_the_cli_shows_what_the_bot_noticed_too(tmp_path):
+    """It reported "(nothing known)" about chrisk while holding six hundred
+    characters the daily pass had written about him."""
+    from chickenbot.store import Store
+
+    st = Store(tmp_path / "c.db")
+    pid = st.set_person("irc:x", "chrisk", "")
+    st.set_person_observed(pid, "maclab is his Apple-Silicon kernel test lab")
+    st.close()
+
+    code, out = cli(tmp_path, "dossier", "irc:x", "chrisk")
+    assert code == 0
+    assert "noticed: maclab is his Apple-Silicon kernel test lab" in out
+    assert "nothing known" not in out
+
+
+def test_the_two_halves_stay_labelled_apart(tmp_path):
+    from chickenbot.store import Store
+
+    st = Store(tmp_path / "c.db")
+    pid = st.set_person("irc:x", "chrisk", "runs the server")
+    st.set_person_observed(pid, "fighting a cold")
+    st.close()
+
+    out = cli(tmp_path, "dossier", "irc:x", "chrisk")[1]
+    assert "noted: runs the server" in out
+    assert "noticed: fighting a cold" in out
+
+
+def test_somebody_with_neither_still_says_so(tmp_path):
+    from chickenbot.store import Store
+
+    st = Store(tmp_path / "c.db")
+    st.set_person("irc:x", "ghost", "")
+    st.close()
+    assert "nothing known" in cli(tmp_path, "dossier", "irc:x", "ghost")[1]

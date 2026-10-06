@@ -205,6 +205,91 @@ def manage_settings(settings: Settings, args: argparse.Namespace) -> int:
         return 1
 
 
+def rehearse_notes(cfg: config.Config, store: Store, args: argparse.Namespace) -> int:
+    """The daily pass over a slice you choose, writing nothing.
+
+    What would it have made of that evening? And what would a different
+    instruction have made of the same evening? Both are questions about the
+    prompt, and neither should cost anybody's dossier to ask.
+    """
+    from .bartender import Bartender
+    from .commands import Handler
+
+    realm, _, room = (args.room or "").partition("/")
+    if not room:
+        print("rehearse needs realm/#room, as `log` lists them", file=sys.stderr)
+        return 1
+    try:
+        since, until = _window(args)
+    except ValueError as exc:
+        print(exc, file=sys.stderr)
+        return 1
+    system = _read_text(args.system) if args.system else ""
+
+    provider = brain.build(cfg.llm)
+    if provider is None:
+        print("no model is configured", file=sys.stderr)
+        return 1
+    handler = Handler(cfg, store, provider, None)
+    transport = _Preview(realm, cfg.irc.nick)
+    transport.rooms = [room]
+
+    async def go():
+        try:
+            return await Bartender(handler).rehearse(transport, room, since=since, until=until, system=system)
+        finally:
+            await handler.drain()
+            await provider.aclose()
+
+    prompt, written, people = asyncio.run(go())
+    span = f"{_when(since)} to {_when(until)}"
+    print(f"{realm}/{room}  {span}")
+    print(f"asked about: {', '.join(people) or '(nobody identified spoke)'}")
+    if args.prompt:
+        print("\n===== SYSTEM " + "=" * 56)
+        print(system or _bartender_system())
+        print("\n===== PROMPT " + "=" * 56)
+        print(prompt)
+    print("\n===== WOULD HAVE WRITTEN " + "=" * 44)
+    print(written or "(nothing)")
+    print("\nNothing was written down. `dossier` still says what it said before.")
+    return 0
+
+
+def _bartender_system() -> str:
+    from .bartender import SYSTEM
+
+    return SYSTEM
+
+
+def _when(ts: int) -> str:
+    return time.strftime("%Y-%m-%d %H:%M", time.localtime(ts))
+
+
+def _window(args: argparse.Namespace) -> tuple[int, int]:
+    """A slice of history, said three ways: around a moment, a named day, or
+    the last so many hours."""
+    hours = max(args.hours, 1)
+    if args.around:
+        middle = _moment(args.around)
+        half = hours * 3600 // 2
+        return middle - half, middle + half
+    if args.day:
+        start = _moment(f"{args.day} 00:00")
+        return start, start + 86400
+    now = int(time.time())
+    return now - hours * 3600, now
+
+
+def _moment(text: str) -> int:
+    for shape in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
+        try:
+            return int(time.mktime(time.strptime(text, shape)))
+        except ValueError:
+            continue
+    raise ValueError(f"not a time: {text!r} (try 2026-10-04 12:06)")
+
+
 def backfill_notes(cfg: config.Config, store: Store, args: argparse.Namespace) -> int:
     """The daily pass, pointed at days that have already gone by.
 
@@ -371,6 +456,9 @@ def manage(cfg: config.Config, args: argparse.Namespace) -> int:
         if args.what == "tune":
             return manage_settings(Settings(store, cfg), args)
 
+        if args.what == "rehearse":
+            return rehearse_notes(cfg, store, args)
+
         if args.what == "transcript":
             return show_transcript(store, args)
 
@@ -387,7 +475,7 @@ def manage(cfg: config.Config, args: argparse.Namespace) -> int:
             if args.realm and (ids := store.whois(args.realm)):
                 for pid in ids:
                     print(" = ".join(f"{r}/{h}" for r, h in store.aliases(pid)))
-                    print(store.person_notes(pid) or "(nothing known)")
+                    print(_both_halves(store, pid))
                 return 0
             rows = store.people(args.realm or "")
             for _pid, handles, updated in rows:
@@ -435,7 +523,11 @@ def manage(cfg: config.Config, args: argparse.Namespace) -> int:
             str(pid) if pid else "",
             args,
             lambda text: store.set_person(args.realm, args.account, text),
-            store.person_notes(pid) if pid else "",
+            # Both halves, marked, as the partyline has always shown them.
+            # Printing only the owner-written one reported "(nothing known)"
+            # about somebody the daily pass had written six hundred
+            # characters about.
+            _both_halves(store, pid) if pid else "",
         )
     finally:
         store.close()
@@ -623,6 +715,17 @@ def export(cfg: config.Config, args: argparse.Namespace) -> int:
         return 0
     finally:
         store.close()
+
+
+def _both_halves(store: Store, pid: int | None) -> str:
+    """What an owner wrote and what the bot noticed, kept apart and labelled."""
+    if pid is None:
+        return "(nothing known)"
+    out = []
+    for label, body in (("noted", store.person_notes(pid)), ("noticed", store.person_observed(pid))):
+        for line in body.splitlines():
+            out.append(f"{label}: {line}")
+    return "\n".join(out) or "(nothing known)"
 
 
 def show_transcript(store: Store, args: argparse.Namespace) -> int:
@@ -989,6 +1092,14 @@ def main(argv: list[str] | None = None) -> int:
     act.add_argument("--cost", action="store_true", help="just the model spend")
     act.add_argument("--json", action="store_true", help="one object per line, for something other than a person")
     act.add_argument("--limit", type=int, default=40)
+
+    rh = sub.add_parser("rehearse", help="run the daily pass over a slice of history, writing nothing")
+    rh.add_argument("room", help="realm/#room, as `log` lists them")
+    rh.add_argument("--around", metavar="WHEN", help='centre on a moment, e.g. "2026-10-04 12:06"')
+    rh.add_argument("--day", metavar="YYYY-MM-DD", help="a named day instead")
+    rh.add_argument("--hours", type=int, default=24, help="how wide the window is (default 24)")
+    rh.add_argument("--system", metavar="FILE", help="@file with a different instruction, to compare")
+    rh.add_argument("--prompt", action="store_true", help="print what the model was sent, not just its answer")
 
     tx = sub.add_parser("transcript", help="every call to the model: what was sent, what came back")
     tx.add_argument("id", nargs="?", type=int, help="one call, in full; omit to list")

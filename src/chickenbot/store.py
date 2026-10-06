@@ -655,6 +655,7 @@ class Store:
         *,
         day: str = "",
         since: int = 0,
+        until: int = 0,
         grep: str = "",
         limit: int = 500,
     ) -> list[tuple[int, str, str, str, str]]:
@@ -668,6 +669,9 @@ class Store:
         if since:
             sql += " AND ts >= ?"
             args.append(since)
+        if until:
+            sql += " AND ts < ?"
+            args.append(until)
         if grep:
             sql += " AND text LIKE ?"
             args.append(f"%{grep}%")
@@ -1013,7 +1017,7 @@ class Store:
         )
         self._keep_revision("person-observed", str(person_id), text, "bartender")
 
-    def spoke_on(self, realm: str, room: str, day: str = "", since: int = 0) -> list[str]:
+    def spoke_on(self, realm: str, room: str, day: str = "", since: int = 0, until: int = 0) -> list[str]:
         """Accounts that said something in this room, identified only: a nick
         nobody vouched for is nobody to keep notes about."""
         sql = (
@@ -1027,6 +1031,9 @@ class Store:
         if since:
             sql += " AND ts >= ?"
             args.append(since)
+        if until:
+            sql += " AND ts < ?"
+            args.append(until)
         return [r["account"] for r in self._db.execute(sql, args)]
 
     def person_facts(self, person_id: int) -> dict:

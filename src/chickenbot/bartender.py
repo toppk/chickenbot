@@ -75,6 +75,40 @@ class Bartender:
         last = self.h.store.setting_int("bartender", f"{realm}/{room}")
         return now - last >= EVERY
 
+    async def rehearse(self, tr, room: str, *, since: int, until: int, system: str = "") -> tuple[str, str, list[str]]:
+        """A pass that changes nothing.
+
+        The slice of history is chosen rather than "the last day", the system
+        prompt can be swapped for one being tried, and whatever comes back is
+        returned rather than written. For asking what the daily pass *would*
+        have made of an evening -- and what a different instruction would
+        have made of the same evening.
+
+        Returns (prompt, what it wrote, who it was asked about).
+        """
+        store = self.h.store
+        if self.h.provider is None:
+            raise RuntimeError("no model is configured")
+        # Marked apart from a real pass: it shows in the record and the ring,
+        # and must never be mistaken for the thing that writes dossiers.
+        with activity(kind="rehearsal", realm=tr.realm, room=room, nick=tr.me, account="-"):
+            lines = store.conversation(tr.realm, room, since=since, until=until, limit=MAX_LINES)
+            people = self._people(tr.realm, room, "", since, until=until)
+            note(lines=len(lines), people=len(people))
+            if not lines or not people:
+                note(outcome="nothing-to-read")
+                return "", "", sorted(people)
+            prompt = self._prompt(tr, room, lines, people)
+            written = await self.h.provider.reply(
+                system=system or SYSTEM,
+                history=[],
+                prompt=prompt,
+                search=False,
+                session=f"rehearsal:{tr.realm}:{room}",
+            )
+            note(outcome="rehearsed", chars=len(written))
+            return prompt, written, sorted(people)
+
     async def backfill(self, tr, room: str, days: int) -> list[str]:
         """Read past days, oldest first, as though each had just ended.
 
@@ -127,10 +161,10 @@ class Bartender:
             note(outcome="noted" if kept else "nothing-new", noted=kept, day=day or "last 24h")
             return kept
 
-    def _people(self, realm: str, room: str, day: str, since: int) -> dict[str, int]:
+    def _people(self, realm: str, room: str, day: str, since: int, until: int = 0) -> dict[str, int]:
         """{handle: person_id} for everyone identified who spoke in the window."""
         found: dict[str, int] = {}
-        for account in self.h.store.spoke_on(realm, room, day, since):
+        for account in self.h.store.spoke_on(realm, room, day, since, until=until):
             pid = self.h.store.person_id(realm, account)
             if pid is not None and len(found) < MAX_PEOPLE:
                 found[account] = pid

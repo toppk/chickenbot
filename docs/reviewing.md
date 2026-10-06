@@ -7,6 +7,31 @@ another machine with a copy of `chickenbot.db`.
 The durable record is the database, not the log. Logs are for watching it work
 now; `chatlog` and `activity` are for working out later why it did something.
 
+## What would it have made of that evening
+
+The daily pass over a slice of history you choose, writing nothing:
+
+```bash
+chickenbot -c <config> rehearse 'irc:host/#lobby' --around '2026-10-04 12:06'
+chickenbot -c <config> rehearse 'irc:host/#lobby' --day 2026-10-04 --prompt
+chickenbot -c <config> rehearse 'irc:host/#lobby' --hours 6 --system @variant.txt
+```
+
+It prints who it was asked about and what it would have written, and leaves
+every dossier exactly as it was. `--prompt` shows what the model was sent;
+`--system @file` swaps the instruction for one being tried.
+
+That last flag is the point. The pass is a prompt, and the only honest way to
+ask whether a clause is earning its place is to run the same evening through
+both versions. The first use of this settled a question that had been
+guesswork: chrisk said "im fighting a cold" and no dossier recorded it, and
+removing eight words -- "nothing about anybody's health" -- from the
+instruction produced `chrisk: fighting a cold today` from the same model over
+the same lines. Neither the model nor the window was responsible.
+
+A rehearsal shows in the record as `kind=rehearsal` and in the ring as
+`reason=rehearsal`, so it is never mistaken for the pass that writes.
+
 ## Why did it say that
 
 The activity record says a model was called, what it cost and which tools it
