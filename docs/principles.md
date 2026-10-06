@@ -54,6 +54,15 @@ promoted by being repeated. Hearsay -- one person stating a fact about
 another -- belongs in the first half or nowhere, which is why the daily pass
 will not file it and a command will.
 
+**What is written down about a person outlives the day it was said.**
+So: only what they volunteered about themselves, never what somebody else
+said about them, never anything inferred from how they are behaving. Beyond
+that the rule is durable over passing -- what somebody builds outlasts what
+they did on Tuesday -- except for health, which runs the other way. A cold is
+harmless to note precisely because it is gone by Friday; anything ongoing is
+not ours to keep. The test is whether asking after it next week would be kind
+or alarming.
+
 **A nick is not a person until the network says so.**
 Services-vouched accounts are identities. A nick is a costume. Notes can still
 be kept against a bare nick when that is all there is, but nothing privileged
@@ -155,6 +164,13 @@ failed, it is just slow, and the room should not pay for that with a stale
 answer and silence afterwards. The deterministic half carries the question
 across the gap and asks it again. Nothing about that decision belongs to the
 model, which would always vote to follow up.
+
+**Nobody is on a clock for a thing they did not ask for.** Anything unprompted
+waits a random moment before it goes out, and checks on the way whether it is
+still worth saying. Two bots woken by the same event answer in the same
+second otherwise. The pause costs nothing -- a greeting has no deadline --
+and buys the later speaker the chance to see the earlier one and stay quiet.
+An answer to a question never waits.
 
 **Timely or not at all.** News has a shelf life and a search result answers a
 question that was live. Bringing either one three hours late is worse than not

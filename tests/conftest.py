@@ -113,6 +113,9 @@ def cfg() -> Config:
         irc=IRCConfig(enabled=True, host="test.invalid", nick="chickenbot", channels=["#chan"], owners=["alice"]),
         llm=LLMConfig(enabled=False, provider="none"),
         github=GitHubConfig(enabled=False),
+        # No random pause before unprompted lines: a suite that sleeps for
+        # real is a suite nobody runs. The pause has its own tests.
+        jitter_seconds=0.0,
     )
 
 

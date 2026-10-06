@@ -335,3 +335,21 @@ async def test_the_partyline_can_start_one_too(cfg, store):
     await COMMANDS["dossier"].run(h, ctx)
     assert "dossier now" in tr.sent[0][1]
     assert "Lake Oswego" in store.person(tr.realm, "biff")
+
+
+async def test_two_lines_about_one_person_both_survive(cfg, store):
+    """Writing each line as it arrived meant the last one won, so an answer
+    that split somebody over two lines silently lost the first."""
+    from chickenbot.bartender import Bartender
+    from chickenbot.commands import Handler
+
+    pid = store.set_person("fake", "chrisk", "")
+    bar = Bartender(Handler(cfg, store, None, None))
+    kept = bar._record(
+        "fake",
+        "chrisk: maintains aurora-linux\nchrisk: fighting a cold today",
+        {"chrisk": pid},
+    )
+    assert kept == 1  # one person, not one line
+    notes = store.person_observed(pid)
+    assert "aurora-linux" in notes and "cold" in notes

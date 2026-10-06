@@ -47,6 +47,7 @@ async def test_a_lull_in_a_lively_room_earns_a_remark(cfg, store):
     h, tr, now = setup(cfg, store)
     spoke(store, "nate", now - QUIET - 60, realm="fake")
     await Barfly(h).tick(now)
+    await h.drain()  # the remark goes out after a pause, even a zero one
     assert tr.sent == [("#soup", "nice weather")]
 
 
@@ -96,8 +97,10 @@ async def test_it_says_its_piece_once_a_spell(cfg, store):
     fly = Barfly(h)
     await fly.tick(now)
     await fly.tick(now + QUIET)
+    await h.drain()
     assert len(tr.sent) == 1
     await fly.tick(now + SPELL + 1)
+    await h.drain()
     assert len(tr.sent) == 2
 
 

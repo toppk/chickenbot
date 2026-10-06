@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import random
 import shlex
 import time
 from collections import defaultdict, deque
@@ -26,7 +27,7 @@ from .config import Config
 from .dossier import Dossiers
 from .events import Event, Kind
 from .identity import Identities
-from .observe import activity, carry, note, note_default, resumed
+from .observe import activity, carry, note, note_default, note_many, resumed
 from .policy import ALL, BASIC, EITHER, NAME, NONE, PREFIX, Policies, rooms_from
 from .restraint import Refused, Restraint
 from .rhythm import Rhythm
@@ -508,6 +509,45 @@ class Handler:
         gap = 3600.0 / max(lines, 1)  # the room's recent pace, seconds per line
         return min(max(float(cfg.follow_seconds), gap * 2), float(cfg.follow_max_seconds))
 
+    def unprompted(self, tr: Transport, room: str, said: str, about: str = "") -> None:
+        """Say something nobody asked for, in a moment, if it still needs saying.
+
+        Two bots woken by the same join greet in the same second: biff and
+        chickenbot did it three times in one evening. A random pause
+        decorrelates them, and -- the better half -- gives whichever waits
+        longer the chance to see the other and say nothing instead. Nothing
+        here is on anybody's clock: an answer to a question never waits.
+        """
+        delay = random.uniform(0.5, self.cfg.jitter_seconds) if self.cfg.jitter_seconds > 0 else 0.0
+
+        async def later() -> None:
+            since = int(time.time())
+            if delay:
+                await asyncio.sleep(delay)
+            if about and self._beaten_to_it(tr, room, about, since):
+                note_many("skipped", f"{about}@{room}")
+                log.info("not greeting %s in %s: somebody else already did", about, room)
+                return
+            tr.say(room, said)
+            self.opened_with(tr, room, said)
+
+        task = asyncio.create_task(later())
+        self._writes.add(task)
+        task.add_done_callback(self._writes.discard)
+
+    def _beaten_to_it(self, tr: Transport, room: str, about: str, since: int) -> bool:
+        """Did another bot address the same person while we were waiting?
+
+        Checked against the roster and on word boundaries, as everywhere
+        else: two bots saying hello to the same arrival is the collision,
+        and the second one is noise.
+        """
+        folded = tr.fold(about)
+        for _ts, nick, _account, kind, text in self.store.conversation(tr.realm, room, since=since, limit=20):
+            if kind == "bot" and tr.fold(nick) != tr.fold(tr.me) and names(tr.fold(text), folded):
+                return True
+        return False
+
     def opened_with(self, tr: Transport, room: str, said: str) -> None:
         """It spoke first. Having said something to a room is reason enough to
         listen for the answer -- greeting somebody and then not hearing them
@@ -665,8 +705,7 @@ class Handler:
             note(outcome="quiet")
             return
         note(outcome="greeted")
-        tr.say(event.room, hello)
-        self.opened_with(tr, event.room, hello)
+        self.unprompted(tr, event.room, hello, about=event.sender)
 
     async def _handle_change(self, event: Event) -> None:
         """A room's modes changed. Channel state is already updated by the
@@ -721,8 +760,7 @@ class Handler:
             # Learning the room's hours is a side effect of watching it.
             self.store.note_presence(tr.realm, env.room)
             if hello:
-                tr.say(env.room, hello)
-                self.opened_with(tr, env.room, hello)
+                self.unprompted(tr, env.room, hello, about=env.sender)
 
         if body is None:
             # Not addressed. If this room is mid-conversation with us, hold the

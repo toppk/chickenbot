@@ -108,5 +108,7 @@ class Barfly:
                 note(outcome="silent")
                 return
             note(outcome="remarked")
-            tr.say(room, said)
-            self.h.opened_with(tr, room, said)
+            # Through the same pause as a greeting: a remark nobody asked for
+            # is on nobody's clock, and two bots piping up together is worse
+            # than either of them waiting.
+            self.h.unprompted(tr, room, said)

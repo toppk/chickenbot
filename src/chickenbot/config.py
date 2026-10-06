@@ -290,6 +290,12 @@ class Config:
     # low enough that one exchange is an exchange rather than a rally.
     bot_replies: int = 3
     bot_gap_seconds: float = 180.0
+    # Anything nobody asked for waits a random moment before going out. Two
+    # bots woken by the same join answer in the same second otherwise -- three
+    # such collisions in one evening in #lobby, all greetings. The pause also
+    # buys the later one a chance to see the earlier and think better of it.
+    # Only unprompted speech pays it; an answer to a question does not.
+    jitter_seconds: float = 6.5
     # Where this was read from, so anything that needs to re-read it -- or to
     # put a file beside it -- does not have to be handed the path again. Set
     # by `load`, and rejected in the toml, where it would mean nothing.

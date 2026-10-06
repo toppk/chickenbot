@@ -515,7 +515,8 @@ async def tool_who_link(h: Handler, ctx: Context, args: dict) -> str:
         "Write down a durable fact somebody has told you about a person -- where they live, what "
         "they work on, what they go by. Goes in the trusted half of their dossier, so only use it "
         "for something stated as fact, never for an impression you formed. Starts a dossier if "
-        "they have none. Not for passing moods or anything about health, money or relationships."
+        "they have none. Durable facts only: a passing mood belongs to the day, not to a "
+        "dossier, and money and relationships belong to neither."
     ),
     params={
         "type": "object",
