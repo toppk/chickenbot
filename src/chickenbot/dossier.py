@@ -20,6 +20,30 @@ MAX_PEOPLE = 4
 _WORD = re.compile(r"[A-Za-z0-9._-]{2,64}")
 
 
+def clip(text: str, limit: int = MAX_CHARS) -> str:
+    """Trim to whole lines, never mid-sentence.
+
+    `text[:1200]` ends a note wherever the character fell, and what is left
+    reads exactly like something somebody chose to write -- a half sentence
+    about a person, with nothing to say it was cut. Dropping whole lines at
+    least loses a whole thought, and a single line too long for the limit
+    ends in an ellipsis so the join is visible.
+    """
+    text = text.strip()
+    if len(text) <= limit:
+        return text
+    kept: list[str] = []
+    used = 0
+    for line in text.splitlines():
+        if used + len(line) + 1 > limit:
+            break
+        kept.append(line)
+        used += len(line) + 1
+    if kept:
+        return "\n".join(kept)
+    return text[: max(limit - 1, 1)].rsplit(" ", 1)[0] + "…"
+
+
 class Dossiers:
     def __init__(self, store: Store) -> None:
         self.store = store
@@ -27,7 +51,7 @@ class Dossiers:
         self.unverified: int | None = None
 
     def read(self, realm: str, handle: str) -> str:
-        return self.store.person(realm, handle)[:MAX_CHARS]
+        return clip(self.store.person(realm, handle))
 
     def relevant(self, *, realm: str, account: str = "", text: str = "", nick: str = "") -> dict[str, tuple[str, str]]:
         """Whoever is asking, plus anyone the conversation names by any handle
@@ -43,7 +67,7 @@ class Dossiers:
         order: list[int] = []
 
         def both(pid: int) -> tuple[str, str]:
-            return self.store.person_notes(pid)[:MAX_CHARS], self.store.person_observed(pid)[:MAX_CHARS]
+            return clip(self.store.person_notes(pid)), clip(self.store.person_observed(pid))
 
         pid = self.store.person_id(realm, account) if account else None
         if pid is None and nick and not account:

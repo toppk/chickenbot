@@ -399,3 +399,46 @@ def test_somebody_with_neither_still_says_so(tmp_path):
     st.set_person("irc:x", "ghost", "")
     st.close()
     assert "nothing known" in cli(tmp_path, "dossier", "irc:x", "ghost")[1]
+
+
+# -- what the cap does when it bites -------------------------------------
+
+
+def test_a_note_is_cut_between_thoughts_not_inside_one():
+    """text[:1200] ends wherever the character fell, and what is left reads
+    exactly like something somebody chose to write."""
+    from chickenbot.dossier import clip
+
+    kept = clip("maintains aurora-linux\nfighting a cold\nlikes the SE/30", limit=40)
+    assert kept == "maintains aurora-linux\nfighting a cold"
+    assert not kept.endswith("lik")
+
+
+def test_a_single_line_too_long_says_it_was_cut():
+    from chickenbot.dossier import clip
+
+    kept = clip("one enormous unbroken sentence about somebody " * 10, limit=60)
+    assert kept.endswith("…") and len(kept) <= 60
+
+
+def test_something_that_fits_is_left_alone():
+    from chickenbot.dossier import clip
+
+    assert clip("short enough", limit=100) == "short enough"
+
+
+def test_the_bartender_says_when_it_drops_the_tail(cfg, store, caplog):
+    """A dossier quietly losing its tail every day is how somebody's oldest
+    note disappears without anyone deciding it should."""
+    import logging
+
+    from chickenbot.bartender import Bartender
+    from chickenbot.commands import Handler
+
+    pid = store.set_person("fake", "chrisk", "")
+    bar = Bartender(Handler(cfg, store, None, None))
+    long_note = "x" * 900
+    with caplog.at_level(logging.WARNING):
+        bar._record("fake", f"chrisk: {long_note}\nchrisk: {long_note}", {"chrisk": pid})
+    assert any("kept" in r.getMessage() for r in caplog.records)
+    assert len(store.person_observed(pid)) <= 1200

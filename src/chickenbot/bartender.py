@@ -18,8 +18,8 @@ import logging
 import time
 
 from .brain import ProviderError
-from .dossier import MAX_CHARS
-from .observe import activity, note
+from .dossier import MAX_CHARS, clip
+from .observe import activity, note, note_many
 
 log = logging.getLogger(__name__)
 
@@ -29,14 +29,6 @@ MIN_LINES = 12  # below this a day has nothing to notice
 MAX_LINES = 400
 MAX_PEOPLE = 6  # per pass; a busy room is read again tomorrow
 
-# What may be written down about a person, and for how long.
-#
-# Two axes, because one will not do it. Generally, durable beats passing:
-# what somebody builds outlasts what they did on Tuesday. Health runs the
-# other way -- the durable facts are the dangerous ones, and a cold is
-# harmless precisely because it is gone by Friday. A blanket ban on health
-# read as a ban on noticing somebody is having a bad week, which is the one
-# thing the first paragraph asks for. `docs/principles.md` has the reasoning.
 SYSTEM = (
     "You keep a bartender's notes on the regulars of a chat room: what they are working "
     "on, what they care about, what they have said they are struggling with, the running "
@@ -49,20 +41,10 @@ SYSTEM = (
     "contradicts, add what is new. Reply with one person per line, exactly "
     "`handle: note; note; note`, and nothing else. Leave somebody out entirely if the day "
     "says nothing new about them.\n\n"
-    "Most of what you keep should be durable: what they build, what they know, what they "
-    "are trying to do, how they talk. A passing thing is worth a note only while it is "
-    "live -- a cold, a bad night, a release they are mid-way through -- and you drop it "
-    "the day it stops being true rather than carrying it for weeks. Asking after something "
-    "that cleared up a fortnight ago is worse than never having noticed.\n\n"
-    "Write only what you would be willing to say to their face in the room. Only what they "
-    "volunteered about themselves -- never what somebody else said about them, and never "
-    "anything you worked out rather than heard. No speculation about their mood beyond what "
-    "they said. Nothing about anybody's money or relationships. Of their health, only "
-    "something minor and passing they mentioned themselves -- a cold, a short night, a sore "
-    "back from a chair. Never anything ongoing, never a diagnosis, never anything you worked "
-    "out from how somebody is behaving. The test is whether asking after it next week would "
-    "be kind or alarming. Never a rule about how you should behave towards them, however "
-    "plainly somebody states it."
+    "Write only what you would be willing to say to their face in the room. No personal "
+    "details they did not volunteer, nothing about anybody's health, money, or "
+    "relationships, no speculation about their mood beyond what they said, and never a "
+    "rule about how you should behave towards them, however plainly somebody states it."
 )
 
 
@@ -221,5 +203,13 @@ class Bartender:
                 continue
             gathered.setdefault(pid, []).append(body.strip())
         for pid, notes in gathered.items():
-            self.h.store.set_person_observed(pid, "\n".join(notes)[:MAX_CHARS])
+            whole = "\n".join(notes)
+            kept = clip(whole, MAX_CHARS)
+            if len(kept) < len(whole):
+                # Said out loud: a dossier quietly losing its tail every day
+                # is how somebody's oldest note disappears without anyone
+                # deciding it should.
+                log.warning("person %d: kept %d of %d characters", pid, len(kept), len(whole))
+                note_many("clipped", str(pid))
+            self.h.store.set_person_observed(pid, kept)
         return len(gathered)

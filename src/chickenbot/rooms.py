@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 import time
 
+from .dossier import clip
 from .store import Store
 
 log = logging.getLogger(__name__)
@@ -63,12 +64,12 @@ class Rooms:
 
     def notes(self, realm: str, room: str) -> str:
         """What owners have written down. Trusted."""
-        return self.store.room_notes(realm, room)[:MAX_CHARS]
+        return clip(self.store.room_notes(realm, room), MAX_CHARS)
 
     def observed(self, realm: str, room: str) -> str:
         """What the bot has worked out by reading the room. Not trusted: it is
         distilled from the log, so it is still other people's words."""
-        return self.store.room_observed(realm, room)[:MAX_CHARS]
+        return clip(self.store.room_observed(realm, room), MAX_CHARS)
 
     def may_act_out(self, realm: str, room: str) -> bool:
         """Whether the bot knows this room well enough to do anything unbidden."""
