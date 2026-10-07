@@ -98,7 +98,9 @@ class Barfly:
                 is_owner=False,
                 in_channel=True,
             )
-            system, prompt = compose(self.h, ctx, await self.h.scrollback(ctx))
+            # Says plainly that it has nothing to reach for, which is what
+            # the invented tool call came from believing otherwise.
+            system, prompt = compose(self.h, ctx, await self.h.scrollback(ctx), toolbox=no_tools())
             note(llm=self.h.provider.name)
             try:
                 said = await self.h.provider.reply(

@@ -37,7 +37,7 @@ from .scheduler import MAX_DELAY, describe, parse_delay
 from .settings import RESTART_ONLY, SETTABLE, Settings, Unsettable
 from .soul import Soul
 from .store import Store
-from .tools import ToolBox
+from .tools import ToolBox, no_tools
 from .transport import BAN, DEOP, DEVOICE, KICK, OP, TOPIC, UNBAN, VOICE, Transport
 from .watcher import FEEDS, Watcher, parse_slug
 from .welcome import Welcome
@@ -176,14 +176,40 @@ def speaker(line) -> str:
     return f"{nick} ({', '.join(marks)})" if marks else nick
 
 
-def compose(h: Handler, ctx: Context, scrollback: str, *, following: bool = False) -> tuple[str, str]:
+def tools_note(toolbox: ToolBox | None) -> str:
+    """What this turn can actually reach, named from the toolbox itself.
+
+    The soul used to claim "there are tools for the room, the chat log and
+    GitHub". That is a fact about one call, not about a character, and it was
+    false on every unprompted pass -- which is how a barfly remark came to
+    contain an invented tool call written out as prose. An external tool that
+    is not running offers nothing, so even the chat path cannot say in advance
+    what it has.
+    """
+    names = sorted(s["function"]["name"] for s in toolbox.schemas) if toolbox else []
+    if not names:
+        return (
+            " You have no tools on this turn and cannot look anything up. Answer from what is "
+            "in front of you, or say you cannot. Never write out a request for a tool: there is "
+            "nothing to read it, and it reaches the room as gibberish."
+        )
+    return (
+        f" Tools you can use on this turn, and only these: {', '.join(names)}. "
+        "Call them through the tool mechanism. Never write a call out as text -- that reaches "
+        "the room as gibberish rather than reaching a tool."
+    )
+
+
+def compose(
+    h: Handler, ctx: Context, scrollback: str, *, following: bool = False, toolbox: ToolBox | None = None
+) -> tuple[str, str]:
     """Assemble exactly what the model is sent: (system, user turn).
 
     Kept in one place, and separate from sending it, so `chickenbot prompt`
     can show the real thing rather than an approximation of it.
     """
     # The suffix is a safety rail, not personality: the soul may not edit it.
-    system = h.soul.text() + SYSTEM_SUFFIX + SILENCE_NOTE + (FOLLOW_NOTE if following else "")
+    system = h.soul.text() + SYSTEM_SUFFIX + tools_note(toolbox) + SILENCE_NOTE + (FOLLOW_NOTE if following else "")
 
     # Volatile context goes in the user turn, not the system prompt, so the
     # stable prefix stays cacheable.
@@ -1040,11 +1066,10 @@ async def cmd_ask(h: Handler, ctx: Context, *, following: bool = False) -> None:
 
     scrollback = await h.scrollback(ctx)
 
-    system, prompt = compose(h, ctx, scrollback, following=following)
-
-    toolbox = None
-    if h.cfg.llm.tools and getattr(h.provider, "supports_tools", False):
-        toolbox = ToolBox(h, ctx)
+    # Built before composing: the prompt says what this turn can reach, so it
+    # has to know before it is written.
+    toolbox = ToolBox(h, ctx) if h.cfg.llm.tools and getattr(h.provider, "supports_tools", False) else no_tools()
+    system, prompt = compose(h, ctx, scrollback, following=following, toolbox=toolbox)
 
     note(llm=h.provider.name)
     try:

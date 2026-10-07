@@ -13,8 +13,8 @@ import os
 import httpx
 
 from ..config import LLMConfig
-from ..observe import note
-from . import ProviderError, Turn
+from ..observe import note, note_many
+from . import ProviderError, Turn, leaked_markup
 
 log = logging.getLogger(__name__)
 
@@ -29,6 +29,21 @@ DEFAULTS = {
 # check, then answer. Four was too few and produced "gave up" after the work
 # had already been done.
 MAX_TOOL_TURNS = 8
+
+
+def _wrong_channel(tools: object) -> str:
+    """What to say to a model that wrote a call out as text."""
+    if tools:
+        return (
+            "That was a tool call written into your reply, where only words belong. It reached "
+            "nobody. Tools are called through the tool mechanism, not by describing one. Either "
+            "call the tool properly now, or answer in plain words with what you already have."
+        )
+    return (
+        "That was a tool call written into your reply, where only words belong. It reached "
+        "nobody, and you have no tools on this turn -- there is nothing to call. Answer in plain "
+        "words from what is in front of you, or say that you cannot find out."
+    )
 
 
 class OpenAICompatProvider:
@@ -118,6 +133,20 @@ class OpenAICompatProvider:
             message = await self._post({**body, "messages": messages, "tools": []})
 
         text = (message.get("content") or "").strip()
+        if leak := leaked_markup(text):
+            # It wrote a tool call where prose goes. Telling it so and asking
+            # again beats dropping the turn: the room gets an answer, and the
+            # correction lands where the mistake was made rather than being
+            # swallowed by a filter further down.
+            note_many("leaked", leak)
+            log.warning("model wrote a %s call as text; asking again", leak)
+            messages.append({"role": "assistant", "content": text})
+            messages.append({"role": "user", "content": _wrong_channel(body.get("tools"))})
+            message = await self._post({**body, "messages": messages})
+            text = (message.get("content") or "").strip()
+            if second := leaked_markup(text):
+                note(outcome="leaked-markup", leak=second)
+                raise ProviderError("the model kept answering with tool markup instead of words")
         if not text:
             raise ProviderError("the model came back with nothing")
         return text

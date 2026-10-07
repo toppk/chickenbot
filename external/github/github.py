@@ -62,6 +62,47 @@ class GitHub:
             if b.get("name")
         ]
 
+    async def issue(self, repo: str, number: int, comments: int = 0) -> dict:
+        """One issue or pull request, with its body and the latest comments.
+
+        The mirror carries titles and states, not what anybody wrote. An
+        issue thread is where a good deal of the actual work happens -- and
+        increasingly where agents talk to each other -- so reading one needs
+        a call rather than a cache.
+        """
+        payload, _ = await self.get(f"/repos/{repo}/issues/{number}")
+        if not isinstance(payload, dict) or not payload:
+            return {}
+        said: list[dict] = []
+        if comments and payload.get("comments"):
+            # Newest last, as a thread reads, and only the tail of a long one.
+            page, _ = await self.get(
+                f"/repos/{repo}/issues/{number}/comments", per_page=min(comments, PER_PAGE), sort="created"
+            )
+            said = page[-comments:] if isinstance(page, list) else []
+        return {
+            "number": payload.get("number", number),
+            "kind": "pr" if payload.get("pull_request") else "issue",
+            "title": payload.get("title", ""),
+            "state": payload.get("state", ""),
+            "author": (payload.get("user") or {}).get("login", ""),
+            "labels": [str((label or {}).get("name", "")) for label in payload.get("labels") or []],
+            "created_at": payload.get("created_at", ""),
+            "updated_at": payload.get("updated_at", ""),
+            "url": payload.get("html_url", f"https://github.com/{repo}/issues/{number}"),
+            "body": payload.get("body") or "",
+            "comment_count": payload.get("comments", 0),
+            "comments": [
+                {
+                    "author": (c.get("user") or {}).get("login", ""),
+                    "at": c.get("created_at", ""),
+                    "body": c.get("body") or "",
+                }
+                for c in said
+                if isinstance(c, dict)
+            ],
+        }
+
     async def readme(self, repo: str) -> str:
         """The repo's root README, rendered as its own markdown.
 

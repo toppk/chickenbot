@@ -117,3 +117,125 @@ def test_an_empty_toolbox_is_not_the_same_as_no_toolbox():
 
     box = no_tools()
     assert box.schemas == [] and box.log == []
+
+
+# -- correcting it rather than voiding it --------------------------------
+
+
+def a_provider(*replies, tools=None):
+    """An OpenAI-compatible provider over a scripted sequence of responses."""
+    import httpx
+
+    from chickenbot.brain.openai_compat import OpenAICompatProvider
+    from chickenbot.config import LLMConfig
+
+    sent: list[dict] = []
+    answers = list(replies)
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        import json as _json
+
+        sent.append(_json.loads(request.content))
+        body = answers.pop(0) if len(answers) > 1 else answers[0]
+        return httpx.Response(200, json={"choices": [{"message": {"content": body}}], "provider": "toy"})
+
+    import os
+
+    os.environ["TOY"] = "not-a-real-key"
+    p = OpenAICompatProvider(LLMConfig(provider="xai", model="m", api_key_env="TOY"))
+    p.client = httpx.AsyncClient(transport=httpx.MockTransport(handle))
+    return p, sent
+
+
+async def test_it_is_told_it_used_the_wrong_channel_and_asked_again():
+    """Voiding the turn loses the answer; the correction belongs where the
+    mistake was made, not in a filter further down."""
+    p, sent = a_provider(LEAKED[0], "chrisk: #35 is the SEP comment thread")
+    answer = await p.reply(system="s", history=[], prompt="look at issue 35", search=False)
+    assert answer == "chrisk: #35 is the SEP comment thread"
+    assert len(sent) == 2
+    told = sent[1]["messages"][-1]["content"]
+    assert "written into your reply" in told and "no tools on this turn" in told
+
+
+async def test_with_tools_offered_it_is_told_to_call_one_properly(cfg, store):
+    from chickenbot.commands import Context, Handler
+    from chickenbot.tools import ToolBox
+
+    from .conftest import FakeTransport
+
+    h = Handler(cfg, store, None, None)
+    ctx = Context(
+        handler=h,
+        transport=FakeTransport(),
+        nick="toppk",
+        account="toppk",
+        channel="#chan",
+        args="",
+        is_owner=True,
+        in_channel=True,
+    )
+    p, sent = a_provider(LEAKED[1], "done")
+    await p.reply(system="s", history=[], prompt="x", search=False, toolbox=ToolBox(h, ctx))
+    told = sent[1]["messages"][-1]["content"]
+    assert "call the tool properly" in told and "no tools on this turn" not in told
+
+
+async def test_twice_is_a_failure_not_a_third_try():
+    import pytest
+
+    from chickenbot.brain import ProviderError
+
+    p, _sent = a_provider(LEAKED[0], LEAKED[0])
+    with pytest.raises(ProviderError, match="tool markup"):
+        await p.reply(system="s", history=[], prompt="x", search=False)
+
+
+async def test_honest_prose_is_never_asked_twice():
+    p, sent = a_provider("chrisk: the wheel never stops")
+    answer = await p.reply(system="s", history=[], prompt="x", search=False)
+    assert answer == "chrisk: the wheel never stops"
+    assert len(sent) == 1
+
+
+# -- and what the turn is told it can reach ------------------------------
+
+
+def test_a_turn_with_no_tools_says_so(cfg, store):
+    from chickenbot.commands import tools_note
+    from chickenbot.tools import no_tools
+
+    said = tools_note(no_tools())
+    assert "no tools on this turn" in said
+    assert "Never write out a request for a tool" in said
+
+
+def test_a_turn_with_tools_names_them(cfg, store):
+    from chickenbot.commands import Context, Handler, tools_note
+    from chickenbot.tools import ToolBox
+
+    from .conftest import FakeTransport
+
+    h = Handler(cfg, store, None, None)
+    ctx = Context(
+        handler=h,
+        transport=FakeTransport(),
+        nick="toppk",
+        account="toppk",
+        channel="#chan",
+        args="",
+        is_owner=False,
+        in_channel=True,
+    )
+    said = tools_note(ToolBox(h, ctx))
+    assert "chan_history" in said and "and only these" in said
+
+
+def test_the_soul_no_longer_claims_which_tools_exist():
+    """It is a fact about one call, not about a character -- and it was false
+    on every unprompted pass."""
+    from pathlib import Path
+
+    soul = Path("docs/templates/SOUL.md").read_text()
+    assert "tools for the room, the chat log and GitHub" not in soul
+    assert "Look before asking" in soul
