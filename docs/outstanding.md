@@ -8,6 +8,17 @@ fixed rather than listed.
 Each entry says what was seen, so that in three weeks it is still arguable
 rather than just a line somebody wrote down.
 
+## Before the next deploy
+
+**The live soul still claims tools.** `SOUL.md` now says what you can reach
+"is listed for you each time"; every instance's database still says "There are
+tools for the room, the chat log and GitHub". The two halves have to land
+together -- code without the soul edit leaves a stale claim followed by an
+accurate list, and the soul edit without the code promises a list nothing
+writes. `soul --diff template` shows it, and the fix is a `soul @file` per
+instance. This is the soul's missing upgrade path arriving as a chore, exactly
+as predicted.
+
 ## Being decided
 
 **What the bartender may write about a person.** The prompt says to record
@@ -84,3 +95,13 @@ end-of-day GitHub cheer, bringing up a remembered thing on arrival.
 - GitHub issue/PR splits are exact only where the mirror holds every item;
   paginating the searches would make them exact everywhere.
 - The `activity` table has no retention policy.
+- `leaked_markup` is a list of known tool-call delimiters. Every entry is
+  bracketed now, so prose about tool protocols survives -- but a model with a
+  new delimiter leaks and nothing says so. It is a backstop behind the
+  provider's retry; if `leaked-markup` never appears in the record again, it
+  is dead code and should go.
+- An external tool that writes must declare `writes: true`; unmarked counts as
+  read-only. Safe when a tool is honest, wrong when one forgets.
+- Nothing prunes a dossier of things that stopped being true. The daily pass
+  is told to drop what the day contradicts, which only works for people who
+  spoke that day.

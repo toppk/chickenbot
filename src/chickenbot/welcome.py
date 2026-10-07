@@ -29,9 +29,13 @@ REJOIN_GAP = 900.0
 # Plainer rather than cleverer. These land on people every day, and a greeting
 # that is trying is worse than a greeting that is dull -- but four of dull
 # beats two, which read as a bot with two greetings.
-MORNING = ("morning, {who}", "morning {who}", "morning", "you're up, {who}")
-AFTERNOON = ("afternoon, {who}", "hey {who}", "afternoon", "hi {who}")
-EVENING = ("evening, {who}", "hey {who}", "evening", "evening, {who}")
+#
+# Every one names somebody. A bare "afternoon" is not a greeting, it is a
+# noise: it went out next to biff saying the same word in the same second, and
+# nobody could tell who either of them meant.
+MORNING = ("morning, {who}", "morning {who}", "you're up, {who}", "morning {who}, early one")
+AFTERNOON = ("afternoon, {who}", "hey {who}", "hi {who}", "afternoon {who}")
+EVENING = ("evening, {who}", "hey {who}", "evening {who}", "{who}, evening")
 LATE = ("still up, {who}?", "late one, {who}", "late, {who}", "{who}, still up?")
 
 

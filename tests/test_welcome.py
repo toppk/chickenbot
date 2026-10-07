@@ -235,3 +235,22 @@ async def test_the_engine_remembers_who_it_watched_leave(cfg, store):
     await h.dispatch(arrival(tr, "nate"))
     await h.drain()
     assert tr.sent == []
+
+
+def test_every_greeting_names_somebody(store):
+    """A bare "afternoon" is not a greeting, it is a noise -- and it went out
+    beside biff saying the same word in the same second. The wording is chosen
+    by crc32 of nick and day, so a bank with a nameless variant in it greets
+    nobody on whichever days it happens to land on."""
+    from chickenbot.welcome import AFTERNOON, EVENING, LATE, MORNING
+
+    for bank in (MORNING, AFTERNOON, EVENING, LATE):
+        for wording in bank:
+            assert "{who}" in wording, wording
+
+
+def test_the_wording_names_them_on_every_day_of_a_year(store):
+    """Not just today's. This failed the day the date rolled over."""
+    for day in range(366):
+        said = _wording("nate", midday() - day * 86400)
+        assert "nate" in said, (day, said)

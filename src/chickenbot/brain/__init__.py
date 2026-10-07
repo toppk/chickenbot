@@ -59,7 +59,11 @@ _CITATION = re.compile(r"\s*\[\d+\](?=[\s.,;:]|$)")
 # others use. Their presence in prose means the request had no tools wired, or
 # the model ignored that it had, and either way what came back is machinery.
 _LEAKED = (
-    "DSML",
+    # Every entry carries its opening bracket. A bare "DSML" matched prose
+    # that merely mentioned it, so quoting somebody talking about tool
+    # protocols would have been dropped as if it were one.
+    "<|DSML|",
+    "<｜DSML｜",
     "<tool_call",
     "<tool▁call",
     "<function_call",

@@ -282,3 +282,17 @@ def test_the_soul_no_longer_claims_which_tools_exist():
     soul = Path("docs/templates/SOUL.md").read_text()
     assert "tools for the room, the chat log and GitHub" not in soul
     assert "Look before asking" in soul
+
+
+def test_prose_about_tool_protocols_is_not_mistaken_for_one():
+    """A bare "DSML" caught prose that merely mentioned it -- and the room
+    talks about this constantly, biff's leak being a running joke."""
+    from chickenbot.brain import _LEAKED, leaked_markup
+
+    assert all("<" in mark for mark in _LEAKED), _LEAKED
+    for honest in (
+        "toppk: DSML is deepseek's tool syntax; biff leaked some yesterday",
+        "that was my DSML showing — the costume i was wearing",
+        "chrisk: the agents use github comments as a comms channel",
+    ):
+        assert leaked_markup(honest) == "", honest
