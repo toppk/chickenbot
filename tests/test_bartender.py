@@ -353,3 +353,44 @@ async def test_two_lines_about_one_person_both_survive(cfg, store):
     assert kept == 1  # one person, not one line
     notes = store.person_observed(pid)
     assert "aurora-linux" in notes and "cold" in notes
+
+
+# -- what may be written about a person ----------------------------------
+
+
+def test_a_passing_complaint_is_allowed_and_dated():
+    """chrisk said "im fighting a cold" and nothing kept it, because a
+    blanket ban on health also banned noticing somebody is having a bad week
+    -- which the same prompt asks for in its first paragraph."""
+    from chickenbot.bartender import SYSTEM
+
+    assert "ill or tired or having a rotten week" in SYSTEM
+    assert "drop it once it stops being true" in SYSTEM
+
+
+def test_a_condition_is_not():
+    from chickenbot.bartender import SYSTEM
+
+    assert "condition, diagnosis or ongoing illness" in SYSTEM
+    assert "nothing about anybody's health" not in SYSTEM.lower()
+
+
+def test_hearsay_about_somebody_is_not_a_note_about_them():
+    """The pass that missed the cold saw it only in chickenbot's own words."""
+    from chickenbot.bartender import SYSTEM
+
+    assert "never what somebody else said about them" in SYSTEM
+    assert "never anything you worked out rather than heard" in SYSTEM
+
+
+def test_each_prohibition_stands_on_its_own():
+    """Measured, not styled: the money rule's wording did not change and it
+    leaked half as often once it stopped being third in a list."""
+    from chickenbot.bartender import SYSTEM
+
+    for rule in (
+        "Nothing about anybody's money.",
+        "Nothing about anybody's relationships.",
+        "Nothing about any condition, diagnosis or ongoing illness",
+    ):
+        assert rule in SYSTEM, rule

@@ -76,5 +76,11 @@ and the one that makes the record worth keeping.
 
 ## Settled
 
-Nothing yet. An entry moves here with the date it was promoted into `SOUL.md`
-and one line on what the trial showed.
+**The bartender may note a passing complaint** -- 2026-10-07. Not a soul
+entry, but decided the same way and worth recording here. A blanket ban on
+health also banned noticing that somebody was having a bad week, which the
+same prompt asks for in its opening line. `rehearse --system` over a
+synthetic room settled it with numbers: moving the permission into the
+positive paragraph and splitting the prohibitions one per sentence keeps a
+cold (3/3), still refuses an ongoing condition (0/3), and leaks money half as
+often as the wording it replaced. Measured on one model only.

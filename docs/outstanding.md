@@ -21,27 +21,25 @@ as predicted.
 
 ## Being decided
 
-**What the bartender may write about a person.** The prompt says to record
-"what they have said they are struggling with" and "go easy on somebody
-having a bad week", and then forbids "anything about anybody's health". Those
-contradict. chrisk said "im fighting a cold", chickenbot used it in the
-moment and no dossier kept it; biff -- a fork -- asked after it a day later,
-which read as the warmer behaviour. `rehearse --system` confirmed one clause
-is responsible: remove eight words and the same model over the same evening
-writes `chrisk: fighting a cold today`.
-
-A first attempt framed it as durable-vs-passing, which inverts the risk for
-health specifically: a cold is harmless *because* it is gone by Friday, and
-the durable health facts are the dangerous ones. Candidate wordings are in
-the scratchpad. Not rushed: biff got the warm answer possibly by deleting a
-clause without much thought, and a cold is the easiest case there is.
-
 **How big a dossier may get.** `MAX_CHARS` is 1200 and chrisk is at 598.
 Notes are now cut between thoughts rather than mid-sentence, and the pass
 logs when it drops a tail, so the failure is visible -- but it is still a
 cap, and memory that matters should not age out because a cap was picked
 once. Raised alongside: hiding smaller notes unless something is digging
 deep, which is a bigger idea than today.
+
+**Money leaks out of the bartender's notes.** Measured on a synthetic room
+where somebody mentions their rent: the shipped prompt kept it in 2 of 3
+passes, and splitting the prohibitions one per sentence halved that to 1 in 3
+without changing a word of the money rule. Still a leak. Worth the same
+treatment the health wording got -- a case built, candidates rehearsed,
+numbers rather than readings.
+
+**Every prompt measurement is against one model.** The health wording was
+settled against `deepseek-v4.1-flash`. A prompt shaped around one model's
+habits can be worse on another, and biff runs a local Qwen. `rehearse
+--system` regenerates the comparison, so a change to `llm.model` is a reason
+to re-run it rather than to assume it still holds.
 
 ## Known wrinkles
 
