@@ -3,6 +3,17 @@
 The services run a **built artifact**, not the checkout. Editing the working
 tree cannot change a running bot; only `deploy.sh` can.
 
+## Before you upgrade a running instance
+
+Read `UPGRADE_NOTES.md`. It holds the steps a deploy cannot take for you --
+most often a soul patch, because the soul lives in each instance's database
+and editing the shipped template reaches nobody. Each entry says how to check
+it worked and how to put it back.
+
+The order is always: deploy, restart, then the by-hand steps. A soul is read
+per message, so a patch applied after the restart takes effect on the next
+line anybody says.
+
 ## One-time setup
 
 ```bash

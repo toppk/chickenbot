@@ -54,6 +54,11 @@ people and rooms, what it has been doing and what it cost. `docs/deploying.md`
 covers instances and deploys, `docs/reviewing.md` how to review an episode,
 and `docs/authority.md` who is allowed to do what.
 
+`UPGRADE_NOTES.md` is the by-hand part of a release: the steps the code cannot
+take for you, with how to check each one worked and how to put it back. Most
+releases need nothing there. Read it before upgrading an instance that is
+already running.
+
 `docs/outstanding.md` is what has been noticed and not yet done, with what
 was seen in each case. `docs/principles.md` is why any of it is the way it is -- the claims the
 behaviours are meant to arrive at, so a rule can be held against something
