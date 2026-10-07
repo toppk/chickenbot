@@ -37,6 +37,10 @@ class Tool:
     description: str
     params: dict
     requires: frozenset[str] = frozenset()  # transport capabilities this tool needs
+    # Whether calling it changes something: a record written, a mode set, an
+    # API quota spent. Unprompted passes are given the ones that only look.
+    # Most writers are owner-only anyway, which hid that `who_link` is not.
+    writes: bool = False
 
 
 # Tools are named <family>_<verb>: chan_ for room moderation and state, log_ for
@@ -53,9 +57,12 @@ def tool(
     description: str = "",
     params: dict | None = None,
     requires: frozenset[str] = frozenset(),
+    writes: bool = False,
 ):
     def register(fn: Runner) -> Runner:
-        TOOLS[name] = Tool(name, fn, owner, description, params or {"type": "object", "properties": {}}, requires)
+        TOOLS[name] = Tool(
+            name, fn, owner, description, params or {"type": "object", "properties": {}}, requires, writes
+        )
         return fn
 
     return register
@@ -159,9 +166,20 @@ class ToolBox:
 
 
 def no_tools(handler: Handler | None = None, ctx: Context | None = None) -> ToolBox:
-    """A toolbox that reaches nothing. For the scheduled and unprompted
-    passes, where looking things up is not on offer this turn."""
+    """A toolbox that reaches nothing, for a pass that should only speak from
+    what it already has."""
     return ToolBox(handler, ctx, tools={})  # type: ignore[arg-type]
+
+
+def read_only(handler: Handler, ctx: Context) -> ToolBox:
+    """Everything that only looks, and nothing that changes anything.
+
+    For speaking up unprompted. The useful thing a bot in a channel can be is
+    the one that already went and looked -- a remark worth making is often one
+    nobody could have made without looking something up. Writing is different:
+    nobody asked, so nothing should be different afterwards.
+    """
+    return ToolBox(handler, ctx, tools={name: t for name, t in TOOLS.items() if not t.writes})
 
 
 NOTE_MAX = 200  # one line; a dossier is facts, not a transcript
@@ -212,7 +230,7 @@ def _moderation_tool(action: str, description: str, params: dict) -> None:
         return result
 
     name = f"chan_{action}"
-    TOOLS[name] = Tool(name, run, True, description, params, frozenset({action}))
+    TOOLS[name] = Tool(name, run, True, description, params, frozenset({action}), writes=True)
 
 
 for _action, _desc in (
@@ -255,6 +273,7 @@ _moderation_tool("unban", "Lift a ban. Takes the exact mask from the ban list.",
         "properties": {"topic": {"type": "string", "description": "omit to read rather than set"}},
         "required": [],
     },
+    writes=True,
 )
 async def tool_chan_topic(h: Handler, ctx: Context, args: dict) -> str:
     if not ctx.in_channel:
@@ -396,6 +415,7 @@ async def tool_self_activity(h: Handler, ctx: Context, args: dict) -> str:
         },
         "required": ["handle"],
     },
+    writes=True,
 )
 async def tool_who_is_bot(h: Handler, ctx: Context, args: dict) -> str:
     handle = str(args.get("handle", "")).strip()
@@ -496,6 +516,7 @@ async def tool_chan_who(h: Handler, ctx: Context, args: dict) -> str:
         },
         "required": ["realm", "handle"],
     },
+    writes=True,
 )
 async def tool_who_link(h: Handler, ctx: Context, args: dict) -> str:
     """The speaker's own handle. Open to anyone authenticated, because the
@@ -539,6 +560,7 @@ async def tool_who_link(h: Handler, ctx: Context, args: dict) -> str:
         },
         "required": ["person", "fact"],
     },
+    writes=True,
 )
 async def tool_dossier_note(h: Handler, ctx: Context, args: dict) -> str:
     """Owner-gated like `who_link_other`: the model may propose this from
@@ -581,6 +603,7 @@ async def tool_dossier_note(h: Handler, ctx: Context, args: dict) -> str:
         },
         "required": ["person", "realm", "handle"],
     },
+    writes=True,
 )
 async def tool_who_link_other(h: Handler, ctx: Context, args: dict) -> str:
     """Third-party claims, gated like every other owner action.
@@ -649,6 +672,7 @@ MAX_NICKNAMES = 8
         "properties": {"name": {"type": "string", "description": "the new name"}},
         "required": ["name"],
     },
+    writes=True,
 )
 async def tool_who_call_me(h: Handler, ctx: Context, args: dict) -> str:
     """Owner-gated because a wake word is a shared resource.

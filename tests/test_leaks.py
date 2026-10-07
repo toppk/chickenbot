@@ -86,11 +86,10 @@ def test_the_barfly_is_told_it_has_nothing_to_reach_for():
     assert "never write out a request for it" in REMARK
 
 
-async def test_the_barfly_really_is_given_none(cfg, store):
-    """If this ever changes, the paragraph above becomes a lie. Asserted on
-    what reaches the provider rather than on the source, because the barfly
-    now passes an empty toolbox rather than no toolbox -- the absence is a
-    decision somebody wrote down, not an argument nobody remembered."""
+async def test_the_barfly_may_look_but_not_touch(cfg, store):
+    """It was reaching for a tool when it wrote a call into #lobby, and the
+    reach was right. What it may not do is change anything: nobody asked, so
+    nothing should be different afterwards."""
     from chickenbot.barfly import QUIET
 
     from .test_welcome import spoke
@@ -102,12 +101,56 @@ async def test_the_barfly_really_is_given_none(cfg, store):
             seen["toolbox"] = toolbox
             return "quiet in here"
 
+    cfg.llm.tools = True
     h, tr, now = setup(cfg, store, Watching())
     spoke(store, "nate", now - QUIET - 60, realm="fake")
     await Barfly(h).tick(now)
     await h.drain()
-    assert seen["toolbox"] is not None
+
+    offered = {s["function"]["name"] for s in seen["toolbox"].schemas}
+    assert "chan_history" in offered and "chan_who" in offered
+    assert not {name for name in offered if __import__("chickenbot.tools", fromlist=["TOOLS"]).TOOLS[name].writes}
+
+
+async def test_with_tools_switched_off_it_reaches_nothing(cfg, store):
+    from chickenbot.barfly import QUIET
+
+    from .test_welcome import spoke
+
+    seen = {}
+
+    class Watching(FakeProvider):
+        async def reply(self, *, toolbox=None, **kw):
+            seen["toolbox"] = toolbox
+            return "quiet in here"
+
+    cfg.llm.tools = False
+    h, tr, now = setup(cfg, store, Watching())
+    spoke(store, "nate", now - QUIET - 60, realm="fake")
+    await Barfly(h).tick(now)
+    await h.drain()
     assert seen["toolbox"].schemas == []
+
+
+def test_everything_that_changes_something_is_marked():
+    """`who_link` is the only non-owner writer, which is exactly why the flag
+    exists: the rest were safe by being owner-only, not by being read."""
+    from chickenbot.tools import TOOLS
+
+    for name in ("chan_kick", "chan_ban", "chan_topic", "who_link", "who_link_other", "dossier_note"):
+        assert TOOLS[name].writes, name
+    for name in ("chan_history", "chan_state", "chan_who", "current_time", "self_activity"):
+        assert not TOOLS[name].writes, name
+
+
+def test_an_external_tool_declares_whether_it_writes():
+    """Nothing here could guess, so the tool says. Unmarked is read-only."""
+    from external.github.__main__ import TOOLS as GH
+
+    refresh = next(t for t in GH if t["name"] == "github_refresh")
+    assert refresh.get("writes") is True
+    issue = next(t for t in GH if t["name"] == "github_issue")
+    assert not issue.get("writes")
 
 
 def test_an_empty_toolbox_is_not_the_same_as_no_toolbox():

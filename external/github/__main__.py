@@ -265,6 +265,9 @@ TOOLS = [
     },
     {
         "name": "github_refresh",
+        # Spends API quota and moves the mirror on: not something an
+        # unprompted pass should do on its own.
+        "writes": True,
         "description": (
             "Fetch from GitHub now rather than answering from the mirror. Use it when "
             "somebody asks whether something has landed *yet*, or says they have just "

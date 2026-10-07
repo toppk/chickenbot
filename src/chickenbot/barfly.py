@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 from .attention import SILENT
 from .brain import ProviderError, leaked_markup
 from .observe import activity, note
-from .tools import no_tools
+from .tools import no_tools, read_only
 
 if TYPE_CHECKING:
     from .commands import Handler
@@ -98,9 +98,13 @@ class Barfly:
                 is_owner=False,
                 in_channel=True,
             )
-            # Says plainly that it has nothing to reach for, which is what
-            # the invented tool call came from believing otherwise.
-            system, prompt = compose(self.h, ctx, await self.h.scrollback(ctx), toolbox=no_tools())
+            # Everything that only looks. A remark worth making is often one
+            # nobody could have made without looking something up -- which is
+            # what it was reaching for when it wrote a tool call into #lobby.
+            # Nothing that changes anything: nobody asked, so nothing should
+            # be different afterwards.
+            box = read_only(self.h, ctx) if self.h.cfg.llm.tools else no_tools()
+            system, prompt = compose(self.h, ctx, await self.h.scrollback(ctx), toolbox=box)
             note(llm=self.h.provider.name)
             try:
                 said = await self.h.provider.reply(
@@ -109,7 +113,7 @@ class Barfly:
                     prompt=prompt,
                     search=False,
                     # Nothing to reach for on this pass, said rather than omitted.
-                    toolbox=no_tools(),
+                    toolbox=box,
                     session=f"{tr.name}:{room}",
                 )
             except ProviderError as exc:

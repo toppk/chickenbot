@@ -76,12 +76,6 @@ is useful for is having already gone and looked. See `principles.md`.
 **Scheduled activities**: recurring jobs beyond the daily passes -- the
 end-of-day GitHub cheer, bringing up a remembered thing on arrival.
 
-**The barfly cannot look anything up.** It is now told so plainly, and
-handed an empty toolbox, which is what stopped the leak. Whether it *should*
-be able to is a different question: the principles say context is the job and
-search is a core competence, and a remark drawn from something it went and
-read is exactly the kind of unprompted contribution that would earn its place.
-
 ## Smaller
 
 - Drop the orphaned `exchange` table on eaccel; it is gone from `SCHEMA`.

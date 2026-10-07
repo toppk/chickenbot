@@ -146,6 +146,13 @@ search is meant to be something it is *good* at rather than something it has
 access to -- a capability it reaches for by reflex, like the chat log, not a
 plugin that happens to be granted.
 
+**Looking is not acting.** A remark nobody asked for may be drawn from
+something the bot went and read -- that is often the only thing that makes it
+worth making. It may not change anything on the way: no record written, no
+mode set, no quota spent. Nobody asked, so nothing should be different
+afterwards. Every tool says which of the two it is, and the unprompted passes
+are handed only the ones that look.
+
 **An interjection is a bid, and the room decides whether it was a
 contribution.** Speaking unprompted is only justified if somebody is glad of
 it, and whether they were is observable: a bid nobody picks up was not worth

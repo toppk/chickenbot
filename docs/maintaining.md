@@ -431,6 +431,17 @@ Branch creations and deletions are mirrored too, from the same events feed
 that was already being fetched. They used to be dropped, which is why a branch
 somebody had just pushed up was invisible until something moved on it.
 
+## What an unprompted remark may do
+
+The barfly is handed every tool that only looks, and none that change
+anything -- so it can read the log, the roster, a WHO, or whatever external
+tools are granted in that room, and cannot set a topic, record a handle or
+spend GitHub quota. Each tool carries a `writes` flag; an external tool
+declares its own, and unmarked means read-only.
+
+Switched off wholesale with `llm.tools = false`, which leaves it speaking from
+the scrollback alone.
+
 ## Reading an issue
 
 `github_issue` fetches one issue or pull request with its body, labels, state

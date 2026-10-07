@@ -94,6 +94,10 @@ class Connection:
                 description=str(item.get("description", ""))[:400],
                 params=params,
                 requires=frozenset(grant.requires),
+                # The tool knows whether calling it changes anything; nothing
+                # here could guess. Unmarked means read-only, so a tool that
+                # spends quota or writes somewhere has to say so.
+                writes=bool(item.get("writes")),
             )
             self.names.append(name)
             accepted.append(name)
