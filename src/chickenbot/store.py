@@ -178,6 +178,15 @@ CREATE INDEX IF NOT EXISTS revision_key ON revision (kind, key, id DESC);
 -- An older `exchange` table recorded only the chat path and is not the same
 -- shape. It is left where it is rather than migrated, because pretending the
 -- two are compatible would be worse than an orphan table.
+-- Which shipped changes to the soul have been dealt with on this instance.
+-- Its own table rather than a setting: `.tune` reads settings, and bookkeeping
+-- has no business in the list of knobs somebody can turn.
+CREATE TABLE IF NOT EXISTS soul_patch (
+    id      TEXT PRIMARY KEY,
+    at      INTEGER NOT NULL,
+    outcome TEXT NOT NULL DEFAULT ''   -- applied | by-hand
+);
+
 CREATE TABLE IF NOT EXISTS llm_call (
     id       INTEGER PRIMARY KEY,
     ts       INTEGER NOT NULL,
@@ -510,6 +519,19 @@ class Store:
             changed += cur.rowcount
         self._db.commit()
         return changed
+
+    def soul_patches(self) -> dict[str, str]:
+        """{patch id: how it was dealt with}."""
+        rows = self._db.execute("SELECT id, outcome FROM soul_patch").fetchall()
+        return {r["id"]: r["outcome"] for r in rows}
+
+    def note_soul_patch(self, patch_id: str, outcome: str) -> None:
+        self._db.execute(
+            "INSERT INTO soul_patch (id, at, outcome) VALUES (?, ?, ?)"
+            " ON CONFLICT(id) DO UPDATE SET at=excluded.at, outcome=excluded.outcome",
+            (patch_id, int(time.time()), outcome),
+        )
+        self._db.commit()
 
     def record_llm_call(self, call: LlmCall, keep: int, hours: int) -> None:
         """Keep the last `keep` calls and the last `hours` of them, whichever

@@ -330,6 +330,29 @@ the *next* instance starts with and nothing that is already running. Entries
 being tried on one bot before they are written into the seed are listed in
 `docs/templates/SOUL-trials.md`.
 
+```bash
+chickenbot -c <config> soul --upgrade          # what shipped changes are owed here
+chickenbot -c <config> soul --upgrade --apply  # make the ones that still fit
+chickenbot -c <config> soul --mark <id>        # "I did that one myself"
+```
+
+A shipped change is an **exact replacement**, applied only where the soul
+still has the text it replaces. Three outcomes, all printed:
+
+- `ok` -- dealt with, or the soul already reads the new way
+- `TODO` -- the old text is there and `--apply` will change it
+- `HAND` -- the paragraph has been reworded, so nothing is touched; the
+  intended change is printed for you to make, then `--mark` it
+
+Nothing is guessed at and nothing is dropped. A paragraph somebody rewrote is
+theirs, and an outstanding change is named in the log at every start until it
+is settled. An applied change is an ordinary revision, so `--history` shows it
+and `--restore N` undoes it.
+
+Deliberately no model is involved. The soul's own header says the bot does not
+write it, because a persona a model could rewrite would be a permanent
+injection -- and a migration that asks one to reword it builds exactly that.
+
 Nothing the bot can reach writes the soul. There is no `.soul` command and no
 tool for it: it is set from the CLI, which means shell access to the instance
 directory. A bot cannot edit its own character, and nothing said in a channel

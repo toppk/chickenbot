@@ -27,6 +27,7 @@ from .commands import Handler
 from .observe import TRACE, set_sink
 from .scheduler import Scheduler
 from .settings import RESTART_ONLY, SETTABLE, Settings, Unsettable
+from .soul import pending as soul_pending
 from .soul import seed as seed_soul
 from .store import Store
 from .toolsocket import ToolServer
@@ -92,6 +93,11 @@ async def run(cfg: config.Config) -> int:
     store = Store(cfg.db_path, fold)
     set_sink(store.record_activity)
     seed_soul(store)
+    # Said every start until it is dealt with. A soul change written into the
+    # template reaches no running instance, and the only thing worse than the
+    # chore is not knowing it is owed.
+    if owed := [item.patch.id for item in soul_pending(store) if item.state != "done"]:
+        log.warning("soul changes outstanding (`soul --upgrade`): %s", ", ".join(owed))
     if applied := Settings(store, cfg).apply_stored():
         log.info("applied %d stored setting(s) over the config file", applied)
     if provider is not None:
@@ -465,6 +471,9 @@ def manage(cfg: config.Config, args: argparse.Namespace) -> int:
         if args.what == "cert":
             return make_cert(cfg, args)  # args.config is the toml this sits beside
 
+        if args.what == "soul" and (args.upgrade or args.mark):
+            return upgrade_soul(store, args)
+
         if args.what == "soul":
             seed_soul(store)
             return _document(store, "soul", "", args, lambda text: store.set_soul(text), store.soul())
@@ -726,6 +735,48 @@ def _both_halves(store: Store, pid: int | None) -> str:
         for line in body.splitlines():
             out.append(f"{label}: {line}")
     return "\n".join(out) or "(nothing known)"
+
+
+def upgrade_soul(store: Store, args: argparse.Namespace) -> int:
+    """Shipped changes to the soul, and where this instance stands on them.
+
+    The soul is per instance and diverges the moment anybody edits it, so a
+    change written into the template reaches nobody. These are exact
+    replacements, applied only where the text is still as it shipped -- a
+    paragraph the operator reworded is theirs, and the honest move is to show
+    them the change rather than guess.
+    """
+    from .soul import apply_patches, pending
+
+    seed_soul(store)
+    if args.mark:
+        if args.mark not in {p.patch.id for p in pending(store)}:
+            print(f"no such patch: {args.mark}", file=sys.stderr)
+            return 1
+        store.note_soul_patch(args.mark, "by-hand")
+        print(f"{args.mark}: recorded as dealt with by hand")
+        return 0
+
+    standing = apply_patches(store) if args.apply else pending(store)
+    missing = [item for item in standing if item.state == "missing"]
+    for item in standing:
+        mark = {"done": "ok  ", "applies": "TODO", "missing": "HAND"}[item.state]
+        print(f"{mark}  {item.patch.id}")
+        print(f"        {item.patch.why}")
+    if not standing:
+        print("nothing shipped yet")
+        return 0
+    if args.apply:
+        print("\napplied what fitted; `soul --history` shows the revision, `--restore N` undoes it")
+    elif any(item.state == "applies" for item in standing):
+        print("\nTODO: `soul --upgrade --apply` will make these changes")
+    for item in missing:
+        # Never edited on a guess, and never quietly dropped either.
+        print(f"\n{item.patch.id} does not fit: this soul no longer has the text it replaces.")
+        print("Make the change by hand, then `soul --mark <id>`. What it would have replaced:\n")
+        print("\n".join(f"  - {line}" for line in item.patch.old.splitlines()))
+        print("\n".join(f"  + {line}" for line in item.patch.new.splitlines()))
+    return 0
 
 
 def show_transcript(store: Store, args: argparse.Namespace) -> int:
@@ -1032,6 +1083,9 @@ def main(argv: list[str] | None = None) -> int:
 
     soul = versioned(sub.add_parser("soul", help="show, set or roll back the bot's voice"))
     soul.add_argument("text", nargs="?", help="new text, @file, or - for stdin; omit to show")
+    soul.add_argument("--upgrade", action="store_true", help="what shipped changes are outstanding here")
+    soul.add_argument("--apply", action="store_true", help="with --upgrade: apply the ones that fit")
+    soul.add_argument("--mark", metavar="ID", help="record a patch as dealt with by hand")
     who = versioned(sub.add_parser("dossier", help="show, set or roll back what is known about a person"))
     who.add_argument("realm", nargs="?", help="e.g. irc.chonkbase.net; omit to list everyone")
     who.add_argument("account", nargs="?")
