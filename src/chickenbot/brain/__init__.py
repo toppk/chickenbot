@@ -53,6 +53,37 @@ _LINK = re.compile(r"\[([^\]]+)\]\((https?://[^)\s]+)\)")
 _CITATION = re.compile(r"\s*\[\d+\](?=[\s.,;:]|$)")
 
 
+# Delimiters a model uses to ask for a tool. Not phrasings -- protocol tokens,
+# which is why listing them is a parse rather than a guess: DeepSeek's
+# `<|DSML|>` (often with fullwidth bars), and the `<tool_call>` family the
+# others use. Their presence in prose means the request had no tools wired, or
+# the model ignored that it had, and either way what came back is machinery.
+_LEAKED = (
+    "DSML",
+    "<tool_call",
+    "<tool▁call",
+    "<function_call",
+    "<function_calls",
+    "<invoke name=",
+    "<|tool",
+    "<｜tool",
+)
+
+
+def leaked_markup(text: str) -> str:
+    """Which tool-call delimiter a reply contains, or "" for honest prose.
+
+    A model that wanted a tool and had none writes the call out as text. biff
+    did it and has been teased for it since -- "the costume i was wearing" --
+    and chickenbot did it too, into #lobby, inventing a tool name as it went.
+    Saying this to a room is worse than saying nothing.
+    """
+    for mark in _LEAKED:
+        if mark in text:
+            return mark.strip("<|｜")
+    return ""
+
+
 def blocks(text: str) -> list[tuple[bool, str]]:
     """Split into (is_preformatted, content) runs, on fenced code blocks.
 

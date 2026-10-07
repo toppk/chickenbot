@@ -76,6 +76,19 @@ is useful for is having already gone and looked. See `principles.md`.
 **Scheduled activities**: recurring jobs beyond the daily passes -- the
 end-of-day GitHub cheer, bringing up a remembered thing on arrival.
 
+**No way to read one issue or pull request.** chrisk linked
+`aurora-linux/issues/35` and asked what it said. There is no tool for a single
+item by number or URL -- the mirror carries titles and states, not bodies or
+comments -- so the model invented `github_issue` and wrote the call out as
+prose. The guard now drops that, but the gap is real, and an issue thread is
+where a lot of the actual work in that room happens.
+
+**The barfly cannot look anything up.** It is now told so plainly, which
+stopped the leak. Whether it *should* be able to is a different question: the
+principles say context is the job and search is a core competence, and a
+remark drawn from something it went and read is exactly the kind of
+unprompted contribution that would earn its place.
+
 ## Smaller
 
 - Drop the orphaned `exchange` table on eaccel; it is gone from `SCHEMA`.

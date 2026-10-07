@@ -13,7 +13,7 @@ import time
 from typing import TYPE_CHECKING
 
 from .attention import SILENT
-from .brain import ProviderError
+from .brain import ProviderError, leaked_markup
 from .observe import activity, note
 
 if TYPE_CHECKING:
@@ -30,7 +30,14 @@ REMARK = (
     "Nobody has said anything for a while, and no one has asked you anything. "
     "If the conversation above leaves you with something worth saying — a remark, "
     "a question, a small observation — say it in one line. If you have nothing "
-    f"real to add, reply with exactly {SILENT} and say nothing."
+    f"real to add, reply with exactly {SILENT} and say nothing.\n\n"
+    # The soul says there are tools for the room, the log and GitHub. On this
+    # path there are none, and a model that believes otherwise writes the call
+    # out as prose: chickenbot put a tool call it invented into #lobby rather
+    # than admit it could not read the issue chrisk had linked.
+    "You have no tools on this turn and cannot look anything up. Speak only from what is "
+    "in front of you, or stay silent. If answering would need something you cannot reach, "
+    f"reply with exactly {SILENT} -- never write out a request for it."
 )
 
 
@@ -106,6 +113,12 @@ class Barfly:
             said = said.strip()
             if not said or said == SILENT:
                 note(outcome="silent")
+                return
+            if leak := leaked_markup(said):
+                # It wanted a tool it did not have. Saying the request out
+                # loud is the one thing worse than not answering.
+                note(outcome="leaked-markup", leak=leak)
+                log.warning("dropped a tool call meant for the model, not the room: %r", said[:160])
                 return
             note(outcome="remarked")
             # Through the same pause as a greeting: a remark nobody asked for

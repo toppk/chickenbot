@@ -22,7 +22,7 @@ from .attention import (
     Attention,
     addressed_elsewhere,
 )
-from .brain import Provider, ProviderError
+from .brain import Provider, ProviderError, leaked_markup
 from .config import Config
 from .dossier import Dossiers
 from .events import Event, Kind
@@ -1068,6 +1068,10 @@ async def cmd_ask(h: Handler, ctx: Context, *, following: bool = False) -> None:
     except ProviderError as exc:
         note(outcome="llm-error", error=str(exc)[:60])
         ctx.say(f"{ctx.nick}: {exc}")
+        return
+    if leak := leaked_markup(answer):
+        note(outcome="leaked-markup", leak=leak)
+        log.warning("dropped a tool call meant for the model, not the room: %r", answer.strip()[:160])
         return
     quiet, how = is_silence(answer)
     if quiet:
