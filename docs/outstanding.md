@@ -19,6 +19,32 @@ writes. `soul --diff template` shows it, and the fix is a `soul @file` per
 instance. This is the soul's missing upgrade path arriving as a chore, exactly
 as predicted.
 
+## The soul is fragmenting, and need not be
+
+Every instance holds a whole soul, so every shipped change needs an exact
+patch and a ledger to carry it. That machinery works, and it is more than
+openclaw has -- their `SOUL.md` is written once at workspace creation and
+never updated, because their agent rewrites its own and *is* the migration
+path. We closed that door for good reasons, and inherited the maintenance.
+
+The way out is probably not better patches but **a soul in two parts**: a
+shipped base, versioned with the code and current by definition, and an
+instance overlay in the database for what this bot's operator added. The
+prompt is already assembled that way -- soul, then suffix, then the tools
+note -- so the base would simply join the parts that ship. A base change
+would then need no migration anywhere, and the only thing per instance would
+be the thing that is genuinely per instance.
+
+What it costs: the operator can no longer rewrite a shipped line, only add to
+it or override it, and `soul @file` has to mean the overlay rather than the
+whole. Trials would live in the overlay, which is where they belong anyway.
+The existing patch mechanism becomes the way the current single-blob souls
+are migrated into a base plus an overlay, once.
+
+Worth stealing alongside it: openclaw records a sha256 of what it generated,
+so "never touched" and "made theirs" are a fact rather than an inference from
+whether a patch's text still matches. Today both report `HAND`.
+
 ## Being decided
 
 **How big a dossier may get.** `MAX_CHARS` is 1200 and chrisk is at 598.
