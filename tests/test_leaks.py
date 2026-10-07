@@ -86,9 +86,34 @@ def test_the_barfly_is_told_it_has_nothing_to_reach_for():
     assert "never write out a request for it" in REMARK
 
 
-def test_the_barfly_really_is_given_none():
-    """If this ever changes, the paragraph above becomes a lie."""
-    import inspect
+async def test_the_barfly_really_is_given_none(cfg, store):
+    """If this ever changes, the paragraph above becomes a lie. Asserted on
+    what reaches the provider rather than on the source, because the barfly
+    now passes an empty toolbox rather than no toolbox -- the absence is a
+    decision somebody wrote down, not an argument nobody remembered."""
+    from chickenbot.barfly import QUIET
 
-    source = inspect.getsource(Barfly.remark) if hasattr(Barfly, "remark") else inspect.getsource(Barfly)
-    assert "toolbox=" not in source
+    from .test_welcome import spoke
+
+    seen = {}
+
+    class Watching(FakeProvider):
+        async def reply(self, *, toolbox=None, **kw):
+            seen["toolbox"] = toolbox
+            return "quiet in here"
+
+    h, tr, now = setup(cfg, store, Watching())
+    spoke(store, "nate", now - QUIET - 60, realm="fake")
+    await Barfly(h).tick(now)
+    await h.drain()
+    assert seen["toolbox"] is not None
+    assert seen["toolbox"].schemas == []
+
+
+def test_an_empty_toolbox_is_not_the_same_as_no_toolbox():
+    """It is on the wire -- `tools` is omitted either way -- but it is not in
+    the code, where one is a decision and the other is an oversight."""
+    from chickenbot.tools import no_tools
+
+    box = no_tools()
+    assert box.schemas == [] and box.log == []

@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 from .attention import SILENT
 from .brain import ProviderError, leaked_markup
 from .observe import activity, note
+from .tools import no_tools
 
 if TYPE_CHECKING:
     from .commands import Handler
@@ -105,6 +106,8 @@ class Barfly:
                     history=[],
                     prompt=prompt,
                     search=False,
+                    # Nothing to reach for on this pass, said rather than omitted.
+                    toolbox=no_tools(),
                     session=f"{tr.name}:{room}",
                 )
             except ProviderError as exc:

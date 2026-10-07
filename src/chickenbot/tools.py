@@ -62,7 +62,14 @@ def tool(
 
 
 class ToolBox:
-    """One request's worth of tool access, bound to the user who asked."""
+    """One request's worth of tool access, bound to the user who asked.
+
+    Always pass one. A path that reaches nothing says so with `no_tools()`
+    rather than by leaving the argument out: the barfly had none because
+    nobody had passed one, which is indistinguishable from nobody having
+    decided, and the model filled the gap by inventing a tool and writing the
+    call into the channel.
+    """
 
     def __init__(self, handler: Handler, ctx: Context, tools: dict[str, Tool] | None = None) -> None:
         self.handler = handler
@@ -149,6 +156,12 @@ class ToolBox:
         except Exception as exc:  # noqa: BLE001 - the model gets the failure, the channel does not
             log.exception("tool %s raised", name)
             return f"error: {name} failed ({type(exc).__name__})"
+
+
+def no_tools(handler: Handler | None = None, ctx: Context | None = None) -> ToolBox:
+    """A toolbox that reaches nothing. For the scheduled and unprompted
+    passes, where looking things up is not on offer this turn."""
+    return ToolBox(handler, ctx, tools={})  # type: ignore[arg-type]
 
 
 NOTE_MAX = 200  # one line; a dossier is facts, not a transcript

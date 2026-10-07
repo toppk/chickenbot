@@ -96,6 +96,8 @@ class OpenAICompatProvider:
             body.update(self.cfg.search_params)
         if toolbox is not None and toolbox.schemas:
             body["tools"] = toolbox.schemas
+            # `tools: []` is left out rather than sent empty: some endpoints
+            # reject it, and a path with nothing to offer says so in words.
 
         exhausted = True
         for _ in range(MAX_TOOL_TURNS):

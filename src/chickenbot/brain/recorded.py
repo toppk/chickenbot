@@ -119,7 +119,7 @@ class Recorded:
                 served=str(fields.get("served", "")),
                 # What it asked for and what came back, in the order it asked.
                 # The turn is one row; this is what happened inside it.
-                tool_calls=[_called(name, args, out) for name, args, out in getattr(toolbox, "log", [])],
+                tool_calls=[_called(name, args, out) for name, args, out in (toolbox.log if toolbox else [])],
                 ms=int((time.monotonic() - started) * 1000),
             ),
             keep,

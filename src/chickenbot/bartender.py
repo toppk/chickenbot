@@ -20,6 +20,7 @@ import time
 from .brain import ProviderError
 from .dossier import MAX_CHARS, clip
 from .observe import activity, note, note_many
+from .tools import no_tools
 
 log = logging.getLogger(__name__)
 
@@ -104,6 +105,7 @@ class Bartender:
                 history=[],
                 prompt=prompt,
                 search=False,
+                toolbox=no_tools(),
                 session=f"rehearsal:{tr.realm}:{room}",
             )
             note(outcome="rehearsed", chars=len(written))
@@ -152,6 +154,8 @@ class Bartender:
                     history=[],
                     prompt=self._prompt(tr, room, lines, people),
                     search=False,
+                    # Nothing to reach for on this pass, said rather than omitted.
+                    toolbox=no_tools(),
                     session=f"bartender:{tr.realm}:{room}",
                 )
             except ProviderError as exc:

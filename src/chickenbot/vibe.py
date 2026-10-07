@@ -19,6 +19,7 @@ import time
 from .brain import ProviderError
 from .observe import activity, note
 from .rooms import MAX_CHARS
+from .tools import no_tools
 from .transport import Transport
 
 log = logging.getLogger(__name__)
@@ -92,6 +93,8 @@ class VibeCheck:
                     history=[],
                     prompt=self._prompt(tr, room, lines),
                     search=False,
+                    # Nothing to reach for on this pass, said rather than omitted.
+                    toolbox=no_tools(),
                     session=f"vibe:{tr.realm}:{room}",
                 )
             except ProviderError as exc:
