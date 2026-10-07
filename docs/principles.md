@@ -27,6 +27,35 @@ No `.soul` command, no soul tool. Its character is set from the CLI, which
 means shell access. The same goes for owners, tool grants, hosts and
 credentials: declared in config, never settable at runtime.
 
+This is a real choice rather than an obvious one, and it is worth knowing that
+good projects go the other way. OpenClaw's `SOUL.md` is a file in the agent's
+own workspace, and their documentation ships a prompt whose last line is "Save
+the new `SOUL.md`. Welcome to having a personality" -- the agent rewriting its
+own character is the intended workflow, with disclosure as the safeguard:
+"If you change this file, tell the user -- it's your soul, and they should
+know."
+
+That works for a personal assistant with one principal who is present and who
+asked. It does not transfer here. chickenbot sits in a room with people it did
+not choose, and every line they type reaches the same context as the soul. A
+model that can write its own persona means anybody in the room can, not by
+being trusted but by being present -- and it would survive every restart.
+"Tell the user" assumes a user who is listening; this one is asleep most of
+the time, which is why the barfly exists at all.
+
+So the rule costs us a migration per shipped change, because the soul is the
+one thing that cannot ride in with the code. That is the price, and it is
+cheaper than the alternative.
+
+**Instructions we test belong in code; character the operator tunes belongs in
+the database.** The bartender's prompt is evaluated, pinned by tests and
+shipped with a deploy, so it sits beside the code that calls it -- the health
+wording was settled with numbers and cost no instance a single step. The soul
+is meant to diverge per bot, so it lives in the database and pays for that in
+migrations. Getting it backwards costs both ways: a prompt in the database
+cannot be tested before it ships, and a soul in code could never be anybody's
+but ours.
+
 **Standing is earned; power is granted.**
 Two separate systems, deliberately. Time in a room loosens what the bot does
 *unprompted* -- greeting, remarks, acting out. It never unlocks a command or a

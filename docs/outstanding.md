@@ -54,6 +54,11 @@ cap, and memory that matters should not age out because a cap was picked
 once. Raised alongside: hiding smaller notes unless something is digging
 deep, which is a bigger idea than today.
 
+Worth stealing: OpenClaw's `USER.md` is a *directive-based* model -- dated
+entries, each either active or superseded, with its own character budget.
+Superseding beats truncating, because the thing that drops out is the thing
+that stopped being true rather than the thing that happened to be last.
+
 **Money leaks out of the bartender's notes.** Measured on a synthetic room
 where somebody mentions their rent: the shipped prompt kept it in 2 of 3
 passes, and splitting the prohibitions one per sentence halved that to 1 in 3
