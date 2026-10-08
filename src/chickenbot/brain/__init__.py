@@ -50,6 +50,20 @@ _EMPHASIS = re.compile(r"(?<!\w)(\*\*|\*)(?=\S)(.+?)(?<=\S)\1(?!\w)", re.DOTALL)
 # asterisks. CommonMark forbids intra-word underscore emphasis for this reason.
 _UNDERSCORE = re.compile(r"(?<!\w)(__|_)(?=\S)(.+?)(?<=\S)\1(?!\w)", re.DOTALL)
 _LINK = re.compile(r"\[([^\]]+)\]\((https?://[^)\s]+)\)")
+# IRC formatting, from modern.ircdocs.horse/formatting.html. Toggles, so the
+# same byte opens and closes. Only the universally supported three plus
+# strikethrough: monospace (0x11) is in the spec and WeeChat does not render
+# it, and colour (0x03) eats a following digit unless padded, for no gain.
+BOLD, ITALIC, UNDERLINE, STRIKE, RESET = "\x02", "\x1d", "\x1f", "\x1e", "\x0f"
+TOGGLES = BOLD + ITALIC + UNDERLINE + STRIKE
+# Python counts 0x1c-0x1f as whitespace, so a bare `.strip()` eats a trailing
+# italic, strikethrough or underline close -- and the rest of the client's
+# line stays formatted. Trim real whitespace only.
+BLANK = " \t\r\n\v\f"
+_STRIKE_MD = re.compile(r"~~(?=\S)(.+?)(?<=\S)~~", re.DOTALL)
+# `<i>quiet is fine</i>` went into #lobby: a model reaching for markup because
+# nothing had told it what this medium takes. Nothing on IRC renders HTML.
+_HTML = re.compile(r"</?[A-Za-z][A-Za-z0-9-]*(?:\s[^<>]*)?/?>")
 _CITATION = re.compile(r"\s*\[\d+\](?=[\s.,;:]|$)")
 
 
@@ -114,20 +128,35 @@ def blocks(text: str) -> list[tuple[bool, str]]:
 
 
 def clean_for_irc(text: str) -> str:
-    """Strip markdown and control codes. Called by transports that want plain text,
-    never by a provider: Discord and Telegram render markdown and should keep it."""
+    """Markdown in, IRC formatting out. For transports that take control codes
+    rather than markup; Discord and Telegram render markdown and keep theirs.
+
+    Emphasis used to be deleted along with everything else, so a model writing
+    **bold** was simply flattened. It is converted now, which is the whole of
+    what IRC offers and more than most of it is worth using.
+    """
+    # Anything the model wrote for a different medium goes first, so its
+    # contents survive and its tags do not.
     text = _FENCE.sub("", text)
+    text = _HTML.sub("", text)
     text = _LINK.sub(r"\1 (\2)", text)
     text = _HEADING.sub("", text)
     text = _BULLET.sub("", text)
-    text = _EMPHASIS.sub(r"\2", text)
-    text = _UNDERSCORE.sub(r"\2", text)
     text = _CITATION.sub("", text)
-    text = text.replace("`", "")
-    # IRC formatting codes: bold, colour, reset, reverse, italic, underline.
+    # Then any control codes the model emitted itself: it does not get to
+    # write the wire format, only the markup we translate.
     text = re.sub(r"[\x00-\x08\x0b-\x1f]", "", text)
+    text = _STRIKE_MD.sub(f"{STRIKE}\\1{STRIKE}", text)
+    text = _EMPHASIS.sub(
+        lambda m: f"{BOLD if m.group(1) == '**' else ITALIC}{m.group(2)}{BOLD if m.group(1) == '**' else ITALIC}", text
+    )
+    text = _UNDERSCORE.sub(
+        lambda m: f"{BOLD if m.group(1) == '__' else UNDERLINE}{m.group(2)}{BOLD if m.group(1) == '__' else UNDERLINE}",
+        text,
+    )
+    text = text.replace("`", "")
     text = re.sub(r"\n{2,}", "\n", text)
-    return text.strip()
+    return text.strip(BLANK)
 
 
 def build(cfg: LLMConfig) -> Provider | None:

@@ -109,9 +109,24 @@ async def test_topic_needs_no_ops_and_respects_topiclen(irc):
     assert ("TOPIC", "#chan", "x" * 10) in irc.sent
 
 
-def test_output_is_stripped_of_markdown_and_wrapped(irc):
-    assert irc.lines("**bold** and `code`") == ["bold and code"]
+def test_markdown_becomes_irc_formatting_and_is_wrapped(irc):
+    assert irc.lines("**bold** and `code`") == ["\x02bold\x02 and code"]
     assert all(len(line) <= 400 for line in irc.lines("word " * 500))
+
+
+def test_formatting_never_spills_past_the_end_of_a_message(irc):
+    """Toggles, so a span split across messages would leave the first open --
+    and some clients then format everything after it, including other people."""
+    out = irc.lines("**" + "word " * 200 + "end**")
+    assert len(out) > 1
+    for line in out:
+        assert line.count("\x02") % 2 == 0, line
+
+
+def test_the_network_says_what_it_renders(irc):
+    """Not the soul: it changes per connection, and was wrong on some."""
+    assert "This is IRC" in irc.renders
+    assert "no HTML" in irc.renders
 
 
 async def test_somebody_arriving_is_an_event(irc):

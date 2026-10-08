@@ -52,6 +52,10 @@ class DiscordTransport:
         permissions, which refuse the call rather than being asked first."""
         return None
 
+    @property
+    def renders(self) -> str:
+        return " This is Discord. Markdown renders: **bold**, *italic*, `code`, lists, and fenced blocks."
+
     def lines(self, text: str) -> list[str]:
         return chunk(text, 1900, 4)  # Discord's limit is 2000; markdown is kept
 

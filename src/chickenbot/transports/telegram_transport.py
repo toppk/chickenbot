@@ -46,6 +46,10 @@ class TelegramTransport:
         permissions, which refuse the call rather than being asked first."""
         return None
 
+    @property
+    def renders(self) -> str:
+        return " This is Telegram. Markdown renders: **bold**, *italic*, `code`, and fenced blocks."
+
     def lines(self, text: str) -> list[str]:
         return chunk(text, 3900, 4)  # Telegram's limit is 4096
 

@@ -100,12 +100,31 @@ async def test_api_failures_are_reported_not_raised_raw(provider):
         await provider.reply(system="s", history=[], prompt="p", search=False)
 
 
-def test_clean_for_irc_removes_markdown_and_control_codes():
-    assert clean_for_irc("## Title\n- **one**\n- _two_") == "Title\none\ntwo"
+def test_clean_for_irc_turns_markdown_into_irc_formatting():
+    """What IRC has, it gets: emphasis is converted, structure is flattened."""
+    assert clean_for_irc("## Title\n- **one**\n- _two_") == "Title\n\x02one\x02\n\x1ftwo\x1f"
     assert clean_for_irc("see [docs](https://x.com/a) [1].") == "see docs (https://x.com/a)."
     assert clean_for_irc("```py\ncode\n```") == "code"
-    assert clean_for_irc("a\x03\x02b\x1fc") == "abc"
     assert clean_for_irc("one\n\n\n\ntwo") == "one\ntwo"
+
+
+def test_the_model_does_not_get_to_write_the_wire_format():
+    """Codes it emitted itself are stripped; only markup we translate survives."""
+    assert clean_for_irc("a\x03\x02b\x1fc") == "abc"
+
+
+def test_html_is_removed_but_what_it_wrapped_is_not():
+    """`<i>quiet is fine</i>` went into #lobby: a model reaching for markup
+    because nothing had told it what this medium takes."""
+    assert clean_for_irc("<i>quiet is fine</i>") == "quiet is fine"
+    assert clean_for_irc("<br/>a <span class='x'>b</span>") == "a b"
+
+
+def test_a_trailing_code_is_not_eaten_as_whitespace():
+    """Python counts 0x1c-0x1f as whitespace, so a bare strip() would take the
+    closing italic with it and leave the client formatting the rest."""
+    assert clean_for_irc("*trailing emphasis*").endswith("\x1d")
+    assert clean_for_irc("~~struck~~").endswith("\x1e")
 
 
 def openai_compat(monkeypatch, cfg, handler):
@@ -181,10 +200,12 @@ async def test_missing_key_names_the_env_var_it_wanted(monkeypatch):
         ("chan_ban and chan_unban", "chan_ban and chan_unban"),
         ("call some_function_name(a_b)", "call some_function_name(a_b)"),
         ("see src/chickenbot/tool_socket.py", "see src/chickenbot/tool_socket.py"),
-        ("_italic_ here", "italic here"),  # boundary emphasis still works
-        ("__bold__ here", "bold here"),
-        ("**star** and *one*", "star and one"),
-        ("a _b c_ d", "a b c d"),
+        # Emphasis is converted rather than deleted; the point of these is
+        # that an underscore inside a word is never emphasis at all.
+        ("_italic_ here", "\x1funderline\x1f here".replace("underline", "italic")),
+        ("__bold__ here", "\x02bold\x02 here"),
+        ("**star** and *one*", "\x02star\x02 and \x1done\x1d"),
+        ("a _b c_ d", "a \x1fb c\x1f d"),
     ],
 )
 def test_markdown_stripping_leaves_snake_case_alone(raw, want):
@@ -198,8 +219,9 @@ def test_markdown_stripping_leaves_snake_case_alone(raw, want):
         ("a/b (0*, 2 open) | c/d (1*, 0 open)", "a/b (0*, 2 open) | c/d (1*, 0 open)"),
         ("rated 5* and 4* today", "rated 5* and 4* today"),
         ("2*3 and 4*5", "2*3 and 4*5"),
-        ("**bold** survives", "bold survives"),
-        ("(*parenthesised*)", "(parenthesised)"),
+        # These two are emphasis and are converted; the rest above are not.
+        ("**bold** survives", "\x02bold\x02 survives"),
+        ("(*parenthesised*)", "(\x1dparenthesised\x1d)"),
     ],
 )
 def test_asterisks_that_are_not_emphasis_are_left_alone(raw, want):

@@ -7,6 +7,48 @@ it back.
 Releases themselves are the git tags (`git tag -l 'v*'`); this file is only
 the by-hand part.
 
+## v0.3.3
+
+### Formatting belongs to the network — one patch, per instance
+
+**Why.** The soul described one network's formatting -- "Plain text on IRC: no
+markdown, no bullets, no asterisks for emphasis -- they arrive literally", with
+a note telling the model to check the context block for which network it was
+on. That is a fact about a connection sitting in a character file, wrong on
+Discord and Telegram, and the same mistake as the soul claiming which tools
+exist. Each transport now says for itself, per message.
+
+IRC also *gains* formatting rather than losing it. Markdown emphasis is
+converted on the way out, per [modern.ircdocs.horse/formatting.html]: `**bold**`
+to `0x02`, `*italic*` to `0x1D`, `_underline_` to `0x1F`, `~~strikethrough~~`
+to `0x1E`. Not monospace (`0x11`), which WeeChat does not render, and not
+colour, which eats a following digit for no gain. HTML is removed -- a model
+put `<i>quiet is fine</i>` into a channel, which nothing renders.
+
+**Do this**, after deploying and restarting:
+
+```bash
+chickenbot -c <config> soul --upgrade --apply
+```
+
+**Check it worked.** `soul --upgrade` reads `ok`, and once it has spoken:
+
+```bash
+chickenbot -c <config> transcript 1 | grep -i "this is irc"
+```
+
+Then watch the channel. Emphasis is new in rooms that have never seen it, and
+a bot that discovers formatting tends to over-use it. The note tells it that
+plain prose is the register and "a line with two bold words in it reads as
+shouting"; if that does not hold, it is the note to change, not the feature.
+
+**Put it back**: `soul --history`, then `soul --restore <N>`. Turning the
+conversion off entirely is a code change, not a knob.
+
+**If your soul has been edited**, expect `HAND` and the printed replacement.
+What the patch is for is removing any description of what one network renders;
+whatever your wording, that belongs to the transport now.
+
 ## v0.3.2
 
 ### The soul no longer says which tools exist — one patch, per instance

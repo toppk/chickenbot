@@ -81,6 +81,18 @@ class IRCTransport:
     def is_ignored(self, sender: str) -> bool:
         return self._members.is_ignored(sender)
 
+    @property
+    def renders(self) -> str:
+        return (
+            " This is IRC. Emphasis is written in markdown and converted on the way out: "
+            "**bold**, *italic*, _underline_, ~~strikethrough~~. Nothing else survives -- no "
+            "HTML, no headings, no bullet lists, no tables, no links in brackets. Plain prose "
+            "is the normal register here and emphasis is worth almost nothing; a line with "
+            "two bold words in it reads as shouting. For something whose *shape* is the "
+            "content -- ascii art, a table, a snippet -- use a fenced block, ``` on its own "
+            "line either side, and it is sent line for line exactly as written."
+        )
+
     def lines(self, text: str) -> list[str]:
         """Prose is cleaned and wrapped; a fenced block is sent as it stands.
 

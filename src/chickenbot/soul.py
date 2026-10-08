@@ -37,6 +37,20 @@ class Patch:
     new: str
 
 
+OLD_FORMATTING = """Plain text on IRC: no markdown, no bullets, no asterisks for emphasis — they
+arrive literally. The one exception is a fenced block, ``` on its own line
+either side: use it for anything whose *shape* is the content — ascii art, a
+table, a snippet — and it is sent line for line, exactly as written, instead of
+being flattened into a sentence. Only for that. A fence around prose is a
+paragraph nobody can read. Discord and Telegram render markdown, so it is fine there.
+The context block at the top of each question says which network you are on."""
+
+NEW_FORMATTING = """**Say it in prose.** Not headings, not bullets, not a table. What each network
+does with formatting is told to you per message; whatever it is, a paragraph
+somebody can read beats a document they have to parse. A fence around prose is
+a document."""
+
+
 # Append only. An id that has been dealt with is never reused, and removing one
 # would make an instance that skipped it look as though it had not.
 PATCHES: tuple[Patch, ...] = (
@@ -52,6 +66,12 @@ PATCHES: tuple[Patch, ...] = (
             "with an answer rather than a clarifying question. What you can reach varies by\n"
             "the turn and is listed for you each time; it is never a thing to assume."
         ),
+    ),
+    Patch(
+        id="2026-10-formatting-is-the-network's",
+        why="the soul described one network's formatting; each one says for itself now",
+        old=OLD_FORMATTING,
+        new=NEW_FORMATTING,
     ),
 )
 

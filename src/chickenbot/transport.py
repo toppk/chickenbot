@@ -13,6 +13,8 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
+from .brain import BLANK, RESET, TOGGLES
+
 if TYPE_CHECKING:
     from .events import Event
 
@@ -83,6 +85,18 @@ class Transport(Protocol):
         """Presentation and chunking for this network."""
         ...
 
+    @property
+    def renders(self) -> str:
+        """One line telling the model what this medium does with formatting.
+
+        A fact about the transport, so the transport owns it. It used to sit
+        in the soul -- "no markdown, no bullets, they arrive literally", with
+        a note to check which network you were on -- which is the same mistake
+        as the soul claiming which tools exist: a character file carrying a
+        fact that changes per connection, and is wrong on some of them.
+        """
+        return " Plain text only here: markup of any kind arrives literally."
+
     def say(self, room: str, text: str) -> None: ...
 
     @property
@@ -112,11 +126,34 @@ class Transport(Protocol):
     async def close(self, reason: str = "") -> None: ...
 
 
+def balance(lines: list[str]) -> list[str]:
+    """Close formatting a line leaves open, and reopen it on the next.
+
+    IRC formatting is toggles, so a bold span split across two messages would
+    leave the first open -- everything after it in the client stays bold,
+    including other people's lines in some of them -- and the second would
+    carry a stray close.
+    """
+    out: list[str] = []
+    carry = ""
+    for line in lines:
+        line = carry + line
+        open_now = ""
+        for ch in line:
+            if ch in TOGGLES:
+                open_now = open_now.replace(ch, "") if ch in open_now else open_now + ch
+            elif ch == RESET:
+                open_now = ""
+        out.append(line + open_now[::-1])
+        carry = open_now
+    return out
+
+
 def chunk(text: str, limit: int, max_lines: int) -> list[str]:
     """Wrap on word boundaries, never mid-word, and cap the burst."""
     lines: list[str] = []
     for paragraph in text.splitlines():
-        paragraph = paragraph.strip()
+        paragraph = paragraph.strip(BLANK)
         while paragraph:
             if len(paragraph) <= limit:
                 lines.append(paragraph)
@@ -124,14 +161,14 @@ def chunk(text: str, limit: int, max_lines: int) -> list[str]:
             cut = paragraph.rfind(" ", 0, limit)
             if cut <= 0:
                 cut = limit
-            lines.append(paragraph[:cut].strip())
-            paragraph = paragraph[cut:].strip()
+            lines.append(paragraph[:cut].strip(BLANK))
+            paragraph = paragraph[cut:].strip(BLANK)
         if len(lines) > max_lines:
             break
     if len(lines) > max_lines:
         lines = lines[:max_lines]
         lines[-1] = lines[-1][: limit - 1] + "…"
-    return [line for line in lines if line]
+    return balance([line for line in lines if line])
 
 
 class Membership:
