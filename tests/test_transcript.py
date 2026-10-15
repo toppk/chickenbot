@@ -518,8 +518,9 @@ def test_the_timeline_shows_waits_tools_and_calls_in_order(tmp_path):
     assert "WHERE THE TIME WENT" in out
     order = [line for line in out.splitlines() if line.startswith("  t+")]
     assert "waiting for the burst" in order[0] and "waited" in order[0]
-    assert "ext_github_activity  from the mirror" in order[2]
-    assert "turn took 8512ms end to end" in out
+    assert any("ext_github_activity  from the mirror" in line for line in order)
+    # The total moved into the one-line summary under what it said.
+    assert "(8.5s total)" in out
 
 
 def test_a_tool_says_whether_it_answered_from_its_mirror():
@@ -529,3 +530,76 @@ def test_a_tool_says_whether_it_answered_from_its_mirror():
 
     assert "github_activity" in MIRRORED and "github_repos" in MIRRORED
     assert "github_issue" not in MIRRORED and "github_readme" not in MIRRORED
+
+
+def test_the_shape_of_the_turn_is_one_line_at_the_bottom(tmp_path):
+    """Held, looked it up, thought, spoke -- the story without the detail."""
+    from chickenbot.store import Store
+
+    st = Store(tmp_path / "c.db")
+    st.record_llm_call(
+        LlmCall(
+            reason="follow",
+            room="#lobby",
+            response="saw it",
+            ms=8512,
+            tool_calls=[{"name": "ext_github_activity", "args": {}, "result": "r", "at": 1.9, "ms": 412}],
+            details=[
+                {"kind": "wait", "what": "waiting for the burst to finish", "ms": 5000, "at": 0.0},
+                {"kind": "call", "served": "Together", "finish": "tool_calls", "at": 5.0, "ms": 1850},
+                {"kind": "call", "served": "Parasail", "finish": "stop", "at": 7.0, "ms": 1480},
+            ],
+        ),
+        100,
+        48,
+    )
+    st.close()
+    out = cli(tmp_path, "transcript", "1", "--color", "never")[1]
+    assert "held 5.0s >>>> looked 0.4s >>>> thought 3.3s >>>> spoke  (8.5s total)" in out
+    # Last thing on the page, after what it actually said.
+    assert out.index("held 5.0s") > out.index("WHAT IT SAID")
+
+
+def test_consecutive_stages_of_a_kind_collapse(tmp_path):
+    """Two model calls in a row are one span of thinking, not two."""
+    from chickenbot.store import Store
+
+    st = Store(tmp_path / "c.db")
+    st.record_llm_call(
+        LlmCall(
+            reason="ask",
+            response="ok",
+            ms=3000,
+            details=[
+                {"kind": "call", "served": "A", "at": 0.0, "ms": 1000},
+                {"kind": "call", "served": "B", "at": 1.0, "ms": 2000},
+            ],
+        ),
+        100,
+        48,
+    )
+    st.close()
+    out = cli(tmp_path, "transcript", "1", "--color", "never")[1]
+    assert "thought 3.0s >>>> spoke" in out
+    assert out.count("thought") == 1
+
+
+def test_the_timeline_runs_in_time_order(tmp_path):
+    """Tools and legs are gathered separately and must not print that way."""
+    from chickenbot.store import Store
+
+    st = Store(tmp_path / "c.db")
+    st.record_llm_call(
+        LlmCall(
+            reason="ask",
+            response="ok",
+            ms=100,
+            tool_calls=[{"name": "early", "args": {}, "result": "r", "at": 0.5, "ms": 10}],
+            details=[{"kind": "call", "served": "late", "at": 9.0, "ms": 10}],
+        ),
+        100,
+        48,
+    )
+    st.close()
+    lines = [x for x in cli(tmp_path, "transcript", "1", "--color", "never")[1].splitlines() if x.startswith("  t+")]
+    assert "early" in lines[0] and "late" in lines[1]
