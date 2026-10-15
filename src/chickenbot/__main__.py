@@ -954,6 +954,8 @@ def _sequence(row, paint: Paint) -> None:
     events = _events(row)
     if not events:
         return
+    if not any(ms for _at, ms, _kind, _what in events):
+        return  # nothing to summarise but the total, already printed above
     stages: list[tuple[str, int]] = []
     for _at, ms, kind, _what in events:
         if stages and stages[-1][0] == kind:
@@ -981,6 +983,14 @@ def _timeline(row, paint: Paint) -> None:
         return
     print()
     print(paint.rule("WHERE THE TIME WENT", "rev", "magenta"))
+    if not any(ms for _at, ms, _kind, _what in laid):
+        # Nothing was measured, which is not the same as nothing taking any
+        # time. Drawing a row of 0ms bars would be a measurement of zero.
+        print(paint("  not recorded: this row predates per-step timing", "dim"))
+        print(paint(f"  the turn took {row['ms']}ms in total, which is all that was kept", "dim"))
+        for _at, _ms, kind, what in laid:
+            print(f"  {paint(format(kind, '<7'), 'grey')} {what}")
+        return
     colours = {"waited": "grey", "tool": "yellow", "model": "cyan"}
     for start, ms, kind, what in laid:
         bar = "\u2588" * max(1, min(round(ms / 100), 40))

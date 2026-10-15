@@ -606,3 +606,29 @@ def test_the_timeline_runs_in_time_order(tmp_path):
     st.close()
     lines = [x for x in cli(tmp_path, "transcript", "1", "--color", "never")[1].splitlines() if x.startswith("  t+")]
     assert "early" in lines[0] and "late" in lines[1]
+
+
+def test_an_unmeasured_row_says_so_rather_than_drawing_zeros(tmp_path):
+    """A row of 0ms bars is a measurement of zero, which is not what a row
+    written before per-step timing means."""
+    from chickenbot.store import Store
+
+    st = Store(tmp_path / "c.db")
+    st.record_llm_call(
+        LlmCall(
+            reason="follow",
+            room="#lobby",
+            response="saw it",
+            ms=3512,
+            tool_calls=[{"name": "ext_github_activity", "args": {}, "result": "r"}],  # no at, no ms
+        ),
+        100,
+        48,
+    )
+    st.close()
+    out = cli(tmp_path, "transcript", "1", "--color", "never")[1]
+    assert "predates per-step timing" in out
+    assert "3512ms in total, which is all that was kept" in out
+    assert "ext_github_activity" in out
+    assert "0ms" not in out  # never a bar claiming it took no time
+    assert ">>>>" not in out  # and no shape of a turn we cannot see
