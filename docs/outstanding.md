@@ -119,8 +119,6 @@ end-of-day GitHub cheer, bringing up a remembered thing on arrival.
 ## Smaller
 
 - Drop the orphaned `exchange` table on eaccel; it is gone from `SCHEMA`.
-- `served` is recorded per turn, not per HTTP leg, so a turn routed across
-  two providers shows only the last.
 - GitHub issue/PR splits are exact only where the mirror holds every item;
   paginating the searches would make them exact everywhere.
 - The `activity` table has no retention policy.

@@ -857,7 +857,7 @@ def show_transcript(store: Store, args: argparse.Namespace) -> int:
     want = getattr(args, "color", "auto")
     lit = want == "always" or (want == "auto" and sys.stdout.isatty() and not os.environ.get("NO_COLOR"))
     paint = Paint(lit)
-    return _one_call(rows[0], paint) if args.id else _call_listing(rows, paint)
+    return _one_call(rows[0], paint, getattr(args, "details", False)) if args.id else _call_listing(rows, paint)
 
 
 def _call_listing(rows: list, paint: Paint) -> int:
@@ -881,7 +881,7 @@ def _call_listing(rows: list, paint: Paint) -> int:
     return 0
 
 
-def _one_call(row, paint: Paint) -> int:
+def _one_call(row, paint: Paint, details: bool = False) -> int:
     label, colour = REASONS.get(str(row["reason"]), (str(row["reason"]), "grey"))
     when = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(row["ts"]))
     print(paint.rule(f"#{row['id']}  {label.upper()}  {row['room']}  {when}", "rev", "bold"))
@@ -911,10 +911,53 @@ def _one_call(row, paint: Paint) -> int:
         print(f"  {paint('came back', 'grey')}")
         print(_indent(str(call.get("result", "")), paint, mark="dim"))
 
+    if details:
+        _legs(row, paint)
+
     print()
     print(paint.rule("WHAT IT SAID", "rev", "green"))
     print(_indent(visible(str(row["response"])), paint, mark="bold"))
     return 0
+
+
+def _legs(row, paint: Paint) -> None:
+    """One row per HTTP call. A turn that used tools is several, and
+    OpenRouter may route each one somewhere different -- which is why a slow
+    turn could never be pinned on an endpoint before."""
+    legs = json.loads(row["details"] or "[]")
+    print()
+    print(paint.rule("WHAT THE PROVIDER RETURNED", "rev", "magenta"))
+    if not legs:
+        print(paint("  (nothing recorded; rows written before --details existed)", "dim"))
+        return
+    head = f"  {'#':>2}  {'served by':<14} {'finished':<12} {'in':>7} {'out':>6} {'cost':>10}  {'tools':<14}"
+    print(paint(head, "bold", "under"))
+    for n, leg in enumerate(legs, 1):
+        cost = leg.get("cost")
+        offered, wanted = leg.get("asked_for") or 0, leg.get("wanted_tools") or 0
+        asked = f"{wanted} of {offered}" if offered else "none offered"
+        finish = str(leg.get("finish") or "-")
+        # A leg that ended in `tool_calls` is one that went back for more.
+        why = paint(format(finish, "<12"), "yellow" if finish == "tool_calls" else "")
+        spent = f"${cost:.6f}" if isinstance(cost, (int, float)) else "-"
+        print(
+            f"  {n:>2}  {str(leg.get('served') or '-'):<14} {why} "
+            f"{_count(leg.get('tokens_in')):>7} {_count(leg.get('tokens_out')):>6} "
+            f"{spent:>10}  {asked:<14}"
+        )
+    spent = sum(leg["cost"] for leg in legs if isinstance(leg.get("cost"), (int, float)))
+    served = {str(leg.get("served")) for leg in legs if leg.get("served")}
+    print()
+    print(paint(f"  {len(legs)} call(s), ${spent:.6f}, model {legs[0].get('model') or '-'}", "dim"))
+    if len(served) > 1:
+        # Worth saying out loud: the turn was split across endpoints.
+        print(paint(f"  routed across {len(served)}: {', '.join(sorted(served))}", "yellow"))
+    if ids := [leg["id"] for leg in legs if leg.get("id")]:
+        print(paint(f"  generation {', '.join(ids)}", "dim"))
+
+
+def _count(value) -> str:
+    return f"{value:,}" if isinstance(value, int) else "-"
 
 
 def _split_request(request: str) -> tuple[str, str, str]:
@@ -1307,6 +1350,7 @@ def main(argv: list[str] | None = None) -> int:
     tx.add_argument(
         "--color", choices=("auto", "always", "never"), default="auto", help="colour; auto means a terminal"
     )
+    tx.add_argument("--details", action="store_true", help="what the provider returned on each HTTP call")
 
     pr = sub.add_parser("prompt", help="show exactly what the model would be sent")
     pr.add_argument("room", nargs="?", help="realm/#room, as `log` lists them")

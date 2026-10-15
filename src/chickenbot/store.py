@@ -199,6 +199,7 @@ CREATE TABLE IF NOT EXISTS llm_call (
     model    TEXT NOT NULL DEFAULT '',
     served   TEXT NOT NULL DEFAULT '',
     tool_calls TEXT NOT NULL DEFAULT '[]',  -- json: name, args and result, in order
+    details  TEXT NOT NULL DEFAULT '[]',   -- json: one entry per HTTP leg of the turn
     ms       INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS llm_call_ts ON llm_call (ts DESC);
@@ -298,6 +299,10 @@ class LlmCall:
     # called, the arguments it chose, and what came back. Empty when it
     # answered without reaching for anything.
     tool_calls: list[dict[str, Any]] = field(default_factory=list)
+    # One entry per HTTP call the turn took: who served it, what it cost, why
+    # it stopped. A turn using tools is several, possibly on several
+    # endpoints, and only the last used to be recorded anywhere.
+    details: list[dict[str, Any]] = field(default_factory=list)
     ms: int = 0
 
 
@@ -372,6 +377,9 @@ class Store:
         if watch_cols and "transport" in watch_cols:
             self._db.execute("ALTER TABLE watch RENAME COLUMN transport TO realm")
             watch_cols = {r["name"] for r in self._db.execute("PRAGMA table_info(watch)")}
+        call_cols = {r["name"] for r in self._db.execute("PRAGMA table_info(llm_call)")}
+        if call_cols and "details" not in call_cols:
+            self._db.execute("ALTER TABLE llm_call ADD COLUMN details TEXT NOT NULL DEFAULT '[]'")
         alias_cols = {r["name"] for r in self._db.execute("PRAGMA table_info(alias)")}
         if alias_cols and "source" not in alias_cols:
             self._db.execute("ALTER TABLE alias ADD COLUMN source TEXT NOT NULL DEFAULT 'cli'")
@@ -542,7 +550,7 @@ class Store:
         now = int(time.time())
         self._db.execute(
             "INSERT INTO llm_call (ts, reason, realm, room, nick, request, response, model, served,"
-            " tool_calls, ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            " tool_calls, details, ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 now,
                 call.reason,
@@ -554,6 +562,7 @@ class Store:
                 call.model,
                 call.served,
                 json.dumps(call.tool_calls),
+                json.dumps(call.details),
                 int(call.ms),
             ),
         )

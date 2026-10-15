@@ -337,3 +337,108 @@ def test_one_call_prints_every_section(tmp_path):
     assert "SOULTEXT" in out and "ROOMTEXT" in out and "merged #1757" in out
     assert "[b]saw it[b]" in out  # shown, not applied
     assert "3512ms" in out
+
+
+# -- what the provider actually returned ---------------------------------
+
+
+async def test_each_http_leg_is_recorded(store):
+    """A turn using tools is several calls, and OpenRouter may route each one
+    somewhere different. Only the last was recorded anywhere before."""
+    import json
+
+    from chickenbot.brain import note_leg
+
+    class TwoLegs:
+        name, supports_tools = "two", True
+
+        async def reply(self, **kw):
+            note_leg({"served": "Together", "finish": "tool_calls", "cost": 0.000421})
+            note_leg({"served": "Parasail", "finish": "stop", "cost": 0.000712})
+            return "done"
+
+        async def aclose(self):
+            pass
+
+    p = Recorded(TwoLegs(), store, LLMConfig(transcript=10))
+    with activity(kind="message"):
+        await p.reply(system="s", history=[], prompt="p", search=False)
+    legs = json.loads(store.llm_calls()[0]["details"])
+    assert [leg["served"] for leg in legs] == ["Together", "Parasail"]
+    assert [leg["finish"] for leg in legs] == ["tool_calls", "stop"]
+
+
+async def test_two_rooms_answering_at_once_do_not_mix_their_legs(store):
+    """Rooms answer concurrently, so this cannot be state on the provider."""
+    import asyncio
+    import json
+
+    from chickenbot.brain import note_leg
+
+    class Slow:
+        name, supports_tools = "slow", False
+
+        async def reply(self, *, prompt, **kw):
+            note_leg({"served": prompt, "finish": "stop"})
+            await asyncio.sleep(0.01)
+            note_leg({"served": prompt, "finish": "stop"})
+            return prompt
+
+        async def aclose(self):
+            pass
+
+    p = Recorded(Slow(), store, LLMConfig(transcript=10))
+
+    async def one(room):
+        with activity(kind="message", room=room):
+            await p.reply(system="s", history=[], prompt=room, search=False)
+
+    await asyncio.gather(one("#lobby"), one("#soup"))
+    for row in store.llm_calls(limit=9):
+        served = {leg["served"] for leg in json.loads(row["details"])}
+        assert served == {row["room"]}, (row["room"], served)
+
+
+def test_the_details_table_names_a_split_route(tmp_path):
+    from chickenbot.store import Store
+
+    st = Store(tmp_path / "c.db")
+    st.record_llm_call(
+        LlmCall(
+            reason="follow",
+            room="#lobby",
+            response="done",
+            details=[
+                {"served": "Together", "finish": "tool_calls", "tokens_in": 4210, "cost": 0.000421},
+                {"served": "Parasail", "finish": "stop", "tokens_in": 5880, "cost": 0.000712},
+            ],
+        ),
+        100,
+        48,
+    )
+    st.close()
+    out = cli(tmp_path, "transcript", "1", "--details", "--color", "never")[1]
+    assert "WHAT THE PROVIDER RETURNED" in out
+    assert "Together" in out and "Parasail" in out
+    assert "$0.001133" in out  # summed across the legs
+    assert "routed across 2" in out
+    assert "4,210" in out
+
+
+def test_without_the_flag_the_legs_are_not_shown(tmp_path):
+    from chickenbot.store import Store
+
+    st = Store(tmp_path / "c.db")
+    st.record_llm_call(LlmCall(reason="follow", response="done", details=[{"served": "Together"}]), 100, 48)
+    st.close()
+    assert "WHAT THE PROVIDER RETURNED" not in cli(tmp_path, "transcript", "1", "--color", "never")[1]
+
+
+def test_a_row_from_before_the_column_existed_says_so(tmp_path):
+    from chickenbot.store import Store
+
+    st = Store(tmp_path / "c.db")
+    st.record_llm_call(LlmCall(reason="follow", response="done"), 100, 48)
+    st.close()
+    out = cli(tmp_path, "transcript", "1", "--details", "--color", "never")[1]
+    assert "nothing recorded" in out

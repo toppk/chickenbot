@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any
 from ..config import LLMConfig
 from ..observe import current
 from ..store import LlmCall
-from . import Provider, Turn
+from . import Provider, Turn, collect_legs
 
 if TYPE_CHECKING:
     from ..store import Store
@@ -86,10 +86,12 @@ class Recorded:
     ) -> str:
         started = time.monotonic()
         answer = ""
+        legs: list[dict] = []
         try:
-            answer = await self.inner.reply(
-                system=system, history=history, prompt=prompt, search=search, toolbox=toolbox, session=session
-            )
+            with collect_legs() as legs:
+                answer = await self.inner.reply(
+                    system=system, history=history, prompt=prompt, search=search, toolbox=toolbox, session=session
+                )
             return answer
         except Exception as exc:  # noqa: BLE001 - recorded, then re-raised
             answer = f"<{type(exc).__name__}: {exc}>"
@@ -97,11 +99,11 @@ class Recorded:
         finally:
             # Never let bookkeeping lose an answer that was already produced.
             try:
-                self._keep(system, history, prompt, answer, toolbox, started)
+                self._keep(system, history, prompt, answer, toolbox, started, legs)
             except Exception:
                 log.exception("could not record the model call")
 
-    def _keep(self, system, history, prompt, answer, toolbox, started) -> None:
+    def _keep(self, system, history, prompt, answer, toolbox, started, legs) -> None:
         keep, hours = self.cfg.transcript, self.cfg.transcript_hours
         if keep <= 0:
             return
@@ -120,6 +122,7 @@ class Recorded:
                 # What it asked for and what came back, in the order it asked.
                 # The turn is one row; this is what happened inside it.
                 tool_calls=[_called(name, args, out) for name, args, out in (toolbox.log if toolbox else [])],
+                details=list(legs),
                 ms=int((time.monotonic() - started) * 1000),
             ),
             keep,

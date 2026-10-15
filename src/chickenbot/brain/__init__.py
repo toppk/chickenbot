@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import contextlib
 import re
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
@@ -16,6 +18,33 @@ if TYPE_CHECKING:
 class Turn:
     role: str  # "user" or "assistant"
     text: str
+
+
+# Each HTTP leg of one turn: who served it, what it cost, why it stopped. A
+# tool-using turn is several, and OpenRouter may route each one differently --
+# the activity record keeps only the last, which is how a slow turn hides
+# which endpoint was slow. A ContextVar rather than state on the provider:
+# two rooms answer at once, and their legs must not mix.
+_LEGS: ContextVar[list[dict] | None] = ContextVar("llm_legs", default=None)
+
+
+def note_leg(leg: dict) -> None:
+    if (legs := _LEGS.get()) is not None:
+        legs.append(leg)
+
+
+@contextlib.contextmanager
+def collect_legs():
+    """Gather the legs of one turn. Nested calls reuse the outer list."""
+    if (existing := _LEGS.get()) is not None:
+        yield existing
+        return
+    legs: list[dict] = []
+    token = _LEGS.set(legs)
+    try:
+        yield legs
+    finally:
+        _LEGS.reset(token)
 
 
 class ProviderError(Exception):

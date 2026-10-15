@@ -14,7 +14,7 @@ import httpx
 
 from ..config import LLMConfig
 from ..observe import note, note_many
-from . import ProviderError, Turn, leaked_markup
+from . import ProviderError, Turn, leaked_markup, note_leg
 
 log = logging.getLogger(__name__)
 
@@ -170,6 +170,20 @@ class OpenAICompatProvider:
         usage = payload.get("usage") or {}
         if usage.get("cost") is not None:
             note(cost=f"{usage['cost']:.6f}")
+        choice = (payload.get("choices") or [{}])[0]
+        note_leg(
+            {
+                "served": payload.get("provider", ""),
+                "model": payload.get("model", ""),
+                "finish": choice.get("finish_reason", ""),
+                "asked_for": len(body.get("tools") or []),
+                "wanted_tools": len(message.get("tool_calls") or []),
+                "tokens_in": usage.get("prompt_tokens"),
+                "tokens_out": usage.get("completion_tokens"),
+                "cost": usage.get("cost"),
+                "id": payload.get("id", ""),
+            }
+        )
         return message
 
     async def _run_call(self, toolbox, call: dict) -> dict:

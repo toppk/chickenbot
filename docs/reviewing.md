@@ -41,6 +41,7 @@ reached for. It has never held the words. For that:
 chickenbot -c <config> tune llm.transcript 20   # keep the last 20 exchanges
 chickenbot -c <config> transcript               # list them
 chickenbot -c <config> transcript 7             # one, in full
+chickenbot -c <config> transcript 7 --details   # what the provider returned
 chickenbot -c <config> transcript 7 | less -R   # colour survives -R
 chickenbot -c <config> transcript --room '#lobby'
 chickenbot -c <config> tune llm.transcript 0    # off again
@@ -53,7 +54,14 @@ worth scanning for is whether the bot was answering or speaking unbidden.
 One exchange prints the system prompt (soul and all), the user turn with its
 context, room dossier, people and scrollback, and the reply exactly as the
 model produced it -- before chunking, before the nick prefix, and including a
-`<silent>` that never reached the room. IRC formatting is shown as marks rather than applied -- `[b]bold[b]` -- so a
+`<silent>` that never reached the room. `--details` adds a row per HTTP call the turn took: who served it, why it
+stopped, tokens in and out, cost, and how many tools it asked for of those
+offered. A turn that used tools is several calls, and OpenRouter may route
+each one to a different endpoint -- which is said out loud when it happens,
+because it is the reason a turn can be slow with nothing in the activity
+record to blame.
+
+IRC formatting is shown as marks rather than applied -- `[b]bold[b]` -- so a
 terminal is not quietly restyled, and so the markdown conversion can be
 checked by eye. Colour turns itself off when the output is not a terminal, or
 with `--color never`, or under `NO_COLOR`.
