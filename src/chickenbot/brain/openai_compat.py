@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
 
 import httpx
 
@@ -152,6 +153,7 @@ class OpenAICompatProvider:
         return text
 
     async def _post(self, body: dict) -> dict:
+        began = time.monotonic()
         try:
             response = await self.client.post(f"{self.base_url}/chat/completions", json=body)
         except httpx.RequestError as exc:
@@ -181,6 +183,8 @@ class OpenAICompatProvider:
                 "tokens_in": usage.get("prompt_tokens"),
                 "tokens_out": usage.get("completion_tokens"),
                 "cost": usage.get("cost"),
+                "reasoning_tokens": (usage.get("completion_tokens_details") or {}).get("reasoning_tokens"),
+                "ms": int((time.monotonic() - began) * 1000),
                 "id": payload.get("id", ""),
             }
         )

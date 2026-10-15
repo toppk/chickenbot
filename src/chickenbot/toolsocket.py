@@ -132,6 +132,7 @@ class ToolServer:
         # Set by the most recent tool result that named one. Read straight
         # after a call, by whoever made it.
         self.retry_after = 0.0
+        self.source = ""
         self.dispatch = dispatch
         self._subjects = subjects or (lambda realm: [])
         self._live: set[Connection] = set()
@@ -209,6 +210,10 @@ class ToolServer:
                     # back for it is decided above, not here.
                     later = message.get("retry_after")
                     self.retry_after = float(later) if isinstance(later, (int, float)) and later > 0 else 0.0
+                    # Where the tool says the answer came from. A cached
+                    # answer and a fetched one take very different times, and
+                    # guessing which from the clock is not the same as knowing.
+                    self.source = str(message.get("source", ""))[:40]
                     if message.get("ok"):
                         waiter.set_result(str(message.get("content", ""))[:1500])
                     else:

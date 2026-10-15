@@ -54,6 +54,9 @@ REFRESH_BUDGET = 9.0
 # stale mirror is refreshed behind the question rather than in front of it, so
 # a poll costs nothing when nobody is asking.
 DEFAULT_INTERVAL = 6 * 3600
+# Answered from the local mirror unless it had aged out of the window asked
+# about; everything else is a live call.
+MIRRORED = frozenset({"github_activity", "github_repos", "github_pending", "github_outgoing"})
 RANGES = {"hour": 3600, "day": 86400, "week": 604800, "month": 2592000, "all": 0}
 
 
@@ -719,9 +722,15 @@ class Tool:
         task = self._refreshing
         return RETRY_AFTER if task is not None and not task.done() else 0.0
 
+    # Set by the last call: the mirror, GitHub, or both. Read by the socket
+    # layer straight after, in the same single-threaded request loop.
+    source = ""
+
     async def call(self, name: str, args: dict) -> str:
         """Every tool but one answers from the mirror without waiting. The
         exception is `github_refresh`, which is the point of it."""
+        # Everything but the mirrored tools goes to GitHub as it is asked.
+        self.source = "mirror" if name.startswith("github_") and name in MIRRORED else "github"
         if name == "github_lookup":
             return await self.github_lookup(args)
         if name == "github_readme":
@@ -748,6 +757,7 @@ class Tool:
         # and deciding this here beats hoping the model notices.
         if window and self.too_old(user, window):
             await self.github_refresh({"user": user} if user else {})
+            self.source = "mirror, refreshed first"
         answer = handler(args)
         self.freshen(user)
         note = self.age(user, window)
@@ -821,6 +831,8 @@ async def _pump(tool: Tool, reader: asyncio.StreamReader, send) -> None:
                 result = {"type": "result", "id": message.get("id"), "ok": True, "content": content}
                 if later := tool.retry_after():
                     result["retry_after"] = later
+                if tool.source:
+                    result["source"] = tool.source
                 await send(result)
             except Exception as exc:  # noqa: BLE001 - the bot gets the failure, not a traceback
                 log.exception("call %s failed", name)

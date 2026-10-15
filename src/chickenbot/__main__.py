@@ -911,6 +911,7 @@ def _one_call(row, paint: Paint, details: bool = False) -> int:
         print(f"  {paint('came back', 'grey')}")
         print(_indent(str(call.get("result", "")), paint, mark="dim"))
 
+    _timeline(row, paint)
     if details:
         _legs(row, paint)
 
@@ -918,6 +919,49 @@ def _one_call(row, paint: Paint, details: bool = False) -> int:
     print(paint.rule("WHAT IT SAID", "rev", "green"))
     print(_indent(visible(str(row["response"])), paint, mark="bold"))
     return 0
+
+
+def _timeline(row, paint: Paint) -> None:
+    """Where the turn's time went, in the order it went.
+
+    A wait the bot chose, a tool round trip and a slow endpoint all look the
+    same in a single `ms=` on the activity row. Laid out against t=0 they do
+    not: an intentional pause is labelled as one, a cached tool answer takes
+    a millisecond and a fetched one takes hundreds.
+    """
+    events: list[tuple[float, int, str, str]] = []
+    for leg in json.loads(row["details"] or "[]"):
+        if leg.get("kind") == "wait":
+            events.append((float(leg.get("at") or 0.0), int(leg.get("ms") or 0), "waited", str(leg.get("what", ""))))
+        else:
+            served = leg.get("served") or "model"
+            why = leg.get("finish") or ""
+            events.append((float(leg.get("at") or 0.0), int(leg.get("ms") or 0), "model", f"{served}  {why}"))
+    for call in json.loads(row["tool_calls"] or "[]"):
+        where = f"  from the {call['source']}" if call.get("source") else ""
+        events.append(
+            (float(call.get("at") or 0.0), int(call.get("ms") or 0), "tool", f"{call.get('name', '?')}{where}")
+        )
+    if not events:
+        return
+    # Legs carry no offset of their own, so they fall where they were noted.
+    running = 0.0
+    laid: list[tuple[float, int, str, str]] = []
+    for at, ms, kind, what in events:
+        start = at if at else running
+        laid.append((start, ms, kind, what))
+        running = max(running, start + ms / 1000)
+    print()
+    print(paint.rule("WHERE THE TIME WENT", "rev", "magenta"))
+    colours = {"waited": "grey", "tool": "yellow", "model": "cyan"}
+    for start, ms, kind, what in sorted(laid):
+        bar = "\u2588" * max(1, min(round(ms / 100), 40))
+        print(
+            f"  {paint(f't+{start:5.1f}s', 'grey')}  {paint(format(kind, '<7'), colours[kind])} "
+            f"{ms:>6}ms  {paint(bar, colours[kind])} {what}"
+        )
+    print()
+    print(paint(f"  turn took {row['ms']}ms end to end", "dim"))
 
 
 def _legs(row, paint: Paint) -> None:

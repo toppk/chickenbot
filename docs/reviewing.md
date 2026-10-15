@@ -54,7 +54,14 @@ worth scanning for is whether the bot was answering or speaking unbidden.
 One exchange prints the system prompt (soul and all), the user turn with its
 context, room dossier, people and scrollback, and the reply exactly as the
 model produced it -- before chunking, before the nick prefix, and including a
-`<silent>` that never reached the room. `--details` adds a row per HTTP call the turn took: who served it, why it
+`<silent>` that never reached the room. Every call shows **where the time went**: a line per deliberate pause, tool
+call and HTTP leg, placed against t=0 on one clock. A wait the bot chose, a
+tool round trip and a slow endpoint all look identical in a single `ms=` on
+the activity row; laid out they do not. A tool says whether it answered from
+its own mirror or went to the network, so a 3ms answer and a 400ms one are
+distinguishable without inferring it from the clock.
+
+`--details` adds a row per HTTP call the turn took: who served it, why it
 stopped, tokens in and out, cost, and how many tools it asked for of those
 offered. A turn that used tools is several calls, and OpenRouter may route
 each one to a different endpoint -- which is said out loud when it happens,

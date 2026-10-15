@@ -44,9 +44,17 @@ def why(fields: dict) -> str:
     return f"{kind}/{detail}" if detail and detail != kind else kind
 
 
-def _called(name: str, args: dict, out: object) -> dict[str, Any]:
-    result = str(out)
-    kept: dict[str, Any] = {"name": name, "args": args, "result": result[:RESULT_SHOWN]}
+def _called(call) -> dict[str, Any]:
+    result = str(call.result)
+    kept: dict[str, Any] = {
+        "name": call.name,
+        "args": call.args,
+        "result": result[:RESULT_SHOWN],
+        "at": call.at,
+        "ms": call.ms,
+    }
+    if call.source:
+        kept["source"] = call.source
     if len(result) > RESULT_SHOWN:
         kept["of"] = len(result)  # so a slice is never mistaken for the whole
     return kept
@@ -121,7 +129,7 @@ class Recorded:
                 served=str(fields.get("served", "")),
                 # What it asked for and what came back, in the order it asked.
                 # The turn is one row; this is what happened inside it.
-                tool_calls=[_called(name, args, out) for name, args, out in (toolbox.log if toolbox else [])],
+                tool_calls=[_called(call) for call in (toolbox.log if toolbox else [])],
                 details=list(legs),
                 ms=int((time.monotonic() - started) * 1000),
             ),

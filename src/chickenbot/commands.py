@@ -22,7 +22,7 @@ from .attention import (
     Attention,
     addressed_elsewhere,
 )
-from .brain import Provider, ProviderError, leaked_markup
+from .brain import Provider, ProviderError, collect_legs, leaked_markup, note_wait
 from .config import Config
 from .dossier import Dossiers
 from .events import Event, Kind
@@ -633,9 +633,15 @@ class Handler:
         record = carry()
 
         async def thinking() -> None:
+            waited = time.monotonic()
             async with self.alone(key):
-                with resumed(record):
-                    await work
+                with collect_legs():
+                    # Opened out here so a wait before the model call lands in
+                    # the same list as the call itself.
+                    if (queued := time.monotonic() - waited) > 0.05:
+                        note_wait("behind another answer in this room", queued)
+                    with resumed(record):
+                        await work
 
         task = asyncio.create_task(thinking())
         self._thinking.add(task)
@@ -712,11 +718,17 @@ class Handler:
             is_owner=tr.is_owner(account),
             in_channel=True,
         )
-        with activity(kind="follow", realm=tr.realm, room=room, nick=nick, account=account or "-"):
+        with activity(kind="follow", realm=tr.realm, room=room, nick=nick, account=account or "-"), collect_legs():
             note(asked=len(asked), held=len(held), claim=",".join(sorted({line[3] for line in held})))
+            # Opened before the pause is noted, or the note lands nowhere.
+            # Held the burst on purpose before answering any of it.
+            note_wait("waiting for the burst to finish", self.cfg.llm.pause_seconds)
+            waited = time.monotonic()
             # Silence is for a conversation it was merely party to. A question
             # put to it directly gets an answer.
             async with self.alone(key):
+                if (queued := time.monotonic() - waited) > 0.05:
+                    note_wait("behind another answer in this room", queued)
                 await cmd_ask(self, ctx, following=not asked)
 
     async def _handle_topic(self, event: Event) -> None:

@@ -12,6 +12,7 @@ from chickenbot.brain.recorded import Recorded, why
 from chickenbot.config import LLMConfig
 from chickenbot.observe import activity
 from chickenbot.store import LlmCall
+from chickenbot.tools import Called
 
 from .test_commands import StubProvider
 
@@ -194,8 +195,8 @@ async def test_tool_calls_are_kept_with_their_arguments_and_results(store):
         name, supports_tools = "tooled", True
 
         async def reply(self, *, toolbox=None, **kw):
-            toolbox.log.append(("chan_who", {"target": "biff"}, "biff (biff@host) [bot]"))
-            toolbox.log.append(("chan_state", {}, "#lobby: 9 here"))
+            toolbox.log.append(Called("chan_who", {"target": "biff"}, "biff (biff@host) [bot]", at=0.4, ms=220))
+            toolbox.log.append(Called("chan_state", {}, "#lobby: 9 here", at=0.7, ms=2))
             return "three bots, by the flag"
 
         async def aclose(self):
@@ -211,6 +212,8 @@ async def test_tool_calls_are_kept_with_their_arguments_and_results(store):
     assert [c["name"] for c in calls] == ["chan_who", "chan_state"]
     assert calls[0]["args"] == {"target": "biff"}
     assert "biff@host" in calls[0]["result"]
+    # When it ran and how long it took, so a timeline is possible.
+    assert calls[0]["at"] == 0.4 and calls[0]["ms"] == 220
 
 
 async def test_no_tools_is_an_empty_list_not_a_null(store):
@@ -231,7 +234,7 @@ async def test_a_huge_tool_result_is_cut(store):
         name, supports_tools = "big", True
 
         async def reply(self, *, toolbox=None, **kw):
-            toolbox.log.append(("ext_github_readme", {"repo": "a/b"}, "x" * 50000))
+            toolbox.log.append(Called("ext_github_readme", {"repo": "a/b"}, "x" * 50000))
             return "it is a test lab"
 
         async def aclose(self):
@@ -442,3 +445,87 @@ def test_a_row_from_before_the_column_existed_says_so(tmp_path):
     st.close()
     out = cli(tmp_path, "transcript", "1", "--details", "--color", "never")[1]
     assert "nothing recorded" in out
+
+
+# -- where the time went --------------------------------------------------
+
+
+async def test_a_chosen_pause_is_recorded_as_one(store):
+    """Holding a burst on purpose is indistinguishable from being slow in a
+    record that only shows how long the whole turn took."""
+    import json
+
+    from chickenbot.brain import collect_legs, note_leg, note_wait
+
+    class P:
+        name, supports_tools = "p", False
+
+        async def reply(self, **kw):
+            note_leg({"served": "Together", "finish": "stop", "ms": 1200})
+            return "ok"
+
+        async def aclose(self):
+            pass
+
+    r = Recorded(P(), store, LLMConfig(transcript=10))
+    with collect_legs():
+        note_wait("waiting for the burst to finish", 5.0)
+        with activity(kind="follow", room="#lobby"):
+            await r.reply(system="s", history=[], prompt="p", search=False)
+    kinds = [(leg["kind"], leg.get("what") or leg.get("served")) for leg in json.loads(store.llm_calls()[0]["details"])]
+    assert kinds == [("wait", "waiting for the burst to finish"), ("call", "Together")]
+
+
+async def test_a_tool_and_a_leg_share_one_clock(store):
+    """Otherwise a timeline is two clocks that happen to start near together."""
+    import asyncio
+
+    from chickenbot.brain import collect_legs, turn_started
+
+    assert turn_started() == 0.0
+    with collect_legs():
+        first = turn_started()
+        assert first > 0
+        await asyncio.sleep(0.01)
+        assert turn_started() == first  # the same origin throughout the turn
+    assert turn_started() == 0.0
+
+
+def test_the_timeline_shows_waits_tools_and_calls_in_order(tmp_path):
+    from chickenbot.store import Store
+
+    st = Store(tmp_path / "c.db")
+    st.record_llm_call(
+        LlmCall(
+            reason="follow",
+            room="#lobby",
+            response="saw it",
+            ms=8512,
+            tool_calls=[
+                {"name": "ext_github_activity", "args": {}, "result": "r", "at": 5.9, "ms": 412, "source": "mirror"}
+            ],
+            details=[
+                {"kind": "wait", "what": "waiting for the burst to finish", "ms": 5000, "at": 0.0},
+                {"kind": "call", "served": "Together", "finish": "tool_calls", "at": 5.0, "ms": 850},
+                {"kind": "call", "served": "Parasail", "finish": "stop", "at": 6.4, "ms": 1480},
+            ],
+        ),
+        100,
+        48,
+    )
+    st.close()
+    out = cli(tmp_path, "transcript", "1", "--color", "never")[1]
+    assert "WHERE THE TIME WENT" in out
+    order = [line for line in out.splitlines() if line.startswith("  t+")]
+    assert "waiting for the burst" in order[0] and "waited" in order[0]
+    assert "ext_github_activity  from the mirror" in order[2]
+    assert "turn took 8512ms end to end" in out
+
+
+def test_a_tool_says_whether_it_answered_from_its_mirror():
+    """A cached answer and a fetched one take very different times, and
+    guessing which from the clock is not the same as knowing."""
+    from external.github.__main__ import MIRRORED
+
+    assert "github_activity" in MIRRORED and "github_repos" in MIRRORED
+    assert "github_issue" not in MIRRORED and "github_readme" not in MIRRORED

@@ -14,6 +14,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from .brain import turn_started
 from .observe import note_many
 from .rooms import GUEST
 from .transport import BAN, TOPIC
@@ -27,6 +28,24 @@ MAX_CALLS = 8  # per request, across every loop iteration
 TIMEOUT = 20.0  # per call
 
 Runner = Callable[["Handler", "Context", dict], Awaitable[str]]
+
+
+@dataclass(slots=True)
+class Called:
+    """One tool call, with enough to say where a turn's time went.
+
+    `at` is seconds from the start of the turn and `ms` is how long this one
+    took, so a transcript can show a timeline rather than a list -- the
+    difference between a slow tool, a slow model and a deliberate pause is
+    otherwise unanswerable from the record.
+    """
+
+    name: str
+    args: dict
+    result: str
+    at: float = 0.0
+    ms: int = 0
+    source: str = ""  # what the tool says it answered from, when it says
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,7 +102,10 @@ class ToolBox:
         self.ctx = ctx
         self.tools = TOOLS if tools is None else tools
         self.calls = 0
-        self.log: list[tuple[str, dict, str]] = []
+        self.log: list[Called] = []
+        # The turn's clock when there is one, so tool calls and HTTP legs
+        # are placed on the same timeline rather than two adjacent ones.
+        self.started = turn_started() or time.monotonic()
         # Seconds until this turn would be worth repeating, 0 when it would not.
         self.retry_after = 0.0
 
@@ -116,8 +138,18 @@ class ToolBox:
         return handler.policies.of(self.ctx.transport.realm, self.ctx.channel).moderation
 
     async def run(self, name: str, args: dict) -> str:
+        at = time.monotonic()
         result = await self._run(name, args)
-        self.log.append((name, args, result))
+        self.log.append(
+            Called(
+                name=name,
+                args=args,
+                result=result,
+                at=round(at - self.started, 3),
+                ms=int((time.monotonic() - at) * 1000),
+                source=str(getattr(getattr(self.handler, "tool_server", None), "source", "") or ""),
+            )
+        )
         # A tool may answer with the best it has and say a better answer is
         # coming. The soonest such moment wins: whoever comes back should
         # find every late tool landed.

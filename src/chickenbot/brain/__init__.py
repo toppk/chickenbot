@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import re
+import time
 from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
@@ -26,11 +27,36 @@ class Turn:
 # which endpoint was slow. A ContextVar rather than state on the provider:
 # two rooms answer at once, and their legs must not mix.
 _LEGS: ContextVar[list[dict] | None] = ContextVar("llm_legs", default=None)
+# t=0 for everything in one turn, so a tool call and an HTTP leg are placed
+# against the same clock rather than two that happen to start near each other.
+_STARTED: ContextVar[float] = ContextVar("llm_started", default=0.0)
+
+
+def turn_started() -> float:
+    """When this turn's clock began, or 0 outside one."""
+    return _STARTED.get()
 
 
 def note_leg(leg: dict) -> None:
-    if (legs := _LEGS.get()) is not None:
-        legs.append(leg)
+    if (legs := _LEGS.get()) is None:
+        return
+    leg.setdefault("kind", "call")
+    if (started := _STARTED.get()) and "at" not in leg:
+        # A call is noted when it returns, so place it at its own beginning.
+        leg["at"] = round(max(time.monotonic() - started - leg.get("ms", 0) / 1000, 0.0), 3)
+    legs.append(leg)
+
+
+def note_wait(what: str, seconds: float) -> None:
+    """A pause the bot chose, so a timeline can tell it from being slow.
+
+    Waiting for a burst to finish, or for another answer in the same room to
+    land, is deliberate -- and indistinguishable from latency in a record
+    that only shows how long the whole thing took.
+    """
+    started = _STARTED.get()
+    at = round(max(time.monotonic() - started - seconds, 0.0), 3) if started else 0.0
+    note_leg({"kind": "wait", "what": what, "ms": int(seconds * 1000), "at": at})
 
 
 @contextlib.contextmanager
@@ -40,11 +66,12 @@ def collect_legs():
         yield existing
         return
     legs: list[dict] = []
-    token = _LEGS.set(legs)
+    token, clock = _LEGS.set(legs), _STARTED.set(time.monotonic())
     try:
         yield legs
     finally:
         _LEGS.reset(token)
+        _STARTED.reset(clock)
 
 
 class ProviderError(Exception):
