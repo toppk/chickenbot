@@ -516,6 +516,9 @@ def test_the_timeline_shows_waits_tools_and_calls_in_order(tmp_path):
     st.close()
     out = cli(tmp_path, "transcript", "1", "--color", "never")[1]
     assert "WHERE THE TIME WENT" in out
+    # At the end, not in the middle: the prompt is long and this is what you
+    # came to see.
+    assert out.index("WHERE THE TIME WENT") > out.index("WHAT IT SAID")
     order = [line for line in out.splitlines() if line.startswith("  t+")]
     assert "waiting for the burst" in order[0] and "waited" in order[0]
     assert any("ext_github_activity  from the mirror" in line for line in order)

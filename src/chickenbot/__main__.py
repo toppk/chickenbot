@@ -911,13 +911,15 @@ def _one_call(row, paint: Paint, details: bool = False) -> int:
         print(f"  {paint('came back', 'grey')}")
         print(_indent(str(call.get("result", "")), paint, mark="dim"))
 
-    _timeline(row, paint)
     if details:
         _legs(row, paint)
 
     print()
     print(paint.rule("WHAT IT SAID", "rev", "green"))
     print(_indent(visible(str(row["response"])), paint, mark="bold"))
+    # Last, not in the middle: the prompt is long, and the thing you came to
+    # see should not be somewhere up the scrollback behind it.
+    _timeline(row, paint)
     _sequence(row, paint)
     return 0
 
