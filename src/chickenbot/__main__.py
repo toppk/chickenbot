@@ -10,8 +10,10 @@ import json
 import logging
 import os
 import random
+import shutil
 import signal
 import sys
+import textwrap
 import time
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -779,37 +781,179 @@ def upgrade_soul(store: Store, args: argparse.Namespace) -> int:
     return 0
 
 
+class Paint:
+    """Just enough ANSI to make a transcript readable, and nothing when the
+    output is not a terminal: piping into `grep` or `less` should get words,
+    not escape codes nobody asked for."""
+
+    CODES = {
+        "bold": "1",
+        "dim": "2",
+        "under": "4",
+        "rev": "7",
+        "red": "31",
+        "green": "32",
+        "yellow": "33",
+        "blue": "34",
+        "magenta": "35",
+        "cyan": "36",
+        "grey": "90",
+    }
+
+    def __init__(self, on: bool) -> None:
+        self.on = on
+
+    def __call__(self, text: str, *styles: str) -> str:
+        if not self.on or not styles:
+            return text
+        return "\x1b[" + ";".join(self.CODES[s] for s in styles) + "m" + text + "\x1b[0m"
+
+    def rule(self, title: str, *styles: str) -> str:
+        """A banner across the terminal, so sections are findable by eye."""
+        width = min(shutil.get_terminal_size((100, 24)).columns, 100)
+        return self(f" {title} ".ljust(max(width, len(title) + 2)), *(styles or ("rev", "bold")))
+
+
+# What each reason is called, and its colour. The one thing worth scanning a
+# listing for is whether the bot was answering or speaking unbidden.
+REASONS = {
+    "message/ask": ("asked", "cyan"),
+    "follow": ("following", "blue"),
+    "ask": ("second look", "magenta"),
+    "scheduled/ask": ("scheduled", "magenta"),
+    "bartender": ("bartender", "yellow"),
+    "vibe": ("room read", "yellow"),
+    "barfly": ("unbidden", "green"),
+    "rehearsal": ("rehearsal", "grey"),
+}
+
+# IRC formatting is invisible in a terminal and would quietly restyle it.
+# Shown as marks, which is also how you check the conversion did what it
+# should: `**bold**` from the model should read as [b]bold[b] here.
+CONTROLS = {
+    "\x02": "[b]",
+    "\x1d": "[i]",
+    "\x1f": "[u]",
+    "\x1e": "[s]",
+    "\x0f": "[reset]",
+    "\x03": "[colour]",
+    "\x16": "[rev]",
+    "\x11": "[mono]",
+}
+
+
+def visible(text: str) -> str:
+    for code, mark in CONTROLS.items():
+        text = text.replace(code, mark)
+    return text
+
+
 def show_transcript(store: Store, args: argparse.Namespace) -> int:
     """The one thing the activity record never held: the words themselves."""
     rows = store.llm_calls(room=args.room, reason=args.reason, limit=args.last, one=args.id or 0)
     if not rows:
         print("nothing recorded; `tune llm.transcript 100` turns it on", file=sys.stderr)
         return 1
-    if args.id:
-        row = rows[0]
-        when = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(row["ts"]))
-        print(f"#{row['id']}  {when}  {row['reason']}  {row['realm']}/{row['room']}  {row['nick']}")
-        print(f"model={row['model']} served={row['served']} ms={row['ms']}")
-        print("\n===== REQUEST " + "=" * 55)
-        print(row["request"])
-        for n, call in enumerate(json.loads(row["tool_calls"] or "[]"), 1):
-            print(f"\n===== TOOL {n}: {call.get('name', '?')} " + "=" * 40)
-            print(f"  args: {json.dumps(call.get('args', {}))}")
-            if whole := call.get("of"):
-                print(f"  (first {len(str(call.get('result', '')))} of {whole} characters)")
-            for line in str(call.get("result", "")).splitlines() or [""]:
-                print(f"  {line}")
-        print("\n===== RESPONSE " + "=" * 54)
-        print(row["response"])
-        return 0
+    want = getattr(args, "color", "auto")
+    lit = want == "always" or (want == "auto" and sys.stdout.isatty() and not os.environ.get("NO_COLOR"))
+    paint = Paint(lit)
+    return _one_call(rows[0], paint) if args.id else _call_listing(rows, paint)
+
+
+def _call_listing(rows: list, paint: Paint) -> int:
+    print(paint(f"{'id':>5}  {'when':<14}  {'what':<12} {'room':<10} {'took':>8} {'tools':>5}  reply", "bold", "under"))
     for row in rows:
         when = time.strftime("%m-%d %H:%M:%S", time.localtime(row["ts"]))
-        says = " ".join(str(row["response"]).split())[:48]
+        label, colour = REASONS.get(str(row["reason"]), (str(row["reason"])[:12], "grey"))
         used = len(json.loads(row["tool_calls"] or "[]"))
-        marks = f"[{used}]" if used else "   "
-        print(f"{row['id']:5}  {when}  {row['reason']:16} {row['room']:10} {row['ms']:6}ms {marks} {says}")
-    print(f"\n`transcript <id>` for one in full ({len(rows)} shown)")
+        said = visible(" ".join(str(row["response"]).split()))
+        print(
+            f"{paint(format(row['id'], '>5'), 'grey')}  "
+            f"{paint(when, 'grey')}  "
+            f"{paint(format(label, '<12'), colour)} "
+            f"{format(row['room'], '<10')} "
+            f"{paint(format(str(row['ms']) + 'ms', '>8'), 'grey')} "
+            f"{paint(format(used or '-', '>5'), 'yellow' if used else 'grey')}  "
+            f"{paint(said[:44], 'dim') if said == '<silent>' else said[:44]}"
+        )
+    print()
+    print(paint(f"`transcript <id>` for one in full  ({len(rows)} shown)", "dim"))
     return 0
+
+
+def _one_call(row, paint: Paint) -> int:
+    label, colour = REASONS.get(str(row["reason"]), (str(row["reason"]), "grey"))
+    when = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(row["ts"]))
+    print(paint.rule(f"#{row['id']}  {label.upper()}  {row['room']}  {when}", "rev", "bold"))
+    facts = [("who asked", row["nick"] or "-"), ("network", row["realm"]), ("model", row["model"] or "-")]
+    facts += [("served by", row["served"] or "-"), ("took", f"{row['ms']}ms")]
+    for name, value in facts:
+        print(f"  {paint(format(name, '>10'), 'grey')}  {value}")
+
+    system, history, turn = _split_request(str(row["request"]))
+    print()
+    print(paint.rule("SYSTEM PROMPT  (soul, then what this turn may reach)", "rev", colour))
+    print(_indent(system, paint))
+    if history.strip():
+        print()
+        print(paint.rule("HISTORY", "rev", colour))
+        print(_indent(history, paint))
+    print()
+    print(paint.rule("THE TURN  (context, room, people, scrollback, question)", "rev", colour))
+    print(_indent(turn, paint))
+
+    for n, call in enumerate(json.loads(row["tool_calls"] or "[]"), 1):
+        print()
+        print(paint.rule(f"TOOL {n}  {call.get('name', '?')}", "rev", "yellow"))
+        print(f"  {paint('asked for', 'grey')}  {json.dumps(call.get('args', {}))}")
+        if whole := call.get("of"):
+            print(f"  {paint('note', 'grey')}  first {len(str(call.get('result', '')))} of {whole} characters")
+        print(f"  {paint('came back', 'grey')}")
+        print(_indent(str(call.get("result", "")), paint, mark="dim"))
+
+    print()
+    print(paint.rule("WHAT IT SAID", "rev", "green"))
+    print(_indent(visible(str(row["response"])), paint, mark="bold"))
+    return 0
+
+
+def _split_request(request: str) -> tuple[str, str, str]:
+    """The stored request is one blob with its own separators; show the parts."""
+    parts = {"system": "", "history": "", "turn": ""}
+    current = "system"
+    for line in request.splitlines():
+        if line.startswith("----- ") and line[6:].strip() in parts:
+            current = line[6:].strip()
+            continue
+        parts[current] += line + "\n"
+    return parts["system"], parts["history"], parts["turn"]
+
+
+# The blocks `compose` builds. Marked so the eye can find the room dossier or
+# the scrollback without reading the whole prompt.
+BLOCKS = ("<context>", "<powers>", "<room>", "<known_people>", "<channel_scrollback>")
+
+
+def _wrapped(line: str, width: int) -> list[str]:
+    """A tool can answer with fourteen rows on one line. Fold it, with a
+    hanging indent, so the shape of the answer is visible."""
+    if len(line) <= width or not line.strip():
+        return [line]
+    return textwrap.wrap(line, width, subsequent_indent="    ", break_long_words=False, break_on_hyphens=False)
+
+
+def _indent(body: str, paint: Paint, mark: str = "") -> str:
+    width = max(min(shutil.get_terminal_size((100, 24)).columns, 100) - 2, 40)
+    out = []
+    for raw in visible(body).rstrip().splitlines():
+        for line in _wrapped(raw, width):
+            if any(line.startswith(tag) or line.startswith(tag.replace("<", "</")) for tag in BLOCKS):
+                out.append("  " + paint(line, "cyan", "bold"))
+            elif line.startswith("[") and "] <" in line:
+                out.append("  " + paint(line, "grey"))  # a scrollback line, stamped
+            else:
+                out.append("  " + (paint(line, mark) if mark else line))
+    return "\n".join(out) or "  (nothing)"
 
 
 def make_cert(cfg, args) -> int:
@@ -1160,6 +1304,9 @@ def main(argv: list[str] | None = None) -> int:
     tx.add_argument("--room", default="", help="only this room")
     tx.add_argument("--reason", default="", help="only these, e.g. bartender, vibe, barfly, follow")
     tx.add_argument("--last", type=int, default=20, help="how many to list (default 20)")
+    tx.add_argument(
+        "--color", choices=("auto", "always", "never"), default="auto", help="colour; auto means a terminal"
+    )
 
     pr = sub.add_parser("prompt", help="show exactly what the model would be sent")
     pr.add_argument("room", nargs="?", help="realm/#room, as `log` lists them")

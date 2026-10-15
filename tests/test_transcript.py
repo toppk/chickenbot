@@ -162,12 +162,12 @@ def test_one_call_prints_request_and_response(tmp_path):
         48,
     )
     st.close()
-    code, out = cli(tmp_path, "transcript", "1")
+    code, out = cli(tmp_path, "transcript", "1", "--color", "never")
     assert code == 0
     assert "REQUESTTEXT" in out and "RESPONSETEXT" in out
-    assert "bartender" in out and "served=Together" in out
+    assert "BARTENDER" in out and "served by  Together" in out
     # What it asked for, with what, and what came back.
-    assert "TOOL 1: chan_who" in out
+    assert "TOOL 1  chan_who" in out
     assert '"target": "biff"' in out and "biff [bot]" in out
 
 
@@ -246,3 +246,94 @@ async def test_a_huge_tool_result_is_cut(store):
     kept = json.loads(store.llm_calls()[0]["tool_calls"])[0]
     assert len(kept["result"]) == RESULT_SHOWN
     assert kept["of"] == 50000  # a slice that does not say so reads as the whole
+
+
+# -- reading one back as a person -----------------------------------------
+
+
+def test_colour_is_off_when_nobody_is_watching():
+    """Piping into grep or less should get words, not escape codes."""
+    from chickenbot.__main__ import Paint
+
+    assert Paint(False)("hi", "bold") == "hi"
+    assert Paint(True)("hi", "bold") == "\x1b[1mhi\x1b[0m"
+
+
+def test_irc_formatting_is_shown_rather_than_applied():
+    """A terminal would quietly restyle itself, and the point of looking is
+    to see that the conversion did what it should."""
+    from chickenbot.__main__ import visible
+
+    assert visible("\x02bold\x02 and \x1ditalic\x1d") == "[b]bold[b] and [i]italic[i]"
+    assert visible("plain") == "plain"
+
+
+def test_the_request_is_split_into_its_parts():
+    from chickenbot.__main__ import _split_request
+
+    system, history, turn = _split_request("----- system\nSOUL\n----- history\n\n----- turn\nASK")
+    assert system.strip() == "SOUL"
+    assert history.strip() == ""
+    assert turn.strip() == "ASK"
+
+
+def test_a_request_without_separators_is_all_system():
+    """Rows written before the parts were marked still read."""
+    from chickenbot.__main__ import _split_request
+
+    system, _history, turn = _split_request("just a blob")
+    assert system.strip() == "just a blob" and turn == ""
+
+
+def test_a_long_tool_answer_is_folded_with_a_hanging_indent():
+    """A tool can answer with fourteen rows on one line."""
+    from chickenbot.__main__ import _wrapped
+
+    out = _wrapped("row | " * 40, 60)
+    assert len(out) > 1
+    assert all(len(line) <= 60 for line in out)
+    assert out[1].startswith("    ")
+
+
+def test_a_short_line_is_left_exactly_as_it_is():
+    from chickenbot.__main__ import _wrapped
+
+    assert _wrapped("short", 60) == ["short"]
+
+
+def test_every_reason_the_engine_writes_has_a_label():
+    """A new kind of call should be named in the listing, not printed raw."""
+    from chickenbot.__main__ import REASONS
+
+    for reason in ("message/ask", "follow", "bartender", "vibe", "barfly", "rehearsal"):
+        assert reason in REASONS, reason
+
+
+def test_one_call_prints_every_section(tmp_path):
+    from chickenbot.store import Store
+
+    st = Store(tmp_path / "c.db")
+    st.record_llm_call(
+        LlmCall(
+            reason="follow",
+            realm="irc:x",
+            room="#lobby",
+            nick="toppk",
+            request="----- system\nSOULTEXT\n----- history\n\n----- turn\n<room>\nROOMTEXT\n</room>",
+            response="\x02saw it\x02",
+            model="m",
+            served="Together",
+            ms=3512,
+            tool_calls=[{"name": "ext_github_activity", "args": {"user": "toppk"}, "result": "merged #1757"}],
+        ),
+        100,
+        48,
+    )
+    st.close()
+    code, out = cli(tmp_path, "transcript", "1", "--color", "never")
+    assert code == 0
+    for section in ("SYSTEM PROMPT", "THE TURN", "TOOL 1  ext_github_activity", "WHAT IT SAID"):
+        assert section in out, section
+    assert "SOULTEXT" in out and "ROOMTEXT" in out and "merged #1757" in out
+    assert "[b]saw it[b]" in out  # shown, not applied
+    assert "3512ms" in out

@@ -41,14 +41,24 @@ reached for. It has never held the words. For that:
 chickenbot -c <config> tune llm.transcript 20   # keep the last 20 exchanges
 chickenbot -c <config> transcript               # list them
 chickenbot -c <config> transcript 7             # one, in full
+chickenbot -c <config> transcript 7 | less -R   # colour survives -R
 chickenbot -c <config> transcript --room '#lobby'
 chickenbot -c <config> tune llm.transcript 0    # off again
 ```
 
+A listing is a table: when, what kind of call, which room, how long, how many
+tools, and the opening of the reply. The kind is coloured, because the thing
+worth scanning for is whether the bot was answering or speaking unbidden.
+
 One exchange prints the system prompt (soul and all), the user turn with its
 context, room dossier, people and scrollback, and the reply exactly as the
 model produced it -- before chunking, before the nick prefix, and including a
-`<silent>` that never reached the room. `trigger=` says what set it off:
+`<silent>` that never reached the room. IRC formatting is shown as marks rather than applied -- `[b]bold[b]` -- so a
+terminal is not quietly restyled, and so the markdown conversion can be
+checked by eye. Colour turns itself off when the output is not a terminal, or
+with `--color never`, or under `NO_COLOR`.
+
+`trigger=` says what set it off:
 `ask` for a direct question, `follow` for a batch it was drawn into,
 `second-look` for a question re-asked because a tool said better was coming.
 
