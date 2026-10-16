@@ -215,6 +215,15 @@ and once `note` is in hand, discarding it from the owner's complete record
 is the wrong call. Ruff caught the unused variable and the question answered
 itself.
 
+**Silent truncation, found by a question rather than a test.** The first
+version did `[:NOTE_CHARS]` and said nothing, so 141 characters came back as
+140 with a word cut in half -- `understan` -- and the model none the wiser.
+`clip()`, already in this codebase for dossiers, says why that is wrong in
+its own docstring: "what is left reads exactly like something somebody chose
+to write". The same mistake, three files away from the comment warning
+against it. It cuts at a word now, ends in an ellipsis so the join is
+visible, and the tool's answer says it was cut.
+
 ### Not scored
 
 Whether it is any good -- whether the aside actually relaxes the spoken line

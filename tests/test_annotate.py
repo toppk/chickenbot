@@ -28,13 +28,35 @@ def ctx_for(h, tr=None):
     )
 
 
-async def test_a_note_is_capped_and_flattened(cfg, store):
+async def test_a_note_is_flattened_onto_one_line(cfg, store):
     h = Handler(cfg, store, None, None)
     ctx = ctx_for(h)
-    said = await ToolBox(h, ctx).run("annotate_reply", {"note": "a\nnote  over\tlines " + "x" * 200})
-    assert "noted" in said
+    said = await ToolBox(h, ctx).run("annotate_reply", {"note": "a\nnote  over\tlines"})
+    assert said == "noted, beside your reply: a note over lines"
+    assert ctx.note == "a note over lines"
+
+
+async def test_too_long_is_cut_at_a_word_and_said(cfg, store):
+    """A silent trim hands back a half sentence that reads like one somebody
+    chose to write -- which is what `clip` was written to stop doing to a
+    dossier, and this made the same mistake."""
+    h = Handler(cfg, store, None, None)
+    ctx = ctx_for(h)
+    wrote = "x" * 130 + " understanding"
+    said = await ToolBox(h, ctx).run("annotate_reply", {"note": wrote})
+    assert f"cut to {NOTE_CHARS}" in said  # told, not done quietly
+    assert ctx.note.endswith("\u2026")  # and the join is visible
+    assert "understan" not in ctx.note  # no word left half-written
+    assert len(ctx.note) <= NOTE_CHARS
+
+
+async def test_one_long_word_is_cut_anyway(cfg, store):
+    """No space to cut at is not a reason to store 200 characters."""
+    h = Handler(cfg, store, None, None)
+    ctx = ctx_for(h)
+    await ToolBox(h, ctx).run("annotate_reply", {"note": "y" * 200})
     assert len(ctx.note) == NOTE_CHARS
-    assert "\n" not in ctx.note and "  " not in ctx.note
+    assert ctx.note.endswith("\u2026")
 
 
 async def test_an_empty_note_is_refused(cfg, store):

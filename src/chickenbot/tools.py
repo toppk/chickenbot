@@ -236,8 +236,8 @@ async def tool_current_time(h: Handler, ctx: Context, args: dict) -> str:
         "aside.\n\n"
         "Use it for what the reply cannot carry: why you said what you said, what you "
         "suspect but would not assert out loud, what you looked up and left out, what to "
-        "pick up if the subject returns. One sentence, 140 characters, and anything longer "
-        "is cut. Optional, and most replies do not need one.\n\n"
+        "pick up if the subject returns. One sentence, 140 characters; longer is cut at a "
+        "word and you are told so. Optional, and most replies do not need one.\n\n"
         "It is not a diary and nobody tidies it: write what would help you read this "
         "exchange cold in an hour, not how you felt about it."
     ),
@@ -251,11 +251,23 @@ async def tool_annotate_reply(h: Handler, ctx: Context, args: dict) -> str:
     """Written onto the Context and consumed by the first `say`, so it lands
     beside the reply it was written about rather than on whatever gets said
     next in the same turn."""
-    note = " ".join(str(args.get("note") or "").split())[:NOTE_CHARS]
-    if not note:
+    wrote = " ".join(str(args.get("note") or "").split())
+    if not wrote:
         return "error: a note needs something in it"
-    ctx.note = note
-    return f"noted, beside your reply: {note}"
+    ctx.note = _cut_note(wrote)
+    if ctx.note == wrote:
+        return f"noted, beside your reply: {ctx.note}"
+    # Said, not done quietly: a silent trim hands back a half sentence that
+    # reads like one somebody chose to write.
+    return f"noted, but cut to {NOTE_CHARS}: {ctx.note} -- say it shorter if that lost the point"
+
+
+def _cut_note(wrote: str) -> str:
+    """At a word, with an ellipsis, so the join is visible."""
+    if len(wrote) <= NOTE_CHARS:
+        return wrote
+    kept = wrote[: NOTE_CHARS - 1].rsplit(" ", 1)[0]
+    return (kept if kept else wrote[: NOTE_CHARS - 1]) + "\u2026"
 
 
 # -- core tools ----------------------------------------------------------
