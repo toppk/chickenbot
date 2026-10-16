@@ -141,6 +141,28 @@ Same shape elsewhere, worth checking at the same time: the github tool's
 against a stop event, which is right; nothing else in that process creates
 a task that outlives its caller.
 
+## A note to self, carried on its own line
+
+Its own words in the room are all it remembers: tool results never reach the
+next turn, so anything learned and not said is gone. A second look read its
+earlier line, concluded it had answered, and restated it.
+
+`annotate_reply(note)` -- a tool, not inline markup, which cannot leak into
+a room -- stored as `chatlog.note` and rendered back only in its own
+scrollback. **140 characters.** A forced sentence is a clue; a paragraph is
+a diary that re-reads itself every turn and nobody corrects. Per utterance,
+never cumulative, ages out with the chatlog.
+
+Needs schema v2, and the gate wants refining first: `_check_version` refuses
+any database older than `SCHEMA_VERSION`, but adding a column with a default
+is additive and `_migrate()` can apply it in place. The policy stands --
+every change is a revision -- the gate just has to know which steps it can
+take alone and which need the script.
+
+Risks: somewhere things that belong in the room end up instead, and a
+private story that compounds. The dossier stays the place for durable facts
+about people; this is working memory for one statement.
+
 ## Roadmap
 
 **Search as a core competence**, not a plugin: the thing a bot in a channel
