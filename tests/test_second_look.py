@@ -152,3 +152,33 @@ async def test_a_scheduled_run_is_marked_as_a_second_look(cfg, store):
     finally:
         COMMANDS.pop("spy", None)
     assert seen == [True]
+
+
+def test_a_second_look_is_told_that_it_is_one(cfg, store):
+    """It has no running dialogue: its own words in the room are all it
+    remembers. Not told, it reads its earlier line, concludes it has already
+    answered, calls nothing, and says "same answer I just gave" -- which
+    spends a message and a model call to add nothing."""
+    from chickenbot.commands import Context, Handler, compose
+
+    from .conftest import FakeTransport
+
+    h = Handler(cfg, store, None, None)
+    ctx = Context(
+        handler=h,
+        transport=FakeTransport(),
+        nick="toppk",
+        account="toppk",
+        channel="#chan",
+        args="what happened",
+        is_owner=True,
+        in_channel=True,
+    )
+    first, _ = compose(h, ctx, scrollback="")
+    assert "second look" not in first
+
+    ctx.again = True
+    again, _ = compose(h, ctx, scrollback="")
+    assert "second look at the same question" in again
+    assert "say only what has changed" in again
+    assert "<silent>" in again  # and silence is the answer when nothing has

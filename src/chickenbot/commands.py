@@ -14,6 +14,7 @@ from dataclasses import dataclass
 
 from . import version
 from .attention import (
+    AGAIN_NOTE,
     FOLLOW_NOTE,
     OVERHEARD,
     SILENCE_NOTE,
@@ -218,6 +219,7 @@ def compose(
         + tools_note(toolbox)
         + SILENCE_NOTE
         + (FOLLOW_NOTE if following else "")
+        + (AGAIN_NOTE if ctx.again else "")
     )
 
     # Volatile context goes in the user turn, not the system prompt, so the

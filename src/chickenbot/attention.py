@@ -49,6 +49,21 @@ SILENCE_NOTE = (
     "someone quoting you, or asking a third party about you, needs nothing from you. "
     f"Decline with {SILENT}, never with a sentence about declining."
 )
+# A second look exists because a tool answered from a stale mirror and said
+# a better answer was coming. Without being told, the model reads its own
+# earlier line in the scrollback, concludes it has already answered, calls
+# nothing, and says "same answer I just gave" -- which spends a message and
+# a model call to add nothing. It has no running dialogue; its own words in
+# the room are all it remembers, so the fact that this is a retry has to be
+# said out loud.
+AGAIN_NOTE = (
+    " You have answered this already, from data a tool said was stale. The fetch has since "
+    "landed, so this is a second look at the same question, not a repeat of it. Look again "
+    "with the tools you have, and say only what has changed since you last spoke -- a "
+    f"correction, or something that was missing. If nothing has changed, say {SILENT} and "
+    "nothing else: restating your previous answer is worse than silence, because the room "
+    "already has it."
+)
 FOLLOW_NOTE = (
     " You are following a conversation you were drawn into rather than being asked a direct question. "
     "Each line is marked with its claim on you: `to you` named you, `overheard` named nobody, and "
