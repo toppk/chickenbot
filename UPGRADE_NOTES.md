@@ -7,6 +7,37 @@ it back.
 Releases themselves are the git tags (`git tag -l 'v*'`); this file is only
 the by-hand part.
 
+## v0.4.1
+
+### `github_repos` is now `github_user_repos`, and grants are by name
+
+**Why.** It lists the repositories a *user* owns. Called `github_repos` it
+read as the tool for anything about a repository, and took questions it
+cannot answer: "what is the latest release?" went to it three times out of
+three and the release tool was never called. Renamed, the same question goes
+to `github_releases` three times out of three. No wording changed that; the
+name did.
+
+Grants are keyed on the tool's name, and anything unlisted is owner-only, so
+the old stanza now grants a tool that does not exist.
+
+**Do this**, in each instance's config:
+
+```toml
+# was [tools.grants.ext_github_repos]
+[tools.grants.ext_github_user_repos]
+owner = false
+
+# new in this release, if non-owners should reach it
+[tools.grants.ext_github_releases]
+owner = false
+```
+
+Then restart both units. **Check it worked**: the tool process logs what it
+declared at startup, and `transcript -1` shows what a turn could reach.
+
+**Put it back**: the old name is gone, and a grant naming it is ignored.
+
 ## v0.3.5
 
 Nothing to do. Noted because it changes what a failure looks like.

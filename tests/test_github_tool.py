@@ -160,7 +160,7 @@ def test_repos_reports_stars_and_recency(gh):
             "description": "d",
         }
     )
-    out = gh.github_repos({"user": "toppk"})
+    out = gh.github_user_repos({"user": "toppk"})
     # "open" alone was read as open pull requests; the count is both.
     assert out == "toppk/chickenbot (3 stars, 2 open issues+PRs, pushed 1h ago): d"
 
@@ -373,7 +373,7 @@ def test_repo_output_spells_stars_rather_than_using_an_asterisk(gh):
             "description": "",
         }
     )
-    out = gh.github_repos({"user": "toppk"})
+    out = gh.github_user_repos({"user": "toppk"})
     assert "4 stars" in out and "4*" not in out
 
 
@@ -641,7 +641,7 @@ async def test_the_answer_says_how_old_it_is(gh):
 
 async def test_a_never_fetched_mirror_says_so(gh):
     gh.users = ["toppk"]
-    assert "nothing fetched yet" in await gh.call("github_repos", {})
+    assert "nothing fetched yet" in await gh.call("github_user_repos", {})
 
 
 async def test_a_question_refreshes_behind_itself_not_in_front(gh, monkeypatch):
@@ -966,7 +966,7 @@ async def test_repos_say_what_they_are(tmp_path):
         }
     )
     tool = Tool(store, None, ["someone"])
-    answer = await tool.call("github_repos", {"user": "someone"})
+    answer = await tool.call("github_user_repos", {"user": "someone"})
     assert "A traditional floating compositor" in answer
     assert "76 stars" in answer
     store.close()
@@ -989,7 +989,7 @@ async def test_a_repo_with_no_description_says_nothing_extra(tmp_path):
         }
     )
     tool = Tool(store, None, ["someone"])
-    answer = await tool.call("github_repos", {"user": "someone"})
+    answer = await tool.call("github_user_repos", {"user": "someone"})
     assert "someone/quiet (0 stars" in answer and ":" not in answer.split("[")[0].split("(")[1]
     store.close()
 
@@ -1013,7 +1013,7 @@ async def test_a_long_description_is_trimmed(tmp_path):
         }
     )
     tool = Tool(store, None, ["someone"])
-    answer = await tool.call("github_repos", {"user": "someone"})
+    answer = await tool.call("github_user_repos", {"user": "someone"})
     assert "x" * DESCRIPTION in answer
     assert "x" * (DESCRIPTION + 1) not in answer
     store.close()
@@ -1040,7 +1040,7 @@ async def test_a_fork_is_marked_as_one(tmp_path):
     were all theirs, because the column was mirrored and never rendered."""
     store = Store(tmp_path / "g.db")
     store.save_repo(_repo_row("aurora-linux", fork=1, description="Linux kernel source tree"))
-    answer = await Tool(store, None, ["someone"]).call("github_repos", {"user": "someone"})
+    answer = await Tool(store, None, ["someone"]).call("github_user_repos", {"user": "someone"})
     assert "(fork, 0 stars" in answer
     store.close()
 
@@ -1048,14 +1048,14 @@ async def test_a_fork_is_marked_as_one(tmp_path):
 async def test_an_archived_repo_is_marked_too(tmp_path):
     store = Store(tmp_path / "g.db")
     store.save_repo(_repo_row("old", archived=1))
-    assert "archived" in await Tool(store, None, ["someone"]).call("github_repos", {"user": "someone"})
+    assert "archived" in await Tool(store, None, ["someone"]).call("github_user_repos", {"user": "someone"})
     store.close()
 
 
 async def test_their_own_work_carries_no_marks(tmp_path):
     store = Store(tmp_path / "g.db")
     store.save_repo(_repo_row("theirs", stars=76))
-    answer = await Tool(store, None, ["someone"]).call("github_repos", {"user": "someone"})
+    answer = await Tool(store, None, ["someone"]).call("github_user_repos", {"user": "someone"})
     assert "(76 stars" in answer and "fork" not in answer
     store.close()
 
@@ -1273,7 +1273,7 @@ async def test_issues_and_pull_requests_are_told_apart(tmp_path):
         store.save_item(_item_row(i, kind="issue", repo="someone/chonkcraft", id=f"someone/chonkcraft#{i}"))
     store.save_item(_item_row(9, kind="pr", repo="someone/chonkcraft", id="someone/chonkcraft#9"))
 
-    answer = await Tool(store, None, ["someone"]).call("github_repos", {"user": "someone"})
+    answer = await Tool(store, None, ["someone"]).call("github_user_repos", {"user": "someone"})
     assert "5 issues, 1 PR open" in answer
     store.close()
 
@@ -1286,7 +1286,7 @@ async def test_a_partial_mirror_reports_the_total_rather_than_inventing_a_split(
     for i in range(3):
         store.save_item(_item_row(i, kind="issue", repo="someone/chonkstep", id=f"someone/chonkstep#{i}"))
 
-    answer = await Tool(store, None, ["someone"]).call("github_repos", {"user": "someone"})
+    answer = await Tool(store, None, ["someone"]).call("github_user_repos", {"user": "someone"})
     assert "77 open issues+PRs" in answer
     assert "3 issues" not in answer
     store.close()
@@ -1297,7 +1297,7 @@ async def test_a_repo_with_only_issues_does_not_mention_pull_requests(tmp_path):
     store.save_repo(_repo_row("quiet", open_issues=2))
     for i in range(2):
         store.save_item(_item_row(i, kind="issue", repo="someone/quiet", id=f"someone/quiet#{i}"))
-    answer = await Tool(store, None, ["someone"]).call("github_repos", {"user": "someone"})
+    answer = await Tool(store, None, ["someone"]).call("github_user_repos", {"user": "someone"})
     assert "2 issues open" in answer and "PR" not in answer
     store.close()
 

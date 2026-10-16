@@ -544,7 +544,7 @@ def test_a_tool_says_whether_it_answered_from_its_mirror():
     guessing which from the clock is not the same as knowing."""
     from external.github.__main__ import MIRRORED
 
-    assert "github_activity" in MIRRORED and "github_repos" in MIRRORED
+    assert "github_activity" in MIRRORED and "github_user_repos" in MIRRORED
     assert "github_issue" not in MIRRORED and "github_readme" not in MIRRORED
 
 
