@@ -930,6 +930,18 @@ def _one_call(row, paint: Paint, details: bool = False) -> int:
     return 0
 
 
+# The tool reports an enum; a timeline is read as prose, not as a field.
+WHENCE = {
+    "mirror": "from the local mirror",
+    "github": "fetched from GitHub",
+    "mirror, refreshed first": "from the mirror, fetched first",
+}
+
+
+def _whence(source: str) -> str:
+    return WHENCE.get(source, source)
+
+
 def _events(row) -> list[tuple[float, int, str, str]]:
     """Every timed thing in one turn, on one clock, in order."""
     out: list[tuple[float, int, str, str]] = []
@@ -940,7 +952,7 @@ def _events(row) -> list[tuple[float, int, str, str]]:
             served, why = leg.get("served") or "model", leg.get("finish") or ""
             out.append((float(leg.get("at") or 0.0), int(leg.get("ms") or 0), "model", f"{served}  {why}"))
     for call in json.loads(row["tool_calls"] or "[]"):
-        where = f"  from the {call['source']}" if call.get("source") else ""
+        where = f"  {_whence(src)}" if (src := str(call.get("source") or "")) else ""
         out.append((float(call.get("at") or 0.0), int(call.get("ms") or 0), "tool", f"{call.get('name', '?')}{where}"))
     laid: list[tuple[float, int, str, str]] = []
     running = 0.0

@@ -521,7 +521,7 @@ def test_the_timeline_shows_waits_tools_and_calls_in_order(tmp_path):
     assert out.index("WHERE THE TIME WENT") > out.index("WHAT IT SAID")
     order = [line for line in out.splitlines() if line.startswith("  t+")]
     assert "waiting for the burst" in order[0] and "waited" in order[0]
-    assert any("ext_github_activity  from the mirror" in line for line in order)
+    assert any("ext_github_activity  from the local mirror" in line for line in order)
     # The total moved into the one-line summary under what it said.
     assert "(8.5s total)" in out
 
@@ -643,3 +643,13 @@ def test_an_empty_style_means_plain_not_a_crash():
     assert on("x", "") == "x"
     assert on("x", "", "yellow") == on("x", "yellow")
     assert Paint(False)("x", "") == "x"
+
+
+def test_where_a_tool_answered_from_reads_as_a_sentence():
+    """It used to interpolate the enum: "from the github"."""
+    from chickenbot.__main__ import _whence
+
+    assert _whence("github") == "fetched from GitHub"
+    assert _whence("mirror") == "from the local mirror"
+    assert _whence("mirror, refreshed first") == "from the mirror, fetched first"
+    assert _whence("something new") == "something new"
