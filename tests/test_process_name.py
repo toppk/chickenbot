@@ -122,3 +122,28 @@ def test_an_undeployed_checkout_says_dev(tmp_path, monkeypatch):
 
     monkeypatch.setattr(pkg, "_STAMP", tmp_path / "missing.txt")
     assert pkg.revision() == "dev"
+
+
+def test_a_release_build_says_the_release(tmp_path, monkeypatch):
+    """An empty stamp is what a release has: deploy.sh and the workflow both
+    truncate it, and `version()` must then say the bare version."""
+    import chickenbot as pkg
+
+    stamp = tmp_path / "_revision.txt"
+    stamp.write_text("")
+    monkeypatch.setattr(pkg, "_STAMP", stamp)
+    assert pkg.revision() == ""
+    assert "+" not in pkg.version()
+
+
+def test_both_build_targets_carry_the_stamp():
+    """The stamp is gitignored, so hatchling drops it from any target that
+    does not ask. The wheel asked and the sdist did not, so a release
+    installed from the sdist found no stamp and called itself 0.4.0+dev."""
+    import tomllib
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent
+    targets = tomllib.loads((root / "pyproject.toml").read_text())["tool"]["hatch"]["build"]["targets"]
+    for name in ("wheel", "sdist"):
+        assert "src/chickenbot/_revision.txt" in targets[name]["artifacts"], name

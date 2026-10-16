@@ -23,14 +23,64 @@ on:
 
 permissions:
   contents: write
+  actions: write  # to delete the hand-off artifact once it has been used
 
 env:
   TAG: ${{ inputs.tag || github.ref_name }}
 
 jobs:
-  build:
-    name: Test and build
+  test:
+    # One interpreter: the one this is deployed on. A second was tried and
+    # earned nothing but a hang of its own to investigate -- `requires-python`
+    # still says >=3.11, which is now a claim rather than something tested.
+    name: Test on fedora 44, python 3.14
     runs-on: ubuntu-24.04
+    container: "fedora:44"
+    # A hang is a failure, not six runner-hours. The suite also has a
+    # per-test timeout, which names the test; this is the backstop.
+    timeout-minutes: 20
+    steps:
+      # Before checkout: it wants git, and the suite shells out to openssl
+      # for the SASL certificate it generates.
+      - name: Say what the image has not got
+        run: dnf -y install python3 git-core openssl tar zstd findutils
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
+
+      - name: Let git read a tree it did not create
+        # The container is root and the checkout is not: without this, git
+        # refuses with "dubious ownership" and anything shelling out to it
+        # fails with exit 128.
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install
+        # Its own step so the log says whether a slow run is installing or
+        # testing. --frozen because a release builds the locked versions or
+        # it is not the thing that was tested.
+        run: uv sync --frozen --all-extras --dev
+
+      - name: The interpreter it actually used
+        run: uv run --no-sync python -V
+
+      - name: Lint
+        run: |
+          uv run --no-sync ruff check
+          uv run --no-sync ruff format --check
+
+      - name: Test
+        run: uv run --no-sync pytest -q
+
+  build:
+    name: Build
+    needs: test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
@@ -39,12 +89,9 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-
-      - name: Check
-        run: |
-          uv run ruff check
-          uv run ruff format --check
-          uv run pytest -q
+          # Pinned so a release is built on a stated interpreter rather
+          # than whatever the runner image happens to ship that month.
+          python-version: "3.12"
 
       - name: The tag must agree with the version it claims
         run: |
@@ -70,6 +117,10 @@ jobs:
           name: dist
           path: dist/
           if-no-files-found: error
+          # A hand-off between two jobs, not a keepsake: what a release
+          # publishes is attached to the release. The publish job deletes
+          # this; the day is for the runs where publish never gets there.
+          retention-days: 1
 
   publish:
     name: Publish
@@ -94,3 +145,16 @@ jobs:
             --title "chickenbot $TAG" \
             --notes-file "release-notes/${TAG#v}.md" \
             dist/*
+
+      - name: Drop the hand-off artifact
+        # Whatever happened above: on success it is in the release, and on
+        # failure it is a half-finished build nobody should fetch.
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          id=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" \
+                 --jq '.artifacts[] | select(.name == "dist") | .id')
+          for one in $id; do
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/actions/artifacts/$one" && echo "deleted artifact $one"
+          done

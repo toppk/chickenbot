@@ -7,7 +7,9 @@
 .ruff_cache/
 .venv/
 __pycache__/
-chickenbot.toml
+# Anchored: unanchored it also swallowed docs/templates/chickenbot.toml,
+# which the code reads and nobody could clone.
+/chickenbot.toml
 data/
 dist/
 github-tool.db

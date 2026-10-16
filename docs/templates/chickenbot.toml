@@ -1,0 +1,124 @@
+# A chickenbot instance. Paths here are relative to this file, not to the
+# working directory, so the run directory is self-contained:
+#
+#   conf/   this file and the .env beside it
+#   data/   what cannot be rebuilt: the soul, people, rooms, the log, the record
+#   cache/  what can: an external tool's mirror of somebody else's data
+#   run/    the tool socket, and anything else that dies with the process
+
+prefix = "."
+nicknames = []
+db_path = "../data/chickenbot.db"
+log_level = "info"
+chatlog_days = 365
+# How to treat other bots: all, addressed, or ignore. `all` because a bot that
+# will not answer bots pushes everyone towards hiding its own +B flag, and
+# hiding what you are is the wrong fix for being ignored. Bounded rather than
+# open: one reply per bot per bot_gap_seconds, at most bot_replies an hour per
+# room, and another bot's line never starts a conversation.
+bots = "all"
+bot_replies = 3
+bot_gap_seconds = 180.0
+
+[irc]
+enabled = true
+host = "irc.example.net"
+port = 6697
+tls = true
+nick = "chickenbot"
+realname = "chickenbot"
+channels = ["#room"]
+
+# What each room is for. `partyline` is where the admins watch the bot work:
+# it takes orders in full and answers a bare `.cmd`. `public` (the default) is
+# a room it participates in; `quiet` is present and listening only. Nothing at
+# runtime changes this -- a room's job is yours to declare, not the bot's to
+# decide. A table overrides one knob of a profile.
+# Inline on purpose: a [irc.rooms] header here would swallow the keys below it.
+rooms = { }
+# rooms = { "#soup" = "partyline", "#lobby" = { profile = "public", barfly = false } }
+# Services account names, not nicks.
+owners = []
+ignore_nicks = []
+casemapping = ""
+# Flag itself as a bot (+B) where the network offers it. Leave this on: it is
+# the honest answer to "what are you", and turning it off to get other bots to
+# talk to you is lying about what you are to work around their manners. Only
+# the bot can set its own user modes, so this is the only way to change it --
+# `/mode chickenbot -B` from your client is refused.
+bot_mode = true
+# Stay under the network's flood protection. eggbot's defaults allow six
+# channel messages in ten seconds and kick on the seventh, counted per
+# nick!user@host across every channel -- so five in ten leaves a margin, and
+# once a burst is spent the steady rate is one message every two seconds,
+# which is the spacing asked for between lines of ascii art. 0 turns it off.
+flood_messages = 5
+flood_seconds = 10.0
+sasl_user = ""
+# Secrets live in the .env beside this file, never here.
+sasl_password_env = "CHICKENBOT_SASL_PASSWORD"
+password_env = "CHICKENBOT_SERVER_PASSWORD"
+
+# Each network keeps its own identity namespace: an owner here is not an owner
+# elsewhere. Signal owners are uuids or E.164 numbers, Discord and Telegram are
+# numeric ids as strings - never display names, which anyone can set.
+#
+# [signal]
+# enabled = true
+# phone_number = "+15550000000"
+# service = "127.0.0.1:8080"   # signal-cli-rest-api
+# groups = []                  # empty means every group the account is in
+# owners = ["+15551234567"]
+#
+# [discord]
+# enabled = true
+# token_env = "DISCORD_TOKEN"  # needs the message content privileged intent
+# channels = ["123456789012345678"]
+# owners = ["234567890123456789"]
+#
+# [telegram]
+# enabled = true
+# token_env = "TELEGRAM_TOKEN"
+# chats = ["-1001234567890"]
+# owners = ["345678901234567"]
+
+[tools]
+enabled = true
+# One socket per instance. Two bots sharing one would be two bots sharing a
+# github mirror, and a work handle is not a hobby handle.
+socket = "../run/chickenbot-tools.sock"
+
+[tools.grants.ext_github_activity]
+owner = false
+
+[tools.grants.ext_github_repos]
+owner = false
+
+# Looking somebody up is reading a public profile, so anyone in the room may
+# ask. It costs an API call and is not mirrored.
+[tools.grants.ext_github_lookup]
+owner = false
+
+# ext_github_refresh is deliberately not granted: it spends API quota and
+# waits, so it stays owner-only like anything unlisted.
+
+[llm]
+enabled = true
+provider = "openrouter"
+model = "deepseek/deepseek-v4.1-flash"
+max_tokens = 4096
+effort = "low"
+search = true
+history_lines = 20
+history_minutes = 180
+follow = true
+follow_seconds = 60
+pause_seconds = 5.0
+max_silences = 3
+per_user_per_min = 4
+
+[llm.body_params.provider]
+zdr = true                   # zero-retention endpoints only
+data_collection = "deny"     # no endpoint that keeps prompts for training
+sort = "price"               # cheapest eligible endpoint wins
+require_parameters = true    # never route somewhere that ignores `tools`

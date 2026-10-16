@@ -1,6 +1,6 @@
 [project]
 name = "chickenbot"
-version = "0.3.5"
+version = "0.4.0"
 description = "A chat bot that logs the room, answers with an LLM, keeps order, and watches GitHub repos"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -24,6 +24,9 @@ chickenbot = "chickenbot.__main__:main"
 dev = [
     "pytest>=8",
     "pytest-asyncio>=0.23",
+    # A hung test should name itself and dump its stack, not sit there: one
+    # did, for seventeen minutes, on a runner nobody could attach to.
+    "pytest-timeout>=2.3",
     "ruff>=0.6",
     "anthropic>=1.0",
     "signalbot>=2.0",
@@ -38,12 +41,21 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/chickenbot"]
 # deploy.sh writes _revision.txt beside the code so the running bot can say
-# which commit it is, without a working tree to ask.
+# which commit it is, without a working tree to ask. It is gitignored, so
+# hatchling drops it unless told; both targets need telling, and a release
+# installed from the sdist called itself 0.4.0+dev without this.
+artifacts = ["src/chickenbot/_revision.txt"]
+
+[tool.hatch.build.targets.sdist]
 artifacts = ["src/chickenbot/_revision.txt"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+# Generous: the slowest test here is well under a second, so this only ever
+# fires on something genuinely stuck. `thread` dumps the stack of where.
+timeout = 120
+timeout_method = "thread"
 
 [tool.ruff]
 line-length = 120

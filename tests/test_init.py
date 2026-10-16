@@ -120,3 +120,31 @@ def test_the_env_it_writes_holds_secrets_not_paths(tmp_path):
     env = (run / "conf" / ".env").read_text()
     assert "OPENROUTER_API_KEY=" in env
     assert "CB_CONFIG_PATH" not in env and "CB_SOCKET_PATH" not in env
+
+
+def test_every_template_the_code_reads_is_committed():
+    """`.gitignore` had a bare `chickenbot.toml` for the instance config at
+    the root, and unanchored it swallowed the template too -- so `init` was
+    broken for anybody who cloned, and only CI ever found out."""
+    import subprocess
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent
+    templates = sorted(p.name for p in (root / "docs" / "templates").glob("*") if p.is_file())
+    try:
+        done = subprocess.run(
+            ["git", "ls-files", "docs/templates"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except (OSError, subprocess.CalledProcessError) as exc:
+        # No git, or a tree git will not read -- a container running as root
+        # over somebody else's checkout answers "dubious ownership" with
+        # exit 128. This guards a mistake made while editing, so it belongs
+        # where git works and nowhere else.
+        pytest.skip(f"git cannot read this checkout ({exc})")
+    tracked = done.stdout.split()
+    missing = [t for t in templates if f"docs/templates/{t}" not in tracked]
+    assert not missing, f"present here but not committed: {missing}"

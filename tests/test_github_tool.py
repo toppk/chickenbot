@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import os
 import time
 
@@ -255,6 +256,14 @@ async def test_it_reconnects_when_chickenbot_restarts(tmp_path, cfg, store, gh):
             await asyncio.sleep(0.01)
         return False
 
+    async def bounded(coro, what):
+        """This test hung a CI runner and the suite timeout could only say
+        which test, not where. Each wait says which wait."""
+        try:
+            return await asyncio.wait_for(coro, timeout=20)
+        except TimeoutError:
+            raise AssertionError(f"timed out {what}") from None
+
     # The tool starts first, before there is any socket to connect to.
     tool_task = asyncio.create_task(serve_forever(gh, str(sock)))
     await asyncio.sleep(0.05)
@@ -266,7 +275,7 @@ async def test_it_reconnects_when_chickenbot_restarts(tmp_path, cfg, store, gh):
 
     # chickenbot goes away.
     first_task.cancel()
-    await asyncio.gather(first_task, return_exceptions=True)
+    await bounded(asyncio.gather(first_task, return_exceptions=True), "stopping the first server")
     for name in [n for n in REGISTRY if n.startswith("ext_")]:
         REGISTRY.pop(name, None)
 
@@ -278,7 +287,10 @@ async def test_it_reconnects_when_chickenbot_restarts(tmp_path, cfg, store, gh):
     finally:
         for task in (tool_task, second_task):
             task.cancel()
-        await asyncio.gather(tool_task, second_task, return_exceptions=True)
+        await bounded(
+            asyncio.gather(tool_task, second_task, return_exceptions=True),
+            "waiting for the tool and the server to stop",
+        )
         for name in [n for n in REGISTRY if n.startswith("ext_")]:
             REGISTRY.pop(name, None)
 
@@ -1919,3 +1931,42 @@ def test_branch_tips_stay_headline_only():
     assert "messageBody" in GitHub.SURVEY
     history, refs = GitHub.SURVEY.split("refs(refPrefix", 1)
     assert "messageBody" in history and "messageBody" not in refs
+
+
+async def test_a_connected_tool_does_not_hold_shutdown_open(tmp_path, cfg, store):
+    """Cancelling the server must not wait on a client that is saying
+    nothing, which is what a tool waiting for work looks like.
+
+    This passes against the older `async with self._server` too, so it is
+    not the reproduction of the CI hang it was first written as -- it pins
+    the behaviour shutdown depends on, nothing more."""
+    import asyncio
+
+    from chickenbot.commands import Handler
+    from chickenbot.config import ToolsConfig
+    from chickenbot.toolsocket import ToolServer
+
+    from .conftest import FakeTransport
+
+    handler = Handler(cfg, store, None, None)
+    handler.transports = {"fake": FakeTransport()}
+    sock = tmp_path / "t.sock"
+    server = ToolServer(ToolsConfig(enabled=True, socket=str(sock)), handler.transports, handler.dispatch)
+    task = asyncio.create_task(server.run())
+    for _ in range(200):
+        if sock.exists():
+            break
+        await asyncio.sleep(0.01)
+
+    # A client that connects and then says nothing at all, which is what a
+    # tool waiting for work looks like.
+    reader, writer = await asyncio.open_unix_connection(str(sock))
+    await asyncio.sleep(0.05)
+
+    task.cancel()
+    # The point of the test: this returns rather than waiting on the client.
+    await asyncio.wait_for(asyncio.gather(task, return_exceptions=True), timeout=5)
+
+    writer.close()
+    with contextlib.suppress(Exception):
+        await writer.wait_closed()

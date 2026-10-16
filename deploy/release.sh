@@ -57,11 +57,17 @@ read -r answer
 
 # pyproject stays authoritative and deploy.sh refuses a tag that disagrees
 # with it, so the bump is part of the release rather than a thing to remember.
-sed -i "0,/^version = \"$major\.$minor\.\|^version = \"/s/^version = \".*\"/version = \"$version\"/" pyproject.toml
+sed -i "0,/^version = /s/^version = .*/version = \"$version\"/" pyproject.toml
 declared=$(sed -n 's/^version = "\(.*\)"/\1/p' pyproject.toml | head -1)
 [ "$declared" = "$version" ] || die "could not set the version in pyproject.toml (it reads $declared)"
 git add pyproject.toml release-notes
-git commit -q -m "chickenbot $version"
+# Already at this version -- a re-cut of a tag that was never published --
+# leaves nothing to commit, and an empty commit is not an error here.
+if git diff --cached --quiet; then
+    echo "pyproject already reads $version; nothing to commit"
+else
+    git commit -q -m "chickenbot $version"
+fi
 
 git push origin master
 git tag -a "$tag" -m "chickenbot $tag"

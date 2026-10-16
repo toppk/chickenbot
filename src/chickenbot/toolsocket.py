@@ -171,8 +171,20 @@ class ToolServer:
         self._server = await asyncio.start_unix_server(self._serve, path=str(path))
         os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)  # the socket is the authentication
         log.info("tool socket listening on %s", path)
-        async with self._server:
+        try:
             await self._server.serve_forever()
+        finally:
+            # Not `async with`: its __aexit__ awaits wait_closed(), which
+            # waits for every client connection to drain, and a tool process
+            # parked in readline has no reason to. Shutting down means
+            # dropping the clients rather than asking them to agree. This
+            # has not been shown to be the cause of the CI hang it was
+            # written for -- only that it is the right way round.
+            self._server.close()
+            for conn in tuple(self._live):
+                conn.writer.close()
+            with contextlib.suppress(Exception):
+                await self._server.wait_closed()
 
     async def _serve(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         conn = Connection(self, writer)
