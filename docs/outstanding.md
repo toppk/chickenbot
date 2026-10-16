@@ -148,10 +148,30 @@ next turn, so anything learned and not said is gone. A second look read its
 earlier line, concluded it had answered, and restated it.
 
 `annotate_reply(note)` -- a tool, not inline markup, which cannot leak into
-a room -- stored as `chatlog.note` and rendered back only in its own
-scrollback. **140 characters.** A forced sentence is a clue; a paragraph is
-a diary that re-reads itself every turn and nobody corrects. Per utterance,
-never cumulative, ages out with the chatlog.
+a room -- stored as `chatlog.note`. **140 characters.** A forced sentence is
+a clue; a paragraph is a diary that re-reads itself every turn and nobody
+corrects. Per utterance, never cumulative, ages out with the chatlog.
+
+**The rendering is the feature**, not the column. It belongs interleaved in
+the scrollback, tied to the line it was written beside, which every pass
+reads for free -- the bartender, the vibe check and the barfly all compose
+from the same history:
+
+```
+[2m ago] <toppk> hi chick, it's been busy
+[2m ago] <chickenbot> hopefully in a good way
+                      note: maybe he wants an activity review
+```
+
+Not a parenthetical, though that reads best. `SILENCE_NOTE` exists because
+it wrote "(no reply -- that was addressed to chrisk)" into a room: showing
+it its own parentheticals as ordinary history teaches back the thing we
+trained out. A form it cannot copy into a message.
+
+And the point of it is not recall alone. There is currently nowhere for an
+aside, so the suffix tells it flatly that everything it writes is sent
+verbatim with no thinking out loud. Give the colour a home and the public
+line can relax.
 
 Needs schema v2, and the gate wants refining first: `_check_version` refuses
 any database older than `SCHEMA_VERSION`, but adding a column with a default
