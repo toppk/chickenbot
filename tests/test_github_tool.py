@@ -1381,23 +1381,6 @@ class BranchApi:
         return [{"name": n, "protected": n == "main"} for n in self.names]
 
 
-async def test_a_branch_nobody_mentioned_can_be_found(tmp_path):
-    """chrisk: "there's an entire unify branch up w/ m3 support did you see that"."""
-    api = BranchApi(["main", "unify", "fix/sep-jjrpf"])
-    out = await _tool(tmp_path, api).call("github_branches", {"repo": "iconidentify/aurora-linux"})
-    assert "unify" in out and "3 branch(es)" in out
-    assert "main (protected)" in out
-
-
-async def test_a_fork_with_hundreds_is_cut(tmp_path):
-    from external.github.__main__ import BRANCHES_SHOWN
-
-    api = BranchApi([f"wip/{n}" for n in range(200)])
-    out = await _tool(tmp_path, api).call("github_branches", {"repo": "a/b"})
-    assert "200 branch(es)" in out and "and 170 more" in out
-    assert out.count(",") < BRANCHES_SHOWN + 5
-
-
 async def test_a_bad_repo_never_reaches_github_either(tmp_path):
     api = BranchApi(["main"])
     tool = _tool(tmp_path, api)
@@ -1407,7 +1390,14 @@ async def test_a_bad_repo_never_reaches_github_either(tmp_path):
 
 
 async def test_a_repo_with_nothing_visible_says_so(tmp_path):
-    assert "no branches visible" in await _tool(tmp_path, BranchApi()).call("github_branches", {"repo": "a/b"})
+    class Empty:
+        private = False
+
+        async def survey(self, repo, commits=5, branches=100):
+            return {}
+
+    said = await _tool(tmp_path, Empty()).call("github_commits", {"repo": "a/b"})
+    assert "no such repository" in said
 
 
 # -- a branch appearing is news ------------------------------------------
@@ -1540,7 +1530,7 @@ def _mock(api, handler):
     api.client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
 
 
-def test_branch_tips_come_back_newest_first():
+def test_a_survey_puts_the_busiest_branch_first():
     """A default branch is routinely the stalest ref: mesa-omacom's main had
     not moved in a month while eleven branches had moved that week."""
     import asyncio
@@ -1584,14 +1574,14 @@ def test_branch_tips_come_back_newest_first():
     async def go():
         api = GitHub("github_pat_x")
         _mock(api, lambda request: httpx.Response(200, json=body))
-        got = await api.branch_tips("iconidentify/mesa-omacom")
+        got = await api.survey("iconidentify/mesa-omacom")
         await api.aclose()
         return got
 
-    default, tips = asyncio.run(go())
-    assert default == "main"
-    assert [b["name"] for b in tips] == ["fix/recent", "main"]
-    assert tips[0]["sha"] == "d616d06"
+    found = asyncio.run(go())
+    assert found["default"] == "main"
+    assert [b["name"] for b in found["branches"]] == ["fix/recent", "main"]
+    assert found["branches"][0]["sha"] == "d616d06"
 
 
 def test_graphql_says_it_needs_a_token_rather_than_failing_oddly():
@@ -1605,7 +1595,7 @@ def test_graphql_says_it_needs_a_token_rather_than_failing_oddly():
     async def go():
         api = GitHub("")
         with pytest.raises(RuntimeError, match="GITHUB_TOKEN"):
-            await api.branch_tips("owner/repo")
+            await api.survey("owner/repo")
         await api.aclose()
 
     asyncio.run(go())
@@ -1850,3 +1840,36 @@ def test_every_stored_stamp_is_on_the_one_clock(tmp_path):
         stamp = store.db.execute(f"SELECT {column} FROM {table}").fetchone()[0]
         assert now - 10_000 < stamp <= now, f"{table}.{column} is not millis: {stamp}"
     store.close()
+
+
+async def test_a_single_branch_repo_does_not_read_as_a_single_commit(tmp_path):
+    """It told a room "one branch, one commit, and that is the whole of it"
+    about a repo with hundreds, because branch tips alone look like history."""
+
+    class OneBranch:
+        private = False
+
+        async def survey(self, repo, commits=5, branches=100):
+            now = int(time.time() * 1000)
+            return {
+                "default": "master",
+                "total": 1,
+                "branches": [{"name": "master", "sha": "97ccb4e", "ts_ms": now, "who": "toppk", "subject": "last"}],
+                "recent": [
+                    {"sha": "97ccb4e", "ts_ms": now, "who": "toppk", "subject": "last"},
+                    {"sha": "037a0e4", "ts_ms": now - 60_000, "who": "toppk", "subject": "before that"},
+                ],
+            }
+
+    said = await _tool(tmp_path, OneBranch()).call("github_commits", {"repo": "toppk/chickenbot"})
+    assert "recent on master:" in said
+    assert "97ccb4e" in said and "037a0e4" in said  # history, not just the tip
+    assert "branches (1)" in said
+
+
+def test_a_commit_nobody_linked_to_an_account_still_has_an_author():
+    from external.github.github import _commit
+
+    assert _commit({"author": {"user": {"login": "gfxstrand"}}})["who"] == "gfxstrand"
+    assert _commit({"author": {"name": "Faith Ekstrand", "user": None}})["who"] == "Faith Ekstrand"
+    assert _commit({})["who"] == "?"

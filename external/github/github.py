@@ -20,6 +20,19 @@ API = "https://api.github.com"
 PER_PAGE = 100
 
 
+def _commit(raw: dict) -> dict:
+    """One commit, as both halves of a survey report it."""
+    return {
+        "sha": str(raw.get("oid", ""))[:7],
+        "ts_ms": _ts_ms(raw.get("committedDate")),
+        # The GitHub login where a commit is linked to an account, the name
+        # on the commit where it is not; a blank author reads as nobody.
+        "who": (((raw.get("author") or {}).get("user") or {}).get("login")
+                or (raw.get("author") or {}).get("name") or "?"),
+        "subject": str(raw.get("messageHeadline", "")),
+    }
+
+
 def _ts_ms(value: str | None) -> int:
     """GitHub answers in ISO 8601; everything stored here is epoch millis."""
     if not value:
@@ -92,10 +105,16 @@ class GitHub:
             if b.get("name")
         ]
 
-    BRANCH_TIPS = (
-        "query($owner:String!,$name:String!,$n:Int!){repository(owner:$owner,name:$name){"
-        "isPrivate defaultBranchRef{name} refs(refPrefix:\"refs/heads/\",first:$n){totalCount nodes{name "
-        "target{... on Commit{committedDate oid messageHeadline author{user{login}}}}}}}}"
+    # One request for both halves of "what is happening here": the history
+    # of the branch being asked about, and when every other branch last
+    # moved. Two questions, one round trip; the model sees neither.
+    SURVEY = (
+        "query($owner:String!,$name:String!,$n:Int!,$refs:Int!){"
+        "repository(owner:$owner,name:$name){isPrivate "
+        "defaultBranchRef{name target{... on Commit{history(first:$n){nodes{"
+        "oid committedDate messageHeadline author{name user{login}}}}}}} "
+        "refs(refPrefix:\"refs/heads/\",first:$refs){totalCount nodes{name "
+        "target{... on Commit{committedDate oid messageHeadline author{name user{login}}}}}}}}"
     )
 
     async def graphql(self, query: str, **variables) -> dict:
@@ -109,41 +128,46 @@ class GitHub:
             raise RuntimeError(f"github rejected the query ({str(errors[0].get('message', ''))[:80]})")
         return body.get("data") or {}
 
-    async def branch_tips(self, repo: str, limit: int = 100) -> tuple[str, list[dict]]:
-        """Every branch and when it last moved, newest first, in one call.
+    async def survey(self, repo: str, commits: int = 5, branches: int = 100) -> dict:
+        """What is happening in a repository: the default branch's recent
+        history, and every branch with when it last moved.
 
-        The default branch is routinely the stalest thing in a repository --
-        the work is on branches and the merge comes later -- so a tool that
-        reads only `main` reports a month of silence on a repo that moved
-        yesterday. REST cannot answer this: `/branches` carries no dates, so
-        it would be a call per branch.
+        Both, because either alone misleads. A default branch is routinely
+        the stalest ref there is -- mesa-omacom's main had not moved in a
+        month while eleven branches had moved that week -- and a list of
+        branch tips on a single-branch repo reads as "this repo has one
+        commit", which is what it told a room.
         """
         owner, _, name = repo.partition("/")
-        # RefOrder cannot sort branches by commit date -- only tags -- so the
-        # ordering that matters is done here.
-        data = await self.graphql(self.BRANCH_TIPS, owner=owner, name=name, n=max(1, min(limit, 100)))
+        data = await self.graphql(
+            self.SURVEY,
+            owner=owner,
+            name=name,
+            n=max(1, min(commits, 50)),
+            refs=max(1, min(branches, 100)),
+        )
         repository = data.get("repository") or {}
         if not repository:
-            return "", []
+            return {}
         if repository.get("isPrivate") and not self.private:
             raise RuntimeError(f"{repo} is private and this instance does not read private repositories")
-        default = ((repository.get("defaultBranchRef") or {}).get("name")) or ""
-        out = []
+
+        head = repository.get("defaultBranchRef") or {}
+        history = ((head.get("target") or {}).get("history") or {}).get("nodes") or []
+        tips = []
         for node in (repository.get("refs") or {}).get("nodes") or []:
-            target = node.get("target") or {}
-            if not target.get("committedDate"):
+            if not (target := node.get("target") or {}).get("committedDate"):
                 continue  # an annotated tag or an empty branch is not a tip
-            out.append(
-                {
-                    "name": node.get("name", ""),
-                    "sha": str(target.get("oid", ""))[:7],
-                    "ts_ms": _ts_ms(target.get("committedDate")),
-                    "who": ((target.get("author") or {}).get("user") or {}).get("login") or "",
-                    "subject": str(target.get("messageHeadline", "")),
-                }
-            )
-        out.sort(key=lambda b: b["ts_ms"], reverse=True)
-        return default, out
+            tips.append(_commit(target) | {"name": node.get("name", "")})
+        # RefOrder cannot sort branches by commit date -- only tags -- so the
+        # ordering that matters is done here.
+        tips.sort(key=lambda b: b["ts_ms"], reverse=True)
+        return {
+            "default": head.get("name") or "",
+            "branches": tips,
+            "total": (repository.get("refs") or {}).get("totalCount") or len(tips),
+            "recent": [_commit(node) for node in history],
+        }
 
     async def commits(self, repo: str, branch: str = "", limit: int = 10) -> list[dict]:
         """What a repository has actually had pushed to it, live.

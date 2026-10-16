@@ -64,8 +64,8 @@ COMMENTS_SHOWN = 5  # enough to see where a thread got to
 COMMENTS_MAX = 20
 BODY_CHARS = 3000  # an issue body can be a design document
 COMMENT_CHARS = 1200
-BRANCHES_SHOWN = 30  # a busy fork has hundreds and the names stop meaning anything
-COMMITS_SHOWN = 10  # a room cannot read a changelog; this is "what just landed"
+BRANCHES_SHOWN = 12  # a busy fork has hundreds and the names stop meaning anything
+COMMITS_SHOWN = 5  # a room cannot read a changelog; this is "what just landed"
 README_CHARS = 12000  # a long README is the point; an unbounded one is a context leak
 
 
@@ -236,22 +236,6 @@ TOOLS = [
         },
     },
     {
-        "name": "github_branches",
-        "description": (
-            "What branches a repository has, live. Use it when somebody mentions work on a "
-            "branch you have not seen -- 'there's a unify branch up', 'did you see the "
-            "m3 work' -- or when asked what is being worked on beyond the default branch.\n\n"
-            "Names only. GitHub puts no date on a branch, so when each one last moved comes "
-            "from github_activity, which carries the branch on every push. A branch that "
-            "exists here but appears in no activity has not been pushed to recently."
-        ),
-        "params": {
-            "type": "object",
-            "properties": {"repo": {"type": "string", "description": "owner/repo"}},
-            "required": ["repo"],
-        },
-    },
-    {
         "name": "github_commits",
         "description": (
             "What has actually been pushed to a repository, live, newest first. Use it "
@@ -264,18 +248,19 @@ TOOLS = [
             "push can be real and absent from github_activity at the same time. When the "
             "two disagree, THIS ONE IS RIGHT and the activity is merely late -- say that "
             "rather than telling somebody their push did not happen.\n\n"
-            "With no branch it reports every branch's latest commit, newest first, which "
-            "is what 'what is happening on X' means: the default branch is often the "
-            "stalest ref there is, because work sits on branches and the merge comes "
-            "later. A repo whose main has not moved in a month can have had five pushes "
-            "this week. Name a branch only when the question really is about that one."
+            "With no branch it reports two things: the default branch's recent commits, "
+            "and every branch with when it last moved. Read both. A repo whose main has "
+            "not moved in a month can have had five pushes this week, because work sits "
+            "on branches and the merge comes later -- and a repo with one branch still "
+            "has a whole history behind that branch's latest commit. Name a branch only "
+            "when the question really is about that one."
         ),
         "params": {
             "type": "object",
             "properties": {
                 "repo": {"type": "string", "description": "owner/repo"},
-                "branch": {"type": "string", "description": "a branch or tag; the default branch otherwise"},
-                "limit": {"type": "integer", "description": "how many, 1-50 (default 10)"},
+                "branch": {"type": "string", "description": "one branch's history; omit for the whole repo"},
+                "commits": {"type": "integer", "description": "how many commits, 1-50 (default 5)"},
             },
             "required": ["repo"],
         },
@@ -366,6 +351,11 @@ def ago(seconds: int) -> str:
         if seconds >= size:
             return f"{seconds // size}{unit}"
     return f"{max(seconds, 0)}s"
+
+
+def _said(commit: dict) -> str:
+    """One commit on one line, the same way wherever it came from."""
+    return f"{commit['sha']} {ago_ms(commit['ts_ms'])} ago {commit['who']}: {commit['subject'][:80]}"
 
 
 def ago_ms(ts_ms: int) -> str:
@@ -636,34 +626,16 @@ class Tool:
             return f"no {repo}#{number} that I can see"
         return _render_issue(repo, found)
 
-    async def github_branches(self, args: dict) -> str:
-        repo = str(args.get("repo") or "").strip().strip("/")
-        if repo.count("/") != 1 or not all(_LOGIN.fullmatch(part) for part in repo.split("/")):
-            return "error: give a repository as owner/repo"
-        if self.api is None:
-            return "error: no github client configured"
-        try:
-            found = await self.api.branches(repo)
-        except RuntimeError as exc:
-            return str(exc)
-        except Exception as exc:  # noqa: BLE001 - reported, not raised at the room
-            return f"could not list {repo}'s branches ({type(exc).__name__})"
-        if not found:
-            return f"no branches visible on {repo}"
-        names = [f"{b['name']}{' (protected)' if b['protected'] else ''}" for b in found[:BRANCHES_SHOWN]]
-        more = f", and {len(found) - len(names)} more" if len(found) > len(names) else ""
-        return f"{repo} has {len(found)} branch(es): {', '.join(names)}{more}"
-
     async def github_commits(self, args: dict) -> str:
         """The repository's own answer, which the mirror cannot give: the
         events feed is published late and sometimes hours late, and a room
         reads a late feed as nothing having happened.
 
-        Without a branch this reports every branch's tip rather than the
-        default branch's history. A default branch is routinely the stalest
-        ref in a repository -- the work is on branches and the merge comes
-        later -- so "what is happening here" and "what is on main" are
-        different questions and only one of them is usually meant.
+        Without a branch this reports the default branch's recent history
+        *and* every branch with when it last moved. Both, because either
+        alone has misled a room: a default branch is routinely the stalest
+        ref in a repository, and a list of branch tips on a single-branch
+        repo reads as that repo having one commit.
         """
         repo = str(args.get("repo") or "").strip().strip("/")
         if repo.count("/") != 1 or not all(_LOGIN.fullmatch(part) for part in repo.split("/")):
@@ -672,37 +644,43 @@ class Tool:
             return "error: no github client configured"
         branch = str(args.get("branch") or "").strip()
         try:
-            limit = int(args.get("limit") or COMMITS_SHOWN)
+            commits = int(args.get("commits") or COMMITS_SHOWN)
         except (TypeError, ValueError):
-            limit = COMMITS_SHOWN
-        limit = max(1, min(limit, 50))
+            commits = COMMITS_SHOWN
+        commits = max(1, min(commits, 50))
         if not branch:
-            answer = await self._branch_tips(repo, limit)
-            if answer is not None:
+            if (answer := await self._survey(repo, commits)) is not None:
                 return answer
-            branch = ""  # no token: fall through to the default branch, and say so
-        return await self._branch_commits(repo, branch, limit)
+            # No token: GraphQL has no anonymous tier, so fall back to the
+            # default branch over REST and say that is all this is.
+        return await self._branch_commits(repo, branch, commits)
 
-    async def _branch_tips(self, repo: str, limit: int) -> str | None:
+    async def _survey(self, repo: str, commits: int) -> str | None:
         """None means GraphQL was not available, not that nothing was found."""
         try:
-            default, tips = await self.api.branch_tips(repo)
+            found = await self.api.survey(repo, commits=commits)
         except RuntimeError as exc:
             if "GITHUB_TOKEN" in str(exc):
                 return None
             return str(exc)
         except Exception as exc:  # noqa: BLE001 - reported, not raised at the room
-            return f"could not read {repo}'s branches ({type(exc).__name__})"
-        if not tips:
-            return f"no branches visible on {repo}"
-        shown = tips[:limit]
-        lines = [
-            f"{b['name']}{' (default)' if b['name'] == default else ''} {b['sha']} "
-            f"{ago_ms(b['ts_ms'])} ago {b['who']}: {b['subject'][:80]}"
-            for b in shown
-        ]
-        more = f", and {len(tips) - len(shown)} older" if len(tips) > len(shown) else ""
-        return f"{repo}, each branch's latest, newest first: " + " | ".join(lines) + more
+            return f"could not read {repo} ({type(exc).__name__})"
+        if not found:
+            return f"no such repository as {repo}, or nothing visible in it"
+
+        default, tips = found["default"], found["branches"]
+        parts = []
+        if recent := found["recent"]:
+            parts.append(f"recent on {default}: " + " | ".join(_said(c) for c in recent))
+        # Said even when there is one, because "each branch's latest" on a
+        # single-branch repo otherwise reads as the whole history of it.
+        shown = tips[:BRANCHES_SHOWN]
+        more = f", and {found['total'] - len(shown)} older" if found["total"] > len(shown) else ""
+        listed = " | ".join(
+            f"{b['name']}{' (default)' if b['name'] == default else ''} {ago_ms(b['ts_ms'])} ago" for b in shown
+        )
+        parts.append(f"branches ({found['total']}): {listed}{more}")
+        return f"{repo} -- " + "; ".join(parts)
 
     async def _branch_commits(self, repo: str, branch: str, limit: int) -> str:
         try:
@@ -714,8 +692,7 @@ class Tool:
         where = f"{repo}@{branch}" if branch else f"{repo} (default branch only; no GITHUB_TOKEN for the others)"
         if not found:
             return f"no commits visible on {where}"
-        lines = [f"{c['sha']} {ago_ms(c['ts_ms'])} ago {c['who']}: {c['subject'][:80]}" for c in found]
-        return f"{where}, newest first: " + " | ".join(lines)
+        return f"{where}, newest first: " + " | ".join(_said(c) for c in found)
 
     async def github_readme(self, args: dict) -> str:
         """A project in its own words, trimmed to something a room can hold.
@@ -839,8 +816,6 @@ class Tool:
             return await self.github_lookup(args)
         if name == "github_readme":
             return await self.github_readme(args)
-        if name == "github_branches":
-            return await self.github_branches(args)
         if name == "github_commits":
             return await self.github_commits(args)
         if name == "github_issue":
