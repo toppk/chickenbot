@@ -353,9 +353,20 @@ def ago(seconds: int) -> str:
     return f"{max(seconds, 0)}s"
 
 
-def _said(commit: dict) -> str:
-    """One commit on one line, the same way wherever it came from."""
-    return f"{commit['sha']} {ago_ms(commit['ts_ms'])} ago {commit['who']}: {commit['subject'][:80]}"
+WHY_SHOWN = 160  # one sentence of reasoning; the rest belongs in the repo
+
+
+def _said(commit: dict, *, why: bool = False) -> str:
+    """One commit on one line, the same way wherever it came from.
+
+    `why` adds the first paragraph of the body, which is where this project
+    puts the reason. Only for the history: on a list of branch tips it would
+    be a wall of text about branches nobody asked after.
+    """
+    line = f"{commit['sha']} {ago_ms(commit['ts_ms'])} ago {commit['who']}: {commit['subject'][:80]}"
+    if why and (because := commit.get("why")):
+        line += f" -- {because[:WHY_SHOWN]}"
+    return line
 
 
 def ago_ms(ts_ms: int) -> str:
@@ -670,7 +681,7 @@ class Tool:
         default, tips = found["default"], found["branches"]
         parts = []
         if recent := found["recent"]:
-            parts.append(f"recent on {default}: " + " | ".join(_said(c) for c in recent))
+            parts.append(f"recent on {default}: " + " | ".join(_said(c, why=True) for c in recent))
         # Said even when there is one, because "each branch's latest" on a
         # single-branch repo otherwise reads as the whole history of it.
         shown = tips[:BRANCHES_SHOWN]
@@ -691,7 +702,7 @@ class Tool:
         where = f"{repo}@{branch}" if branch else f"{repo} (default branch only; no GITHUB_TOKEN for the others)"
         if not found:
             return f"no commits visible on {where}"
-        return f"{where}, newest first: " + " | ".join(_said(c) for c in found)
+        return f"{where}, newest first: " + " | ".join(_said(c, why=True) for c in found)
 
     async def github_readme(self, args: dict) -> str:
         """A project in its own words, trimmed to something a room can hold.

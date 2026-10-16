@@ -1881,3 +1881,41 @@ def test_a_commit_nobody_linked_to_an_account_still_has_an_author():
     assert _commit({"author": {"user": {"login": "gfxstrand"}}})["who"] == "gfxstrand"
     assert _commit({"author": {"name": "Faith Ekstrand", "user": None}})["who"] == "Faith Ekstrand"
     assert _commit({})["who"] == "?"
+
+
+def test_a_commit_says_why_as_well_as_what():
+    """The subject says what changed and the body says why, which is the
+    convention this project is written to. Asking only for the headline
+    threw the why away: the bot read one of its own commits, could not tell
+    whether a tool had been removed on purpose, and asked -- when the answer
+    was in the body it was never sent."""
+    from external.github.github import _why
+
+    body = (
+        "`github_branches` is gone and `github_commits` answers a different shape;\n"
+        "a patch bump would understate that for anyone pinning it.\n"
+        "\n"
+        "Co-Authored-By: Somebody <nobody@example.com>\n"
+    )
+    said = _why(body)
+    assert said.startswith("`github_branches` is gone")
+    assert "pinning it." in said
+    assert "Co-Authored-By" not in said  # addressed to git, not to a reader
+    assert "\n" not in said  # one line, for a room
+
+
+def test_a_commit_with_nothing_but_trailers_gives_no_reason():
+    from external.github.github import _why
+
+    assert _why("") == ""
+    assert _why("Signed-off-by: Someone <x@y.z>") == ""
+
+
+def test_branch_tips_stay_headline_only():
+    """Fourteen branches with bodies is a wall of text about branches
+    nobody asked after."""
+    from external.github.github import GitHub
+
+    assert "messageBody" in GitHub.SURVEY
+    history, refs = GitHub.SURVEY.split("refs(refPrefix", 1)
+    assert "messageBody" in history and "messageBody" not in refs

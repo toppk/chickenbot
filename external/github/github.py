@@ -7,6 +7,7 @@ hour, which is enough to try it and not enough to run it.
 from __future__ import annotations
 
 import logging
+import re
 import time
 from datetime import datetime
 
@@ -20,6 +21,21 @@ API = "https://api.github.com"
 PER_PAGE = 100
 
 
+def _why(body: str) -> str:
+    """The reason a commit gives for itself: the first paragraph of the
+    body, without the trailers.
+
+    The subject says what changed and the body says why, which is the
+    convention this project is written to -- and asking only for the
+    headline threw the why away. The bot noticed: it read one of its own
+    commits, could not tell whether something had been removed on purpose,
+    and asked, when the answer was in the body it was never sent.
+    """
+    paragraph = body.strip().split("\n\n", 1)[0]
+    kept = [line for line in paragraph.splitlines() if not _TRAILER.match(line)]
+    return " ".join(" ".join(kept).split())
+
+
 def _commit(raw: dict) -> dict:
     """One commit, as both halves of a survey report it."""
     return {
@@ -31,7 +47,13 @@ def _commit(raw: dict) -> dict:
             ((raw.get("author") or {}).get("user") or {}).get("login") or (raw.get("author") or {}).get("name") or "?"
         ),
         "subject": str(raw.get("messageHeadline", "")),
+        "why": _why(str(raw.get("messageBody", "") or "")),
     }
+
+
+# `Co-Authored-By:`, `Signed-off-by:` and the rest: addressed to git, not
+# to a reader asking what happened.
+_TRAILER = re.compile(r"^[A-Za-z][A-Za-z-]*:\s")
 
 
 def _ts_ms(value: str | None) -> int:
@@ -113,7 +135,7 @@ class GitHub:
         "query($owner:String!,$name:String!,$n:Int!,$refs:Int!){"
         "repository(owner:$owner,name:$name){isPrivate "
         "defaultBranchRef{name target{... on Commit{history(first:$n){nodes{"
-        "oid committedDate messageHeadline author{name user{login}}}}}}} "
+        "oid committedDate messageHeadline messageBody author{name user{login}}}}}}} "
         'refs(refPrefix:"refs/heads/",first:$refs){totalCount nodes{name '
         "target{... on Commit{committedDate oid messageHeadline author{name user{login}}}}}}}}"
     )
