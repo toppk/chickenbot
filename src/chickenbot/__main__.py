@@ -948,6 +948,10 @@ def _one_call(row, paint: Paint, details: bool = False) -> int:
     # see should not be somewhere up the scrollback behind it.
     _timeline(row, paint)
     _sequence(row, paint)
+    # Named again at the foot: the tail is the part people paste, and the
+    # header with the id is thousands of characters up the scrollback.
+    print()
+    print(paint(f"  transcript {row['id']}   ({row['room']}, {when})", "dim"))
     return 0
 
 

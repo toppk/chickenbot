@@ -537,6 +537,8 @@ def test_the_timeline_shows_waits_tools_and_calls_in_order(tmp_path):
     assert any("ext_github_activity  from the local mirror" in line for line in order)
     # The total moved into the one-line summary under what it said.
     assert "(8.5s in all)" in out
+    # The tail is the part people paste, and the header is far up by now.
+    assert out.rstrip().splitlines()[-1].strip().startswith("transcript 1   (#lobby,")
 
 
 def test_a_tool_says_whether_it_answered_from_its_mirror():
