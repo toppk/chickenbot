@@ -1609,3 +1609,33 @@ def test_graphql_says_it_needs_a_token_rather_than_failing_oddly():
         await api.aclose()
 
     asyncio.run(go())
+
+
+def test_the_watched_handles_reach_the_schema():
+    """TOOLS is a module literal and USERS is filled from the command line
+    afterwards, so the model was being told "one of ; omit for everyone"."""
+    import external.github.__main__ as M
+
+    before = [t for t in M.TOOLS if t["name"] == "github_activity"][0]
+    assert "one of ;" not in before["params"]["properties"]["user"]["description"]
+
+    kept = list(M.USERS)
+    try:
+        M.USERS[:] = ["toppk", "iconidentify"]
+        said = [t for t in M._declared() if t["name"] == "github_activity"][0]
+        assert said["params"]["properties"]["user"]["description"] == (
+            "one of toppk, iconidentify; omit for everyone"
+        )
+        # The literal is shared: declaring must not write the watch list into it.
+        assert M.TOOLS[0] is not said
+        assert "toppk" not in before["params"]["properties"]["user"]["description"]
+    finally:
+        M.USERS[:] = kept
+
+
+def test_activity_says_its_feed_can_be_behind():
+    """It told the room a push had not happened when the feed was late."""
+    from external.github.__main__ import TOOLS
+
+    said = [t for t in TOOLS if t["name"] == "github_activity"][0]["description"]
+    assert "behind" in said and "github_commits" in said

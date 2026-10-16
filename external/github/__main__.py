@@ -170,12 +170,18 @@ TOOLS = [
         "description": (
             "Recent GitHub activity for the watched users: commits, issues, pull requests, "
             "stars and releases. Answers from a local mirror, so it is cheap. "
-            "Use it for questions about what someone has been working on."
+            "Use it for questions about what someone has been working on.\n\n"
+            "It mirrors GitHub's events feed, which GitHub publishes asynchronously and "
+            "which is routinely HOURS behind. So 'no activity' here means nothing has been "
+            "published, which is not the same as nothing having happened, and refreshing "
+            "cannot fix it. Never tell somebody their push did not happen on the strength "
+            "of this tool: if a repository is named, github_commits reads that repository "
+            "directly and settles it."
         ),
         "params": {
             "type": "object",
             "properties": {
-                "user": {"type": "string", "description": f"one of {', '.join(USERS)}; omit for everyone"},
+                "user": {"type": "string", "description": "one of the watched users; omit for everyone"},
                 "range": {"type": "string", "enum": list(RANGES), "description": "how far back, default day"},
                 "summarize": {
                     "type": "boolean",
@@ -881,6 +887,23 @@ async def serve_forever(tool: Tool, socket_path: str) -> None:
         delay = min(delay * 2, 30.0)
 
 
+def _declared() -> list[dict]:
+    """TOOLS is a module literal and USERS arrives on the command line after
+    it, so the watched handles read as "one of " until they are filled in."""
+    if not USERS:
+        return TOOLS
+    out = []
+    for tool in TOOLS:
+        user = ((tool.get("params") or {}).get("properties") or {}).get("user")
+        if tool["name"] == "github_activity" and user:
+            tool = {**tool, "params": {**tool["params"], "properties": {
+                **tool["params"]["properties"],
+                "user": {**user, "description": f"one of {', '.join(USERS)}; omit for everyone"},
+            }}}
+        out.append(tool)
+    return out
+
+
 async def serve(tool: Tool, socket_path: str) -> None:
     reader, writer = await asyncio.open_unix_connection(socket_path)
 
@@ -888,7 +911,7 @@ async def serve(tool: Tool, socket_path: str) -> None:
         writer.write(json.dumps(message).encode() + b"\n")
         await writer.drain()
 
-    await send({"type": "hello", "v": PROTOCOL, "process": "github", "subjects": SUBJECTS, "tools": TOOLS})
+    await send({"type": "hello", "v": PROTOCOL, "process": "github", "subjects": SUBJECTS, "tools": _declared()})
     log.info("declared %d tool(s) on %s", len(TOOLS), socket_path)
     try:
         await _pump(tool, reader, send)
