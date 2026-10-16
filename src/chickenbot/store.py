@@ -17,8 +17,15 @@ MAX_REVISIONS = 50
 
 from .clock import ms, now_ms
 
-# Bumped when stored *values* change meaning, not when a column is added:
-# additions are detected in `_migrate`, a change of units cannot be.
+# This database's own version, independent of any other. Bumped for anything
+# that changes the schema OR the interpretation of what is already in it: a
+# renamed column, a changed unit, a reused field meaning something new. An
+# addition that older code can ignore is still a revision, because a fork
+# reading the migration scripts in order is how it learns what happened.
+#
+# `deploy/schema/chickenbot-v<N>.sql` is the shape at each version and
+# `deploy/migrate_db_schema_v<N-1>_v<N>.py` is how to get there. See
+# docs/schema.md.
 SCHEMA_VERSION = 1
 
 
@@ -270,6 +277,15 @@ CREATE TABLE IF NOT EXISTS job (
 );
 CREATE INDEX IF NOT EXISTS job_due ON job (due_at_ms);
 
+-- Which revisions this file has been through, and when. `PRAGMA user_version`
+-- is the gate; this is the account, because a fork arriving several versions
+-- later needs to know where it actually is, not only where it is not.
+CREATE TABLE IF NOT EXISTS schema_history (
+    version    INTEGER PRIMARY KEY,
+    applied_ms INTEGER NOT NULL,
+    by         TEXT NOT NULL DEFAULT ''   -- the release that applied it
+);
+
 CREATE TABLE IF NOT EXISTS cursor (
     watch_id INTEGER NOT NULL REFERENCES watch(id) ON DELETE CASCADE,
     feed     TEXT NOT NULL,
@@ -360,9 +376,27 @@ class Store:
         self._check_version()
         self._migrate()
         self._db.executescript(SCHEMA)
-        self._db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+        self._note_version()
         self._db.commit()
         self._lock = asyncio.Lock()
+
+    def _note_version(self) -> None:
+        """Stamp the gate and keep the receipt."""
+        from . import version
+
+        self._db.execute(
+            "INSERT INTO schema_history (version, applied_ms, by) VALUES (?, ?, ?)"
+            " ON CONFLICT(version) DO NOTHING",
+            (SCHEMA_VERSION, now_ms(), version()),
+        )
+        self._db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+
+    def schema_history(self) -> list[tuple[int, int, str]]:
+        """(version, when, by) oldest first."""
+        rows = self._db.execute(
+            "SELECT version, applied_ms, by FROM schema_history ORDER BY version"
+        ).fetchall()
+        return [(r["version"], r["applied_ms"], r["by"]) for r in rows]
 
     def _check_version(self) -> None:
         """Refuse a database from before the clock changed.

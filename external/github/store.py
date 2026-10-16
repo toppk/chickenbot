@@ -11,6 +11,20 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+# This mirror's own version, numbered independently of chickenbot.db: they
+# are different files with different shapes and no reason to move together.
+# Bumped for anything that changes the schema or the meaning of what is in
+# it. See docs/schema.md.
+def _release() -> str:
+    """The tool's own version, for the receipt in schema_history."""
+    from importlib.metadata import PackageNotFoundError, version
+
+    try:
+        return version("chickenbot-github-tool")
+    except PackageNotFoundError:
+        return "unknown"
+
+
 SCHEMA_VERSION = 1
 
 
@@ -19,6 +33,12 @@ class SchemaTooOld(RuntimeError):
 
 
 SCHEMA = """
+CREATE TABLE IF NOT EXISTS schema_history (
+    version    INTEGER PRIMARY KEY,
+    applied_ms INTEGER NOT NULL,
+    by         TEXT NOT NULL DEFAULT ''
+);
+
 CREATE TABLE IF NOT EXISTS repo (
     full_name  TEXT PRIMARY KEY,
     owner      TEXT NOT NULL,
@@ -98,8 +118,16 @@ class Store:
         self.db.execute("PRAGMA journal_mode=WAL")
         self._check_version()
         self.db.executescript(SCHEMA)
-        self.db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+        self._note_version()
         self.db.commit()
+
+    def _note_version(self) -> None:
+        self.db.execute(
+            "INSERT INTO schema_history (version, applied_ms, by) VALUES (?, ?, ?)"
+            " ON CONFLICT(version) DO NOTHING",
+            (SCHEMA_VERSION, int(time.time() * 1000), _release()),
+        )
+        self.db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     def _check_version(self) -> None:
         """A change of units cannot be detected in place, so an older mirror

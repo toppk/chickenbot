@@ -49,10 +49,14 @@ from __future__ import annotations
 import json
 import shutil
 import sqlite3
+import time
 import sys
 from pathlib import Path
 
-SCHEMA_VERSION = 1
+# Named per database: they are versioned independently, and this script
+# happens to take both from 0 to 1.
+MAIN_VERSION = 1
+GITHUB_VERSION = 1
 
 # Hand-written, and deliberately not derived from the column names: one
 # heuristic matched `presence.dow`, another missed `membership.first_seen`.
@@ -80,6 +84,11 @@ GITHUB: dict[str, list[str]] = {
     "poll": ["last_at"],
     "repo": ["pushed_at", "seen_at"],
 }
+
+# Created at v1 and therefore already milliseconds: these must NOT be
+# multiplied. Listed rather than inferred, so the inventory test can tell
+# "new at this version" from "forgotten".
+BORN_AT_V1 = {"schema_history.applied_ms"}
 
 HOLD = "waiting for the burst to finish"
 
@@ -178,13 +187,13 @@ def convert_settings(db: sqlite3.Connection, write: bool) -> int:
     return len(rows)
 
 
-def do(path: Path, plan: dict[str, list[str]], write: bool, *, transcript: bool) -> bool:
+def do(path: Path, plan: dict[str, list[str]], write: bool, *, transcript: bool, target: int) -> bool:
     if not path.exists():
         print(f"{path}: not there, skipping")
         return True
     db = sqlite3.connect(path)
     version = int(db.execute("PRAGMA user_version").fetchone()[0])
-    if version >= SCHEMA_VERSION:
+    if version >= target:
         print(f"{path}: already v{version}")
         db.close()
         return True
@@ -212,7 +221,18 @@ def do(path: Path, plan: dict[str, list[str]], write: bool, *, transcript: bool)
                 if settings:
                     print(f"  setting: {settings} bartender stamp(s) -> bartender_ms")
             if write:
-                db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+                # v0 predates the table; the running code would create it
+                # at startup, but the receipt is written here, not there.
+                db.execute(
+                    "CREATE TABLE IF NOT EXISTS schema_history (version INTEGER PRIMARY KEY,"
+                    " applied_ms INTEGER NOT NULL, by TEXT NOT NULL DEFAULT '')"
+                )
+                db.execute(
+                    "INSERT INTO schema_history (version, applied_ms, by) VALUES (?, ?, ?)"
+                    " ON CONFLICT(version) DO NOTHING",
+                    (target, int(time.time() * 1000), "migrate_db_schema_v0_v1"),
+                )
+                db.execute(f"PRAGMA user_version = {target}")
     except Exception as exc:  # noqa: BLE001 - the operator gets the reason, not a traceback
         print(f"  FAILED, nothing written: {type(exc).__name__}: {exc}")
         db.close()
@@ -231,8 +251,8 @@ def main(argv: list[str]) -> int:
         print(f"{where} is not an instance directory", file=sys.stderr)
         return 2
 
-    ok = do(where / "data" / "chickenbot.db", MAIN, write, transcript=True)
-    ok = do(where / "cache" / "github-tool.db", GITHUB, write, transcript=False) and ok
+    ok = do(where / "data" / "chickenbot.db", MAIN, write, transcript=True, target=MAIN_VERSION)
+    ok = do(where / "cache" / "github-tool.db", GITHUB, write, transcript=False, target=GITHUB_VERSION) and ok
 
     print()
     if not ok:

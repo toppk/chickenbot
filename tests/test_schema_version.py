@@ -37,19 +37,43 @@ def test_the_migration_knows_every_timestamp_the_schema_has():
     from external.github.store import SCHEMA as GH_SCHEMA
 
     script = _script()
+    born = script.BORN_AT_V1
     listed = {f"{t}.{c}_ms" for t, cols in script.MAIN.items() for c in cols}
-    assert _declared(SCHEMA) == listed
+    assert _declared(SCHEMA) - born == listed
 
     listed_gh = {f"{t}.{c}_ms" for t, cols in script.GITHUB.items() for c in cols}
-    assert _declared(GH_SCHEMA) == listed_gh
+    assert _declared(GH_SCHEMA) - born == listed_gh
+
+    # Nothing may be in both: a column cannot be new at v1 and converted to it.
+    assert not (listed | listed_gh) & born
 
 
-def test_both_stores_declare_the_same_version():
+def test_each_database_carries_its_own_version():
+    """They are different files with different shapes; nothing says a change
+    to one is a change to the other. The script names both explicitly."""
     from chickenbot.store import SCHEMA_VERSION
 
     from external.github.store import SCHEMA_VERSION as GH_VERSION
 
-    assert SCHEMA_VERSION == GH_VERSION == _script().SCHEMA_VERSION
+    script = _script()
+    assert script.MAIN_VERSION == SCHEMA_VERSION
+    assert script.GITHUB_VERSION == GH_VERSION
+
+
+def test_reaching_a_version_is_written_down(tmp_path):
+    """`PRAGMA user_version` says where a database is; the history says how
+    it got there, which is what a fork several versions behind needs."""
+    from chickenbot.store import SCHEMA_VERSION, Store
+
+    st = Store(tmp_path / "new.db")
+    try:
+        history = st.schema_history()
+        assert [v for v, _when, _by in history] == [SCHEMA_VERSION]
+        _version, when, by = history[0]
+        assert when > 1_700_000_000_000  # millis, not seconds
+        assert by  # the release that did it
+    finally:
+        st.close()
 
 
 def test_a_fresh_database_is_stamped_with_the_version(tmp_path):
@@ -87,3 +111,28 @@ def test_the_migration_is_safe_to_run_twice(tmp_path):
     script = _script()
     assert script.main([str(where), "--write"]) == 0
     assert script.main([str(where), "--write"]) == 0  # already v1, nothing to do
+
+
+def test_the_committed_snapshot_matches_what_the_code_creates():
+    """The snapshot is how a fork sees what a version was, so it has to be
+    what that version actually is."""
+    import sqlite3
+    import tempfile
+    from pathlib import Path
+
+    from chickenbot.store import SCHEMA_VERSION, Store
+
+    here = Path(__file__).resolve().parent.parent / "deploy" / "schema"
+    snapshot = here / f"chickenbot-v{SCHEMA_VERSION}.sql"
+    assert snapshot.is_file(), f"{snapshot.name} is missing; run deploy/schema/dump.py"
+
+    with tempfile.TemporaryDirectory() as tmp:
+        st = Store(Path(tmp) / "a.db")
+        live = {sql.strip() for (sql,) in st._db.execute(
+            "SELECT sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%'"
+        )}
+        st.close()
+
+    text = snapshot.read_text()
+    missing = [sql.splitlines()[0] for sql in live if sql.split("(")[0].strip() not in text]
+    assert not missing, f"not in the snapshot: {missing}"
