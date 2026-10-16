@@ -106,6 +106,41 @@ lines an hour and the window is clamped to `follow_max_seconds` (600). A
 twelve-minute beat is normal there, and a reply at 18:50 to an exchange at
 18:38 found nobody listening. Possibly right -- the person is often away too.
 
+## A dead IRC pump leaves a connected bot that cannot speak
+
+`IRCTransport._connect` runs two helpers beside the read loop:
+`_drain_outbox`, which is the only thing that writes to the socket, and
+`_work_inbox`, which is the only thing that processes what arrives. As of
+v0.3.5 both report what they raise, so a death is no longer silent in the
+log -- but the read loop does not end when one of them dies.
+
+The result is a bot that is connected, present in the roster, and answers
+nothing (outbox dead) or ignores everything (inbox dead). `supervise` only
+reconnects when the connection itself ends, so it never fires. The failure
+looks exactly like a quiet room.
+
+The fix is for either helper dying to tear the connection down, so the
+existing reconnect handles it: await the three together and let the first
+one to finish end the attempt, rather than awaiting only `_read_loop` and
+cancelling the others in `finally`. Roughly:
+
+```python
+done, pending = await asyncio.wait(
+    [drain, work, asyncio.create_task(self._read_loop())],
+    return_when=asyncio.FIRST_COMPLETED,
+)
+```
+
+Not done yet because it changes how every disconnection is handled, on the
+one path that must not break, and it wants testing against a real server
+rather than a mock -- the interesting cases are a half-open socket and a
+server that stops reading while still sending.
+
+Same shape elsewhere, worth checking at the same time: the github tool's
+`poll_forever` and `serve_forever` are awaited with `FIRST_COMPLETED`
+against a stop event, which is right; nothing else in that process creates
+a task that outlives its caller.
+
 ## Roadmap
 
 **Search as a core competence**, not a plugin: the thing a bot in a channel
