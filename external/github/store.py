@@ -15,6 +15,18 @@ from pathlib import Path
 # are different files with different shapes and no reason to move together.
 # Bumped for anything that changes the schema or the meaning of what is in
 # it. See docs/schema.md.
+def now_ms() -> int:
+    """Everything stored by this tool is epoch millis, and every column that
+    holds one is named `*_ms`, so a stale read fails loudly. Defined here
+    because this is the module nothing else in the package imports from."""
+    return int(time.time() * 1000)
+
+
+def ms(seconds: float) -> int:
+    """A window said in seconds, as the stored clock counts it."""
+    return int(seconds * 1000)
+
+
 def _release() -> str:
     """The tool's own version, for the receipt in schema_history."""
     from importlib.metadata import PackageNotFoundError, version
@@ -125,7 +137,7 @@ class Store:
         self.db.execute(
             "INSERT INTO schema_history (version, applied_ms, by) VALUES (?, ?, ?)"
             " ON CONFLICT(version) DO NOTHING",
-            (SCHEMA_VERSION, int(time.time() * 1000), _release()),
+            (SCHEMA_VERSION, now_ms(), _release()),
         )
         self.db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
@@ -174,7 +186,7 @@ class Store:
                 row["open_issues"],
                 row["pushed_at_ms"],
                 row["description"],
-                int(time.time()),
+                now_ms(),
             ),
         )
         self.db.commit()
@@ -275,7 +287,7 @@ class Store:
                 row["comments"],
                 row["created_at_ms"],
                 row["updated_at_ms"],
-                int(time.time()),
+                now_ms(),
             ),
         )
         self.db.commit()

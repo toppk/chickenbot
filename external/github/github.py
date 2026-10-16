@@ -12,23 +12,12 @@ from datetime import datetime
 
 import httpx
 
-from .store import Item
+from .store import Item, ms, now_ms
 
 log = logging.getLogger(__name__)
 
 API = "https://api.github.com"
 PER_PAGE = 100
-
-
-def now_ms() -> int:
-    """Everything stored by this tool is epoch millis, and every column that
-    holds one is named `*_ms`, so a stale read fails loudly."""
-    return int(time.time() * 1000)
-
-
-def ms(seconds: float) -> int:
-    """A window said in seconds, as the stored clock counts it."""
-    return int(seconds * 1000)
 
 
 def _ts_ms(value: str | None) -> int:

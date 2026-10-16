@@ -473,7 +473,7 @@ def test_closed_items_are_forgotten_after_a_clean_pass(hunted):
     import time as clock
 
     assert len(hunted.store.pending(["toppk"], limit=10)) == 2
-    later = int(clock.time()) + 5
+    later = int(clock.time() * 1000) + 5000
     assert hunted.store.forget_closed(later) == 4  # nothing was seen again
     assert hunted.store.pending(["toppk"], limit=10) == []
 
@@ -1819,3 +1819,34 @@ def test_githubs_own_field_names_are_not_ours_to_rename():
     src = Path(__file__).resolve().parent.parent / "external" / "github" / "github.py"
     bad = re.findall(r'\.get\(\s*"(\w*_ms)"', src.read_text())
     assert not bad, f"these read the remote payload with our names: {sorted(set(bad))}"
+
+
+def test_a_pass_does_not_forget_what_it_just_saved(tmp_path):
+    """`forget_closed` drops rows a pass did not see again, comparing their
+    stamp against when the pass began. The two were on different clocks --
+    rows stamped in seconds, the pass in millis -- so a fresh mirror threw
+    away all 231 items it had just fetched."""
+    from external.github.store import Store, now_ms
+
+    store = Store(tmp_path / "g.db")
+    started = now_ms()
+    store.save_item(_item_row(1))
+    assert store.forget_closed(started) == 0, "it forgot what it had just stored"
+    assert len(store.pending(["someone"], limit=10)) == 1
+    store.close()
+
+
+def test_every_stored_stamp_is_on_the_one_clock(tmp_path):
+    from external.github.store import Store, now_ms
+
+    store = Store(tmp_path / "g.db")
+    store.save_item(_item_row(2))
+    store.save_repo({
+        "full_name": "a/b", "owner": "a", "name": "b", "private": 0, "fork": 0,
+        "archived": 0, "stars": 1, "open_issues": 0, "pushed_at_ms": now_ms(), "description": "",
+    })
+    now = now_ms()
+    for table, column in (("item", "seen_at_ms"), ("repo", "seen_at_ms")):
+        stamp = store.db.execute(f"SELECT {column} FROM {table}").fetchone()[0]
+        assert now - 10_000 < stamp <= now, f"{table}.{column} is not millis: {stamp}"
+    store.close()
