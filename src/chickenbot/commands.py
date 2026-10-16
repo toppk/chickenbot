@@ -87,6 +87,7 @@ class Context:
     # written about: a command that speaks later in the same turn, or a
     # second sentence, is not what was annotated.
     note: str = ""
+    note_cut: int = 0
 
     def say(self, text: str) -> None:
         self.transport.say(self.channel, text)
@@ -94,7 +95,8 @@ class Context:
         # follow-up arrives as a cold start.
         if self.handler is not None:
             said, self.note = self.note, ""
-            self.handler.remember_own(self.transport, self.channel, text, note=said)
+            cut, self.note_cut = self.note_cut, 0
+            self.handler.remember_own(self.transport, self.channel, text, note=said, note_cut=cut)
 
     def can(self, action: str) -> bool:
         return action in self.transport.caps
@@ -132,6 +134,18 @@ def command(
     return register
 
 
+def truncated(cut: int) -> str:
+    """What the cap took off a note, said where the note is read.
+
+    Its own sentence comes back a word shorter than it wrote it. Without
+    this the gap reads as something it chose, which is the same mistake as
+    trimming a dossier in silence.
+    """
+    if cut <= 0:
+        return ""
+    return f" ({cut} char truncated.)" if cut == 1 else f" ({cut} chars truncated.)"
+
+
 def render_scrollback(recent: list) -> str:
     """Every line carries its age. Without it the model reads a remark from
     half an hour ago as though it had just been made.
@@ -155,7 +169,7 @@ def render_scrollback(recent: list) -> str:
         # labelled rather than parenthesised: a parenthetical shown back as
         # ordinary history teaches exactly what the suffix forbids.
         if line.note and line.kind in ("self", "action"):
-            out.append(f"{' ' * 22}note to self: {line.note}")
+            out.append(f"{' ' * 22}note to self: {line.note}{truncated(line.note_cut)}")
         previous = line
     return "\n".join(out)
 
@@ -603,7 +617,9 @@ class Handler:
         and the second one is noise.
         """
         folded = tr.fold(about)
-        for _ts, nick, _account, kind, text, _note in self.store.conversation(tr.realm, room, since=since, limit=20):
+        for _ts, nick, _account, kind, text, _note, _cut in self.store.conversation(
+            tr.realm, room, since=since, limit=20
+        ):
             if kind == "bot" and tr.fold(nick) != tr.fold(tr.me) and names(tr.fold(text), folded):
                 return True
         return False
@@ -618,11 +634,13 @@ class Handler:
             self._rooms[key] = (tr, room)
             self.attention.engage(key, tr.me, self.follow_window(tr, room))
 
-    def remember_own(self, tr: Transport, room: str, text: str, kind: str = "self", note: str = "") -> None:
+    def remember_own(
+        self, tr: Transport, room: str, text: str, kind: str = "self", note: str = "", note_cut: int = 0
+    ) -> None:
         """Fire and forget: the reply has already gone out, logging must not block it."""
         watched(
             self._writes,
-            self.store.log_line(tr.realm, room, tr.me, "", text, kind, note=note),
+            self.store.log_line(tr.realm, room, tr.me, "", text, kind, note=note, note_cut=note_cut),
             what="logging our own line",
         )
 

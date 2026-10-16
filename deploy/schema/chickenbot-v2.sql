@@ -53,7 +53,8 @@ CREATE TABLE chatlog (
     account   TEXT NOT NULL DEFAULT '',
     kind      TEXT NOT NULL DEFAULT 'privmsg',
     text      TEXT NOT NULL,
-    note      TEXT NOT NULL DEFAULT ''   -- its own aside; see annotate_reply
+    note      TEXT NOT NULL DEFAULT '',  -- its own aside; see annotate_reply
+    note_cut  INTEGER NOT NULL DEFAULT 0  -- characters the cap took off it
 );
 
 CREATE TABLE cursor (

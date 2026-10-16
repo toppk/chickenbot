@@ -44,6 +44,19 @@ is what matters to somebody arriving several versions late.
 A database created fresh is stamped at the current version and never needs a
 migration. An empty file is not refused; a file with tables and no version is.
 
+## Diffing one version against the next
+
+```
+diff -u deploy/schema/chickenbot-v1.sql deploy/schema/chickenbot-v2.sql
+```
+
+That is what the snapshots are for, and why an older one is never rewritten:
+the diff is only honest if v1 is still what v1 was.
+
+An unreleased version is still being written and may change -- amend it and
+regenerate rather than inventing the next number. A version becomes fixed
+once a database somewhere is stamped with it.
+
 ## What is committed, per version
 
 - `deploy/schema/<db>-v<N>.sql` — the shape at that version. A snapshot, not

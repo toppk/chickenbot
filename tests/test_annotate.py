@@ -161,3 +161,40 @@ async def test_the_bartender_and_the_vibe_check_read_the_notes(cfg, store):
 
     seen = VibeCheck(h)._prompt(tr, "#chan", lines)
     assert "note to self: dale mentioned the hospital again" in seen
+
+
+async def test_the_history_says_what_the_cap_took(cfg, store):
+    """Its own sentence comes back a word shorter than it wrote it. Without
+    saying so the gap reads as something it chose."""
+    h = Handler(cfg, store, None, None)
+    tr = FakeTransport()
+    tr.rooms = ["#chan"]
+    h.transports = {"fake": tr}
+    ctx = ctx_for(h, tr)
+    await ToolBox(h, ctx).run("annotate_reply", {"note": "w" * 130 + " and one more thought"})
+    ctx.say("short answer")
+    await h.drain()
+
+    line = (await store.recent("fake", "#chan", limit=5))[0]
+    assert line.note_cut == 11  # 151 written, 140 kept
+    assert "11 chars truncated." in render_scrollback([line])
+
+
+def test_one_character_is_singular():
+    from chickenbot.commands import truncated
+
+    assert truncated(0) == ""
+    assert truncated(1) == " (1 char truncated.)"
+    assert truncated(2) == " (2 chars truncated.)"
+
+
+async def test_a_note_that_fitted_says_nothing_about_truncation(cfg, store):
+    h = Handler(cfg, store, None, None)
+    tr = FakeTransport()
+    ctx = ctx_for(h, tr)
+    await ToolBox(h, ctx).run("annotate_reply", {"note": "it fitted"})
+    ctx.say("fine")
+    await h.drain()
+    line = (await store.recent("fake", "#chan", limit=5))[0]
+    assert line.note_cut == 0
+    assert "truncated" not in render_scrollback([line])

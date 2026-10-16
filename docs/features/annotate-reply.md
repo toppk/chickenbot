@@ -224,6 +224,14 @@ to write". The same mistake, three files away from the comment warning
 against it. It cuts at a word now, ends in an ellipsis so the join is
 visible, and the tool's answer says it was cut.
 
+**And cutting it silently was only half the bug.** Saying so in the tool's
+answer tells the model at the time; it says nothing an hour later, when the
+note comes back in the history a word shorter than it was written and the
+gap reads as something chosen. `note_cut` carries the count and the render
+says `(11 chars truncated.)` beside the note, in all three transcripts.
+Not predicted, and not caught by a test -- caught by being asked what
+happens at 141 characters.
+
 ### Not scored
 
 Whether it is any good -- whether the aside actually relaxes the spoken line

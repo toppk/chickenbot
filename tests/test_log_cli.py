@@ -151,7 +151,7 @@ def test_what_the_bot_did_is_in_the_record(cfg, store, tmp_path):
         await handler.drain()
         assert tr.actions == [(TOPIC, "#chan", "soup o'clock", "")]
         rows = store.conversation(tr.realm, "#chan", limit=10)
-        kinds = {kind: text for _ts, _nick, _acct, kind, text, _note in rows}
+        kinds = {kind: text for _ts, _nick, _acct, kind, text, _note, _cut in rows}
         assert kinds["action"] == "topic soup o'clock"
         assert kinds["command"] == "!topic soup o'clock"
 
@@ -171,7 +171,7 @@ def test_a_failed_action_is_not_recorded_as_done(cfg, store):
         await handler.dispatch(tr.envelope("!kick nate", account="alice"))
         await handler.drain()
         rows = store.conversation(tr.realm, "#chan", limit=10)
-        assert "action" not in {kind for _ts, _n, _a, kind, _t, _note in rows}
+        assert "action" not in {kind for _ts, _n, _a, kind, _t, _note, _cut in rows}
 
     asyncio.run(go())
 

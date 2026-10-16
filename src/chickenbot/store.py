@@ -56,7 +56,8 @@ CREATE TABLE IF NOT EXISTS chatlog (
     account   TEXT NOT NULL DEFAULT '',
     kind      TEXT NOT NULL DEFAULT 'privmsg',
     text      TEXT NOT NULL,
-    note      TEXT NOT NULL DEFAULT ''   -- its own aside; see annotate_reply
+    note      TEXT NOT NULL DEFAULT '',  -- its own aside; see annotate_reply
+    note_cut  INTEGER NOT NULL DEFAULT 0  -- characters the cap took off it
 );
 CREATE INDEX IF NOT EXISTS chatlog_room_id ON chatlog (realm, channel, id DESC);
 CREATE INDEX IF NOT EXISTS chatlog_who_id  ON chatlog (realm, nick_key, id DESC);
@@ -318,6 +319,7 @@ class Line:
     kind: str = "privmsg"
     account: str = ""
     note: str = ""  # its own aside, on its own lines only
+    note_cut: int = 0  # how much the cap took off it, so the gap is visible
 
 
 @dataclass(slots=True)
@@ -440,6 +442,8 @@ class Store:
         cols = {r["name"] for r in self._db.execute("PRAGMA table_info(chatlog)")}
         if cols and "note" not in cols:
             self._db.execute("ALTER TABLE chatlog ADD COLUMN note TEXT NOT NULL DEFAULT ''")
+        if cols and "note_cut" not in cols:
+            self._db.execute("ALTER TABLE chatlog ADD COLUMN note_cut INTEGER NOT NULL DEFAULT 0")
         if cols and "nick_key" not in cols:
             self._db.execute("ALTER TABLE chatlog ADD COLUMN nick_key TEXT NOT NULL DEFAULT ''")
             for row in self._db.execute("SELECT DISTINCT nick FROM chatlog").fetchall():
@@ -530,14 +534,16 @@ class Store:
         text: str,
         kind: str = "privmsg",
         note: str = "",
+        note_cut: int = 0,
     ) -> None:
         """`note` is its own aside, kept beside the line and rendered back
         only into its own scrollback. Nobody else ever reads it."""
 
         def go() -> None:
             self._db.execute(
-                "INSERT INTO chatlog (ts_ms, realm, channel, nick, nick_key, account, kind, text, note)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO chatlog"
+                " (ts_ms, realm, channel, nick, nick_key, account, kind, text, note, note_cut)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     now_ms(),
                     realm,
@@ -548,6 +554,7 @@ class Store:
                     kind,
                     text[:900],
                     note[:NOTE_CHARS],
+                    max(int(note_cut), 0),
                 ),
             )
             self._db.commit()
@@ -589,7 +596,7 @@ class Store:
 
         def go() -> list[Line]:
             rows = self._db.execute(
-                "SELECT ts_ms, channel, nick, text, kind, account, note FROM chatlog"
+                "SELECT ts_ms, channel, nick, text, kind, account, note, note_cut FROM chatlog"
                 " WHERE realm = ? AND channel = ?"
                 " AND kind IN ('privmsg', 'command', 'self', 'bot')"
                 " ORDER BY id DESC LIMIT ?",
@@ -599,7 +606,7 @@ class Store:
                 fresh = [r for r in rows if r["ts_ms"] >= millis(since_ms, "a scrollback window")]
                 rows = fresh if len(fresh) >= least else rows[:least]
             return [
-                Line(r["ts_ms"], r["channel"], r["nick"], r["text"], r["kind"], r["account"], r["note"])
+                Line(r["ts_ms"], r["channel"], r["nick"], r["text"], r["kind"], r["account"], r["note"], r["note_cut"])
                 for r in reversed(rows)
             ]
 
@@ -813,11 +820,11 @@ class Store:
         until: int = 0,
         grep: str = "",
         limit: int = 500,
-    ) -> list[tuple[int, str, str, str, str, str]]:
-        """(ts_ms, nick, account, kind, text, note) oldest first: everything said,
+    ) -> list[tuple[int, str, str, str, str, str, int]]:
+        """(ts_ms, nick, account, kind, text, note, note_cut) oldest first: everything said,
         including the bot's own lines and other bots', unlike the model's
         scrollback. `note` is empty on everything but its own."""
-        sql = "SELECT ts_ms, nick, account, kind, text, note FROM chatlog WHERE realm = ? AND channel = ?"
+        sql = "SELECT ts_ms, nick, account, kind, text, note, note_cut FROM chatlog WHERE realm = ? AND channel = ?"
         args: list = [realm, self.fold(realm, channel)]
         if day:
             sql += " AND date(ts_ms / 1000.0, 'unixepoch', 'localtime') = ?"
@@ -834,7 +841,10 @@ class Store:
         sql += " ORDER BY id DESC LIMIT ?"
         args.append(limit)
         rows = self._db.execute(sql, args).fetchall()
-        return [(r["ts_ms"], r["nick"], r["account"], r["kind"], r["text"], r["note"]) for r in reversed(rows)]
+        return [
+            (r["ts_ms"], r["nick"], r["account"], r["kind"], r["text"], r["note"], r["note_cut"])
+            for r in reversed(rows)
+        ]
 
     async def prune(self, keep_days: int) -> int:
         def go() -> int:

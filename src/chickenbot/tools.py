@@ -255,6 +255,7 @@ async def tool_annotate_reply(h: Handler, ctx: Context, args: dict) -> str:
     if not wrote:
         return "error: a note needs something in it"
     ctx.note = _cut_note(wrote)
+    ctx.note_cut = max(len(wrote) - NOTE_CHARS, 0)
     if ctx.note == wrote:
         return f"noted, beside your reply: {ctx.note}"
     # Said, not done quietly: a silent trim hands back a half sentence that

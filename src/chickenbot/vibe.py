@@ -18,6 +18,7 @@ import time
 
 from .brain import ProviderError
 from .clock import local_ms, ms, now_ms
+from .commands import truncated
 from .observe import activity, note
 from .rooms import MAX_CHARS
 from .tools import no_tools
@@ -112,8 +113,8 @@ class VibeCheck:
         previous = self.h.store.room_observed(tr.realm, room)
         transcript = "\n".join(
             f"[{time.strftime('%a %H:%M', local_ms(ts))}] <{nick}> {text}"
-            + (f"\n{' ' * 8}note to self: {note}" if note else "")
-            for ts, nick, _a, _k, text, note in lines
+            + (f"\n{' ' * 8}note to self: {note}{truncated(cut)}" if note else "")
+            for ts, nick, _a, _k, text, note, cut in lines
         )
         head = f"Room {room} on {tr.realm}."
         if previous:

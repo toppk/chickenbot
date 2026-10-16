@@ -19,6 +19,7 @@ import time
 
 from .brain import ProviderError
 from .clock import local_ms, ms
+from .commands import truncated
 from .dossier import MAX_CHARS, clip
 from .observe import activity, note, note_many
 from .tools import no_tools
@@ -194,8 +195,8 @@ class Bartender:
             known.append(f"{handle}:\n{existing}")
         transcript = "\n".join(
             f"[{time.strftime('%H:%M', local_ms(ts))}] <{nick}> {text}"
-            + (f"\n{' ' * 8}note to self: {note}" if note else "")
-            for ts, nick, _account, kind, text, note in lines
+            + (f"\n{' ' * 8}note to self: {note}{truncated(cut)}" if note else "")
+            for ts, nick, _account, kind, text, note, cut in lines
             if kind in ("privmsg", "command", "self", "bot")
         )
         return (
