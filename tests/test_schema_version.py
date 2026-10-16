@@ -152,3 +152,30 @@ def test_no_timestamp_setting_is_left_in_the_old_namespace():
             if not call.group(1).endswith("_ms"):
                 bad.append(f"{path.name}: {call.group(1)}")
     assert not bad, f"namespaces holding a timestamp must end in _ms: {bad}"
+
+
+def test_nothing_hands_seconds_to_a_millisecond_reader():
+    """`.uptime` said "up 20721d11h" -- 1970 to now -- because `h.started`
+    was still seconds. Every argument to ago_ms has to come from something
+    that says it is milliseconds."""
+    import re
+    from pathlib import Path
+
+    src = Path(__file__).resolve().parent.parent / "src" / "chickenbot"
+    bad = []
+    for path in src.rglob("*.py"):
+        for call in re.finditer(r"ago_ms\(([^()]*(?:\([^()]*\))?[^()]*)\)", path.read_text()):
+            arg = call.group(1).strip()
+            if arg.endswith("_ms") or "_ms'" in arg or '_ms"' in arg or arg.startswith("ts_ms"):
+                continue
+            bad.append(f"{path.name}: ago_ms({arg})")
+    assert not bad, f"these may be seconds: {bad}"
+
+
+def test_the_bot_has_not_been_up_since_1970():
+    """The lint above is a proxy; this is the thing itself."""
+    from chickenbot.clock import now_ms
+    from chickenbot.commands import ago_ms
+
+    assert ago_ms(now_ms()) == "0s"
+    assert ago_ms(now_ms() - 3_600_000) == "1h0m"

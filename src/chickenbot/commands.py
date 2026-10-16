@@ -230,7 +230,7 @@ def compose(
         # Its own version, because asked for one it invented a commit hash
         # rather than saying it had no way to know. Anything it should be able
         # to state about itself belongs here, not in its guesses.
-        f" now={now} running_for={ago_ms(int(h.started))} version={version()} model={_model(h)}</context>"
+        f" now={now} running_for={ago_ms(h.started_ms)} version={version()} model={_model(h)}</context>"
     )
     # What it can actually do here, right now. Without this the model finds out
     # by proposing a kick it has no power to perform and relaying the refusal.
@@ -405,7 +405,7 @@ class Handler:
         self.store = store
         self.provider = provider
         self.watcher = watcher
-        self.started = time.time()
+        self.started_ms = now_ms()
         self.soul = Soul(store, cfg.llm.persona)
         self.dossiers = Dossiers(store)
         self.attention = Attention(
@@ -1045,7 +1045,7 @@ async def cmd_help(h: Handler, ctx: Context) -> None:
 
 @command("uptime", blurb="how long i have been up")
 async def cmd_uptime(h: Handler, ctx: Context) -> None:
-    ctx.say(f"up {ago_ms(int(h.started))}, watching {len(await h.store.watches())} repo feeds")
+    ctx.say(f"up {ago_ms(h.started_ms)}, watching {len(await h.store.watches())} repo feeds")
 
 
 @command("seen", usage="seen <nick>", blurb="when a nick last spoke")
@@ -1452,7 +1452,7 @@ async def cmd_activity(h: Handler, ctx: Context) -> None:
     which = ctx.args.strip().lower()
     kinds = {"message", "barfly", "vibe", "arrival", "departure", "topic", "scheduled", "mode", "follow"}
     rows = h.store.activity(
-        since=int(time.time() - 24 * 3600),
+        since=now_ms() - ms(24 * 3600),
         kind=which if which in kinds else "",
         outcome="" if which in kinds else which,
         room=ctx.channel if ctx.in_channel else "",
@@ -1539,13 +1539,13 @@ async def _dump_comms(h: Handler, ctx: Context) -> list[str]:
     known = await h.store.known_accounts()
     if known:
         out.append(
-            "known: " + ", ".join(f"{acct}@{transport} ({ago_ms(seen)} ago)" for transport, acct, _n, seen in known)
+            "known: " + ", ".join(f"{acct}@{t} ({ago_ms(seen_ms)} ago)" for t, acct, _n, seen_ms in known)
         )
     return out
 
 
 async def _dump_engines(h: Handler, ctx: Context) -> list[str]:
-    out = [f"up {ago_ms(int(h.started))}, prefix {h.cfg.prefix!r}"]
+    out = [f"up {ago_ms(h.started_ms)}, prefix {h.cfg.prefix!r}"]
     if h.provider is None:
         out.append("llm: none configured")
     else:
@@ -1582,8 +1582,8 @@ async def _dump_rhythm(h: Handler, ctx: Context) -> list[str]:
     out: list[str] = []
     for tr in sorted(h.transports.values(), key=lambda t: t.realm):
         for room in tr.rooms:
-            last = h.store.last_human_line(tr.realm, room)
-            quiet = f"quiet {ago_ms(last)}" if last else "never heard anyone"
+            last_ms = h.store.last_human_line(tr.realm, room)
+            quiet = f"quiet {ago_ms(last_ms)}" if last_ms else "never heard anyone"
             awake = "awake now" if h.rhythm.lively_now(tr.realm, room) else "off hours"
             out.append(f"[{tr.realm}] {room}: {awake}, {quiet}")
             out.append(f"  hours: {h.rhythm.describe(tr.realm, room)}")

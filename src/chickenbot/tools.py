@@ -409,7 +409,7 @@ async def tool_self_activity(h: Handler, ctx: Context, args: dict) -> str:
         return "error: hours and limit must be numbers"
     here = args.get("here", True)
     rows = h.store.activity(
-        since=int(time.time() - hours * 3600),
+        since=now_ms() - ms(hours * 3600),
         kind=str(args.get("kind", "")),
         outcome=str(args.get("outcome", "")),
         room=ctx.channel if here and ctx.in_channel else "",
