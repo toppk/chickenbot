@@ -946,14 +946,17 @@ def _events(row) -> list[tuple[float, int, str, str]]:
     """Every timed thing in one turn, on one clock, in order."""
     out: list[tuple[float, int, str, str]] = []
     for leg in json.loads(row["details"] or "[]"):
+        at = float(leg.get("at_ms") or 0) / 1000
         if leg.get("kind") == "wait":
-            out.append((float(leg.get("at") or 0.0), int(leg.get("ms") or 0), "waited", str(leg.get("what", ""))))
+            out.append((at, int(leg.get("ms") or 0), "waited", str(leg.get("what", ""))))
         else:
             served, why = leg.get("served") or "model", leg.get("finish") or ""
-            out.append((float(leg.get("at") or 0.0), int(leg.get("ms") or 0), "model", f"{served}  {why}"))
+            out.append((at, int(leg.get("ms") or 0), "model", f"{served}  {why}"))
     for call in json.loads(row["tool_calls"] or "[]"):
         where = f"  {_whence(src)}" if (src := str(call.get("source") or "")) else ""
-        out.append((float(call.get("at") or 0.0), int(call.get("ms") or 0), "tool", f"{call.get('name', '?')}{where}"))
+        out.append(
+            (float(call.get("at_ms") or 0) / 1000, int(call.get("ms") or 0), "tool", f"{call.get('name', '?')}{where}")
+        )
     laid: list[tuple[float, int, str, str]] = []
     running = 0.0
     for at, ms, kind, what in out:
@@ -992,16 +995,15 @@ def _sequence(row, paint: Paint) -> None:
 
 
 def _rebased(events: list[tuple[float, int, str, str]]) -> list[tuple[float, int, str, str]]:
-    """Put t=0 at the earliest thing that happened, not at the model's clock.
+    """Put t=0 at the earliest thing that happened.
 
-    A pause taken before the turn begins is recorded at a negative offset,
-    which is the truth; a reader wants it at the top of the timeline.
+    The record is absolute -- every leg carries the wall clock it began at --
+    because relative offsets cannot hold a pause taken before the turn's
+    first call. Relative is what a reader wants, so it is made here.
     """
     if not events:
         return events
     base = min(at for at, _ms, _kind, _what in events)
-    if base >= 0:
-        return events
     return [(round(at - base, 3), ms, kind, what) for at, ms, kind, what in events]
 
 

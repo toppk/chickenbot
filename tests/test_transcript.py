@@ -16,6 +16,9 @@ from chickenbot.tools import Called
 
 from .test_commands import StubProvider
 
+# The record is absolute; these fixtures hang off one arbitrary wall clock.
+BASE = 1_792_000_000_000
+
 
 def cli(tmp_path, *args):
     from chickenbot.__main__ import main
@@ -195,8 +198,8 @@ async def test_tool_calls_are_kept_with_their_arguments_and_results(store):
         name, supports_tools = "tooled", True
 
         async def reply(self, *, toolbox=None, **kw):
-            toolbox.log.append(Called("chan_who", {"target": "biff"}, "biff (biff@host) [bot]", at=0.4, ms=220))
-            toolbox.log.append(Called("chan_state", {}, "#lobby: 9 here", at=0.7, ms=2))
+            toolbox.log.append(Called("chan_who", {"target": "biff"}, "biff (biff@host) [bot]", at_ms=BASE + 400, ms=220))
+            toolbox.log.append(Called("chan_state", {}, "#lobby: 9 here", at_ms=BASE + 700, ms=2))
             return "three bots, by the flag"
 
         async def aclose(self):
@@ -213,7 +216,7 @@ async def test_tool_calls_are_kept_with_their_arguments_and_results(store):
     assert calls[0]["args"] == {"target": "biff"}
     assert "biff@host" in calls[0]["result"]
     # When it ran and how long it took, so a timeline is possible.
-    assert calls[0]["at"] == 0.4 and calls[0]["ms"] == 220
+    assert calls[0]["at_ms"] == BASE + 400 and calls[0]["ms"] == 220
 
 
 async def test_no_tools_is_an_empty_list_not_a_null(store):
@@ -477,18 +480,19 @@ async def test_a_chosen_pause_is_recorded_as_one(store):
 
 
 async def test_a_tool_and_a_leg_share_one_clock(store):
-    """Otherwise a timeline is two clocks that happen to start near together."""
+    """One wall clock, so a turn needs no origin to place things against --
+    which is what let a pause taken before the turn be written down at all."""
     import asyncio
 
-    from chickenbot.brain import collect_legs, turn_started
+    from chickenbot.brain import collect_legs, note_leg, now_ms
 
-    assert turn_started() == 0.0
-    with collect_legs():
-        first = turn_started()
-        assert first > 0
+    before = now_ms()
+    with collect_legs() as legs:
+        note_leg({"kind": "call", "ms": 10})
         await asyncio.sleep(0.01)
-        assert turn_started() == first  # the same origin throughout the turn
-    assert turn_started() == 0.0
+        note_leg({"kind": "call", "ms": 10})
+    assert [leg["at_ms"] for leg in legs] == sorted(leg["at_ms"] for leg in legs)
+    assert all(before - 10 <= leg["at_ms"] <= now_ms() for leg in legs)
 
 
 def test_the_timeline_shows_waits_tools_and_calls_in_order(tmp_path):
@@ -502,12 +506,12 @@ def test_the_timeline_shows_waits_tools_and_calls_in_order(tmp_path):
             response="saw it",
             ms=8512,
             tool_calls=[
-                {"name": "ext_github_activity", "args": {}, "result": "r", "at": 5.9, "ms": 412, "source": "mirror"}
+                {"name": "ext_github_activity", "args": {}, "result": "r", "at_ms": BASE + 5900, "ms": 412, "source": "mirror"}
             ],
             details=[
-                {"kind": "wait", "what": "waiting for the burst to finish", "ms": 5000, "at": 0.0},
-                {"kind": "call", "served": "Together", "finish": "tool_calls", "at": 5.0, "ms": 850},
-                {"kind": "call", "served": "Parasail", "finish": "stop", "at": 6.4, "ms": 1480},
+                {"kind": "wait", "what": "waiting for the burst to finish", "ms": 5000, "at_ms": BASE + 0},
+                {"kind": "call", "served": "Together", "finish": "tool_calls", "at_ms": BASE + 5000, "ms": 850},
+                {"kind": "call", "served": "Parasail", "finish": "stop", "at_ms": BASE + 6400, "ms": 1480},
             ],
         ),
         100,
@@ -546,11 +550,11 @@ def test_the_shape_of_the_turn_is_one_line_at_the_bottom(tmp_path):
             room="#lobby",
             response="saw it",
             ms=8512,
-            tool_calls=[{"name": "ext_github_activity", "args": {}, "result": "r", "at": 1.9, "ms": 412}],
+            tool_calls=[{"name": "ext_github_activity", "args": {}, "result": "r", "at_ms": BASE + 1900, "ms": 412}],
             details=[
-                {"kind": "wait", "what": "waiting for the burst to finish", "ms": 5000, "at": 0.0},
-                {"kind": "call", "served": "Together", "finish": "tool_calls", "at": 5.0, "ms": 1850},
-                {"kind": "call", "served": "Parasail", "finish": "stop", "at": 7.0, "ms": 1480},
+                {"kind": "wait", "what": "waiting for the burst to finish", "ms": 5000, "at_ms": BASE + 0},
+                {"kind": "call", "served": "Together", "finish": "tool_calls", "at_ms": BASE + 5000, "ms": 1850},
+                {"kind": "call", "served": "Parasail", "finish": "stop", "at_ms": BASE + 7000, "ms": 1480},
             ],
         ),
         100,
@@ -574,8 +578,8 @@ def test_consecutive_stages_of_a_kind_collapse(tmp_path):
             response="ok",
             ms=3000,
             details=[
-                {"kind": "call", "served": "A", "at": 0.0, "ms": 1000},
-                {"kind": "call", "served": "B", "at": 1.0, "ms": 2000},
+                {"kind": "call", "served": "A", "at_ms": BASE + 0, "ms": 1000},
+                {"kind": "call", "served": "B", "at_ms": BASE + 1000, "ms": 2000},
             ],
         ),
         100,
@@ -597,8 +601,8 @@ def test_the_timeline_runs_in_time_order(tmp_path):
             reason="ask",
             response="ok",
             ms=100,
-            tool_calls=[{"name": "early", "args": {}, "result": "r", "at": 0.5, "ms": 10}],
-            details=[{"kind": "call", "served": "late", "at": 9.0, "ms": 10}],
+            tool_calls=[{"name": "early", "args": {}, "result": "r", "at_ms": BASE + 500, "ms": 10}],
+            details=[{"kind": "call", "served": "late", "at_ms": BASE + 9000, "ms": 10}],
         ),
         100,
         48,
@@ -674,3 +678,13 @@ def test_a_timeline_that_starts_at_zero_is_left_alone():
 
     events = [(0.0, 10, "model", "a"), (1.0, 20, "tool", "b")]
     assert _rebased(events) == events
+
+
+def test_a_pause_before_the_turn_has_somewhere_to_live():
+    """The whole reason the record is absolute: a hold taken before the first
+    model call has no relative offset, so it used to be clamped onto t=0."""
+    from chickenbot.__main__ import _rebased
+
+    hold = (float(BASE - 5000) / 1000, 5000, "waited", "waiting for the burst to finish")
+    call = (float(BASE) / 1000, 797, "model", "Together  tool_calls")
+    assert [at for at, *_ in _rebased([hold, call])] == [0.0, 5.0]

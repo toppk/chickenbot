@@ -50,7 +50,7 @@ def _called(call) -> dict[str, Any]:
         "name": call.name,
         "args": call.args,
         "result": result[:RESULT_SHOWN],
-        "at": call.at,
+        "at_ms": call.at_ms,
         "ms": call.ms,
     }
     if call.source:

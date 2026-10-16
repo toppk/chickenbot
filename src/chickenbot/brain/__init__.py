@@ -27,23 +27,22 @@ class Turn:
 # which endpoint was slow. A ContextVar rather than state on the provider:
 # two rooms answer at once, and their legs must not mix.
 _LEGS: ContextVar[list[dict] | None] = ContextVar("llm_legs", default=None)
-# t=0 for everything in one turn, so a tool call and an HTTP leg are placed
-# against the same clock rather than two that happen to start near each other.
-_STARTED: ContextVar[float] = ContextVar("llm_started", default=0.0)
-
-
-def turn_started() -> float:
-    """When this turn's clock began, or 0 outside one."""
-    return _STARTED.get()
+def now_ms() -> int:
+    """Wall clock, milliseconds. Durations are measured with the monotonic
+    clock; only the anchor is wall time, so a step cannot stretch a bar."""
+    return int(time.time() * 1000)
 
 
 def note_leg(leg: dict) -> None:
     if (legs := _LEGS.get()) is None:
         return
     leg.setdefault("kind", "call")
-    if (started := _STARTED.get()) and "at" not in leg:
+    if "at_ms" not in leg:
         # A call is noted when it returns, so place it at its own beginning.
-        leg["at"] = round(max(time.monotonic() - started - leg.get("ms", 0) / 1000, 0.0), 3)
+        # Absolute, not relative to the turn: a pause taken before the turn's
+        # first call has no relative offset to be written down, which is how
+        # a five second hold came to be recorded as happening at t=0.
+        leg["at_ms"] = now_ms() - int(leg.get("ms", 0))
     legs.append(leg)
 
 
@@ -54,12 +53,8 @@ def note_wait(what: str, seconds: float) -> None:
     land, is deliberate -- and indistinguishable from latency in a record
     that only shows how long the whole thing took.
     """
-    started = _STARTED.get()
-    # Negative on purpose. The burst is held before the turn's clock starts,
-    # so clamping to zero drew a five second bar on top of the first model
-    # call and left the pause out of the total.
-    at = round(time.monotonic() - started - seconds, 3) if started else 0.0
-    note_leg({"kind": "wait", "what": what, "ms": int(seconds * 1000), "at": at})
+    ms = int(seconds * 1000)
+    note_leg({"kind": "wait", "what": what, "ms": ms, "at_ms": now_ms() - ms})
 
 
 @contextlib.contextmanager
@@ -69,12 +64,11 @@ def collect_legs():
         yield existing
         return
     legs: list[dict] = []
-    token, clock = _LEGS.set(legs), _STARTED.set(time.monotonic())
+    token = _LEGS.set(legs)
     try:
         yield legs
     finally:
         _LEGS.reset(token)
-        _STARTED.reset(clock)
 
 
 class ProviderError(Exception):

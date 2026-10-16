@@ -14,7 +14,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from .brain import turn_started
+from .brain import now_ms
 from .observe import note_many
 from .rooms import GUEST
 from .transport import BAN, TOPIC
@@ -34,8 +34,8 @@ Runner = Callable[["Handler", "Context", dict], Awaitable[str]]
 class Called:
     """One tool call, with enough to say where a turn's time went.
 
-    `at` is seconds from the start of the turn and `ms` is how long this one
-    took, so a transcript can show a timeline rather than a list -- the
+    `at_ms` is when it began and `ms` is how long it took, so a transcript
+    can show a timeline rather than a list -- the
     difference between a slow tool, a slow model and a deliberate pause is
     otherwise unanswerable from the record.
     """
@@ -43,7 +43,7 @@ class Called:
     name: str
     args: dict
     result: str
-    at: float = 0.0
+    at_ms: int = 0  # wall clock when it began, so a turn needs no base
     ms: int = 0
     source: str = ""  # what the tool says it answered from, when it says
 
@@ -105,7 +105,7 @@ class ToolBox:
         self.log: list[Called] = []
         # The turn's clock when there is one, so tool calls and HTTP legs
         # are placed on the same timeline rather than two adjacent ones.
-        self.started = turn_started() or time.monotonic()
+
         # Seconds until this turn would be worth repeating, 0 when it would not.
         self.retry_after = 0.0
 
@@ -138,14 +138,14 @@ class ToolBox:
         return handler.policies.of(self.ctx.transport.realm, self.ctx.channel).moderation
 
     async def run(self, name: str, args: dict) -> str:
-        at = time.monotonic()
+        at, at_ms = time.monotonic(), now_ms()
         result = await self._run(name, args)
         self.log.append(
             Called(
                 name=name,
                 args=args,
                 result=result,
-                at=round(at - self.started, 3),
+                at_ms=at_ms,
                 ms=int((time.monotonic() - at) * 1000),
                 source=str(getattr(getattr(self.handler, "tool_server", None), "source", "") or ""),
             )
