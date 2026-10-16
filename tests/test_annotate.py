@@ -32,7 +32,7 @@ async def test_a_note_is_flattened_onto_one_line(cfg, store):
     h = Handler(cfg, store, None, None)
     ctx = ctx_for(h)
     said = await ToolBox(h, ctx).run("annotate_reply", {"note": "a\nnote  over\tlines"})
-    assert said == "noted, beside your reply: a note over lines"
+    assert said == "noted"  # not an echo: it just wrote the words
     assert ctx.note == "a note over lines"
 
 

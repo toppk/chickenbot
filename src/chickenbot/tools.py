@@ -261,7 +261,9 @@ async def tool_annotate_reply(h: Handler, ctx: Context, args: dict) -> str:
     ctx.note = _cut_note(wrote)
     ctx.note_cut = max(len(wrote) - NOTE_CHARS, 0)
     if ctx.note == wrote:
-        return f"noted, beside your reply: {ctx.note}"
+        # Not echoed: it wrote the words a moment ago and gets them back in
+        # the next turn's history anyway.
+        return "noted"
     # Said, not done quietly: a silent trim hands back a half sentence that
     # reads like one somebody chose to write.
     return f"noted, but cut to {NOTE_CHARS}: {ctx.note} -- say it shorter if that lost the point"
