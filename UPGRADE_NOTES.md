@@ -7,6 +7,61 @@ it back.
 Releases themselves are the git tags (`git tag -l 'v*'`); this file is only
 the by-hand part.
 
+## v0.3.4
+
+### A new GitHub tool needs a grant, or only owners can reach it
+
+**Why.** `github_commits` reads a repository directly instead of through the
+mirrored events feed. It exists because the feed is published asynchronously
+and runs hours behind: a push can be real and absent from `github_activity`
+at the same time, and the bot told a room somebody's push had not happened
+on exactly that evidence. It also reports every branch's tip rather than the
+default branch, because a default branch is routinely the stalest ref in a
+repository -- the work sits on branches and the merge comes later.
+
+Anything unlisted in `[tools.grants.*]` is owner-only, so without this the
+tool is declared but unreachable for everybody else, including the bot's own
+unprompted passes.
+
+**Do this**, in each instance's config, beside the other GitHub grants:
+
+```toml
+# Reading a public repository's commits, like looking somebody up. It costs
+# an API call and writes nothing.
+[tools.grants.ext_github_commits]
+owner = false
+```
+
+Then restart both units -- the external tool is a separate service:
+
+```bash
+systemctl --user restart chickenbot@<instance> chickenbot-github@<instance>
+```
+
+**Check it worked.** Ask in a channel as a non-owner, or:
+
+```bash
+chickenbot -c <config> transcript 1 | grep -i github_commits
+```
+
+**Put it back**: remove the stanza and restart. The tool returns to
+owner-only; nothing else depends on it.
+
+**GraphQL needs a token.** Branch tips come from one GraphQL call, and
+GraphQL has no anonymous tier at all, unlike REST. Without `GITHUB_TOKEN`
+the tool falls back to the default branch alone and says so in its answer
+rather than narrowing quietly. A fine-grained PAT scoped to selected
+repositories will fail on anything outside that list.
+
+### Tool descriptions are no longer cut at 400 characters
+
+Nothing to do. Noted because it changes what the model is sent: six of the
+ten GitHub tools were over the cap, and what was being removed was the half
+of each description saying when *not* to call it -- including "a nick handed
+to this tool usually belongs to a different person entirely". If you have
+written your own external tool, its description now arrives whole, up to
+2000 characters, and the log says so when it does not.
+
 ## v0.3.3
 
 ### Formatting belongs to the network — one patch, per instance
