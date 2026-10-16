@@ -41,7 +41,7 @@ def test_push_events_become_commits():
             "type": "PushEvent",
             "actor": {"login": "toppk"},
             "repo": {"name": "toppk/chickenbot"},
-            "created_at_ms": "2026-09-27T10:00:00Z",
+            "created_at": "2026-09-27T10:00:00Z",
             "payload": {"size": 3, "commits": [{"message": "fix the thing\n\ndetail"}]},
         }
     )
@@ -56,7 +56,7 @@ def test_pull_request_events_carry_number_and_state():
             "type": "PullRequestEvent",
             "actor": {"login": "a2f0"},
             "repo": {"name": "x/y"},
-            "created_at_ms": "2026-09-27T10:00:00Z",
+            "created_at": "2026-09-27T10:00:00Z",
             "payload": {
                 "action": "opened",
                 "pull_request": {"number": 7, "title": "T", "state": "open", "html_url": "https://example/7"},
@@ -319,7 +319,7 @@ def test_a_push_reports_the_branch_when_github_omits_the_count():
             "type": "PushEvent",
             "actor": {"login": "iconidentify"},
             "repo": {"name": "iconidentify/aurora-linux"},
-            "created_at_ms": "2026-09-27T10:00:00Z",
+            "created_at": "2026-09-27T10:00:00Z",
             "payload": {
                 "ref": "refs/heads/tb-dp-tunnel-t8103",
                 "head": "5eb7f83a961aa48bf5a4c9f72fb6c6d9f010c0e0",
@@ -339,7 +339,7 @@ def test_a_push_still_uses_the_count_when_one_is_present():
             "type": "PushEvent",
             "actor": {"login": "toppk"},
             "repo": {"name": "toppk/x"},
-            "created_at_ms": "2026-09-27T10:00:00Z",
+            "created_at": "2026-09-27T10:00:00Z",
             "payload": {"ref": "refs/heads/main", "size": 3, "commits": [{"message": "fix it\n\nmore"}]},
         }
     )
@@ -495,8 +495,8 @@ def test_search_results_are_normalised(tmp_path):
         "title": "a title",
         "html_url": "https://example/7",
         "comments": 3,
-        "created_at_ms": "2026-09-01T10:00:00Z",
-        "updated_at_ms": "2026-09-27T10:00:00Z",
+        "created_at": "2026-09-01T10:00:00Z",
+        "updated_at": "2026-09-27T10:00:00Z",
         "repository_url": "https://api.github.com/repos/ghostty-org/ghostty",
         "user": {"login": "toppk"},
         "pull_request": {"draft": True},
@@ -1419,7 +1419,7 @@ def _event(kind, **payload):
         "id": "1",
         "actor": {"login": "chrisk"},
         "repo": {"name": "iconidentify/aurora-linux"},
-        "created_at_ms": "2026-10-04T12:00:00Z",
+        "created_at": "2026-10-04T12:00:00Z",
         "payload": payload,
     }
 
@@ -1471,8 +1471,8 @@ def an_issue(**over):
         "state": "open",
         "author": "iconidentify",
         "labels": ["sep", "help wanted"],
-        "created_at_ms": "2026-10-01T10:00:00Z",
-        "updated_at_ms": "2026-10-06T22:41:00Z",
+        "opened": "2026-10-01T10:00:00Z",
+        "touched": "2026-10-06T22:41:00Z",
         "url": "https://github.com/iconidentify/aurora-linux/issues/35",
         "body": "Tracking what the agents find.",
         "comment_count": 12,
@@ -1778,3 +1778,44 @@ def test_the_watcher_will_not_announce_a_private_repo(tmp_path):
 
     assert asyncio.run(go(False)) is False
     assert asyncio.run(go(True)) is True
+
+
+def test_every_search_is_restricted_at_the_one_choke_point():
+    """`merged()` builds its own query instead of going through
+    search_issues, so a per-caller guard left it reaching private repos."""
+    import asyncio
+
+    import httpx
+
+    from external.github.github import GitHub
+
+    asked = []
+
+    def handler(request):
+        asked.append(request.url.params.get("q"))
+        return httpx.Response(200, json={"items": []})
+
+    async def go(private):
+        api = GitHub("github_pat_x", private=private)
+        api.client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        await api.merged("toppk", since_days=7)
+        await api.search_issues("involves:toppk is:open")
+        await api.aclose()
+
+    asyncio.run(go(False))
+    assert all(q.endswith("is:public") for q in asked), asked
+    asked.clear()
+    asyncio.run(go(True))
+    assert not any("is:public" in q for q in asked), asked
+
+
+def test_githubs_own_field_names_are_not_ours_to_rename():
+    """Renaming our columns `*_ms` corrupted six reads of GitHub's payload --
+    `raw.get("created_at_ms")` is always None, so every stamp became 0 and
+    nothing was stored. Only what we store carries the suffix."""
+    import re
+    from pathlib import Path
+
+    src = Path(__file__).resolve().parent.parent / "external" / "github" / "github.py"
+    bad = re.findall(r'\.get\(\s*"(\w*_ms)"', src.read_text())
+    assert not bad, f"these read the remote payload with our names: {sorted(set(bad))}"

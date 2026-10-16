@@ -87,7 +87,7 @@ def _render_issue(repo: str, found: dict) -> str:
     bits = [head, found["url"]]
     if found["labels"]:
         bits.append("labels: " + ", ".join(label for label in found["labels"] if label))
-    bits.append(f"opened {found['created_at_ms']}, last touched {found['updated_at_ms']}")
+    bits.append(f"opened {found['opened']}, last touched {found['touched']}")
     bits.append("")
     bits.append(_cut(found["body"], BODY_CHARS) or "(no description)")
     shown, total = len(found["comments"]), found["comment_count"]

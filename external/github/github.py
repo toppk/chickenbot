@@ -55,6 +55,13 @@ class GitHub:
         await self.client.aclose()
 
     async def get(self, path: str, **params) -> tuple[list | dict, str]:
+        # Authenticated search reaches whatever the token can see, so the
+        # restriction is applied here rather than at each caller: `merged()`
+        # builds its own query and would otherwise have slipped past.
+        if path == "/search/issues" and not self.private:
+            query = str(params.get("q", ""))
+            if "is:public" not in query:
+                params["q"] = f"{query} is:public".strip()
         response = await self.client.get(f"{self.base}{path}", params=params)
         if response.status_code == 404:
             return [], ""
@@ -183,7 +190,7 @@ class GitHub:
             return 0
         if payload.get("private") and not self.private:
             raise RuntimeError(f"{repo} is private and this instance does not read private repositories")
-        return _ts_ms(payload.get("pushed_at_ms"))
+        return _ts_ms(payload.get("pushed_at"))
 
     async def issue(self, repo: str, number: int, comments: int = 0) -> dict:
         """One issue or pull request, with its body and the latest comments.
@@ -211,15 +218,15 @@ class GitHub:
             "state": payload.get("state", ""),
             "author": (payload.get("user") or {}).get("login", ""),
             "labels": [str((label or {}).get("name", "")) for label in payload.get("labels") or []],
-            "created_at_ms": payload.get("created_at_ms", ""),
-            "updated_at_ms": payload.get("updated_at_ms", ""),
+            "opened": payload.get("created_at", ""),
+            "touched": payload.get("updated_at", ""),
             "url": payload.get("html_url", f"https://github.com/{repo}/issues/{number}"),
             "body": payload.get("body") or "",
             "comment_count": payload.get("comments", 0),
             "comments": [
                 {
                     "author": (c.get("user") or {}).get("login", ""),
-                    "at": c.get("created_at_ms", ""),
+                    "at": c.get("created_at", ""),
                     "body": c.get("body") or "",
                 }
                 for c in said
@@ -258,7 +265,7 @@ class GitHub:
                 "archived": int(bool(r.get("archived"))),
                 "stars": int(r.get("stargazers_count", 0)),
                 "open_issues": int(r.get("open_issues_count", 0)),
-                "pushed_at_ms": _ts_ms(r.get("pushed_at_ms")),
+                "pushed_at_ms": _ts_ms(r.get("pushed_at")),
                 "description": (r.get("description") or "")[:200],
             }
             for r in payload
@@ -273,10 +280,6 @@ class GitHub:
         open anywhere. Discussions are not searchable this way -- they need
         the GraphQL API -- so they are simply absent rather than faked.
         """
-        # Authenticated search reaches whatever the token can see, so the
-        # restriction has to be in the query rather than in the filtering.
-        if not self.private and "is:public" not in query:
-            query = f"{query} is:public"
         payload, _ = await self.get("/search/issues", q=query, per_page=min(limit, 100), sort="updated")
         items = payload.get("items", []) if isinstance(payload, dict) else []
         out = []
@@ -296,8 +299,8 @@ class GitHub:
                     "url": raw.get("html_url", ""),
                     "draft": int(bool((raw.get("pull_request") or {}).get("draft") or raw.get("draft"))),
                     "comments": int(raw.get("comments", 0)),
-                    "created_at_ms": _ts_ms(raw.get("created_at_ms")),
-                    "updated_at_ms": _ts_ms(raw.get("updated_at_ms")),
+                    "created_at_ms": _ts_ms(raw.get("created_at")),
+                    "updated_at_ms": _ts_ms(raw.get("updated_at")),
                 }
             )
         return out
@@ -329,7 +332,7 @@ class GitHub:
                     kind="pr",
                     actor=user,
                     repo=repo,
-                    ts_ms=when or _ts_ms(raw.get("updated_at_ms")),
+                    ts_ms=when or _ts_ms(raw.get("updated_at")),
                     title=f"merged #{number}: {(raw.get('title') or '')[:80]}",
                     url=raw.get("html_url", ""),
                     state="merged",
@@ -367,7 +370,7 @@ def _from_event(raw: dict) -> Item | None:
         return None
     actor = (raw.get("actor") or {}).get("login", "")
     repo = (raw.get("repo") or {}).get("name", "")
-    ts_ms = _ts_ms(raw.get("created_at_ms"))
+    ts_ms = _ts_ms(raw.get("created_at"))
     payload = raw.get("payload") or {}
     title, url, state = "", f"https://github.com/{repo}", ""
 
