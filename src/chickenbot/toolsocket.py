@@ -142,8 +142,8 @@ class ToolServer:
     ) -> None:
         self.cfg = cfg
         self.transports = transports
-        # Set by the most recent tool result that named one. Read straight
-        # after a call, by whoever made it.
+        # Where the answer to the call in flight came from. The caller clears
+        # it before dispatching, so a built-in cannot inherit the last one.
         self.retry_after = 0.0
         self.source = ""
         self.dispatch = dispatch

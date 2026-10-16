@@ -198,3 +198,18 @@ async def test_a_note_that_fitted_says_nothing_about_truncation(cfg, store):
     line = (await store.recent("fake", "#chan", limit=5))[0]
     assert line.note_cut == 0
     assert "truncated" not in render_scrollback([line])
+
+
+async def test_a_builtin_does_not_borrow_the_last_tools_source(cfg, store):
+    """`annotate_reply  from the local mirror` in a timeline: the field holds
+    whatever answered last, and a built-in answers from nowhere."""
+
+    class Server:
+        source = "mirror"
+        retry_after = 0.0
+
+    h = Handler(cfg, store, None, None)
+    h.tool_server = Server()
+    box = ToolBox(h, ctx_for(h))
+    await box.run("annotate_reply", {"note": "worth a look later"})
+    assert [(c.name, c.source) for c in box.log] == [("annotate_reply", "")]

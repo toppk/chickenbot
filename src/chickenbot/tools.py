@@ -141,6 +141,11 @@ class ToolBox:
 
     async def run(self, name: str, args: dict) -> str:
         at, at_ms = time.monotonic(), now_ms()
+        server = getattr(self.handler, "tool_server", None)
+        # Cleared first: the field holds whatever answered last, so a built-in
+        # running after an external call would report that call's source.
+        if server is not None:
+            server.source = ""
         result = await self._run(name, args)
         self.log.append(
             Called(
@@ -149,13 +154,12 @@ class ToolBox:
                 result=result,
                 at_ms=at_ms,
                 ms=int((time.monotonic() - at) * 1000),
-                source=str(getattr(getattr(self.handler, "tool_server", None), "source", "") or ""),
+                source=str(getattr(server, "source", "") or ""),
             )
         )
         # A tool may answer with the best it has and say a better answer is
         # coming. The soonest such moment wins: whoever comes back should
         # find every late tool landed.
-        server = getattr(self.handler, "tool_server", None)
         if (later := getattr(server, "retry_after", 0.0)) and (not self.retry_after or later < self.retry_after):
             self.retry_after = later
         note_many("tools", name if not result.startswith("error:") else f"{name}!")
