@@ -67,6 +67,7 @@ COMMENT_CHARS = 1200
 BRANCHES_SHOWN = 12  # a busy fork has hundreds and the names stop meaning anything
 COMMITS_SHOWN = 5  # a room cannot read a changelog; this is "what just landed"
 RELEASES_SHOWN = 5  # the current one and enough history to see the pace
+NOTES_CHARS = 1500  # a release note is written to be read; this is most of one
 # The mirror exists so a model can ask as often as it likes without us
 # hammering GitHub. The live tools have no mirror to answer from, so they
 # get a memo instead: short, because the point is a repeat inside one
@@ -286,9 +287,11 @@ TOOLS = [
             "This is the repository itself, not the mirrored events feed, so it is current, "
             "and repeats inside a few minutes are free.\n\n"
             "Takes owner/repo, or just the repo name when it belongs to one of the watched "
-            "users. It says nothing about what "
-            "changed in a release -- the notes are not fetched; github_commits is where "
-            "what landed lives."
+            "users.\n\n"
+            "By default the names and dates only. Pass notes=true for the newest release's "
+            "own notes, which is what answers 'what is in it'. Without that you have the "
+            "name and the timestamp and nothing inside, and should say so rather than "
+            "guess at the contents. github_commits is where what landed lives."
         ),
         "params": {
             "type": "object",
@@ -298,6 +301,7 @@ TOOLS = [
                     "description": "owner/repo, or just the repo name if it is a watched user's",
                 },
                 "limit": {"type": "integer", "description": "how many, 1-50 (default 5)"},
+                "notes": {"type": "boolean", "description": "true to read the newest release's own notes"},
             },
             "required": ["repo"],
         },
@@ -804,7 +808,8 @@ class Tool:
         except (TypeError, ValueError):
             limit = RELEASES_SHOWN
         limit = max(1, min(limit, 50))
-        key = f"releases:{repo}:{limit}"
+        notes = bool(args.get("notes"))
+        key = f"releases:{repo}:{limit}:{notes}"
         if (said := self._remembered(key)) is not None:
             return said
         try:
@@ -834,10 +839,18 @@ class Tool:
             when = f" {ago_ms(one['ts_ms'])} ago" if one["ts_ms"] else " unpublished"
             said.append(name + when + (f" ({', '.join(marks)})" if marks else ""))
         more = f", and {total - len(said)} older" if total > len(said) else ""
+        wrote = ""
+        if notes:
+            newest = found["releases"][0]
+            wrote = (
+                f"\n\n{newest['tag']} notes:\n{_cut(newest['notes'], NOTES_CHARS)}"
+                if newest["notes"]
+                else f"\n\n{newest['tag']} was published with no notes at all"
+            )
         loose = ""
         if (untagged := [t for t in tags if t not in {r["tag"] for r in found["releases"]}]) and tags:
             loose = f"; tag(s) with no release: {', '.join(untagged[:5])}"
-        return self._remember(key, f"{repo}, newest release first: " + " | ".join(said) + more + loose)
+        return self._remember(key, f"{repo}, newest release first: " + " | ".join(said) + more + loose + wrote)
 
     async def github_readme(self, args: dict) -> str:
         """A project in its own words, trimmed to something a room can hold.

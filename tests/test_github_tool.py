@@ -2134,3 +2134,38 @@ async def test_asking_the_same_live_question_twice_costs_one_call(tmp_path):
     assert tool.source == "remembered"  # and says so, rather than claiming a fetch
     assert len(calls) == 1
     await api.aclose()
+
+
+async def test_the_notes_are_only_fetched_when_asked_for(tmp_path):
+    """It got the name and the timestamp and nothing inside, and said so --
+    which was the right answer to a tool that could not read them."""
+    body = _releases()
+    body["data"]["repository"]["releases"]["nodes"][0]["description"] = "## What changed\n\nQuite a lot."
+
+    import httpx
+    from external.github.github import GitHub
+    from external.github.store import Store
+
+    api = GitHub("github_pat_x")
+    api.client = httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(200, json=body)))
+    tool = Tool(Store(tmp_path / "g.db"), api, ["toppk"])
+
+    bare = await tool.call("github_releases", {"repo": "toppk/chickenbot"})
+    assert "Quite a lot" not in bare  # names and dates cost nothing to read
+
+    asked = await tool.call("github_releases", {"repo": "toppk/chickenbot", "notes": True})
+    assert "v0.4.0 notes:" in asked and "Quite a lot." in asked
+    await api.aclose()
+
+
+async def test_a_release_published_with_no_notes_says_that(tmp_path):
+    import httpx
+    from external.github.github import GitHub
+    from external.github.store import Store
+
+    api = GitHub("github_pat_x")
+    api.client = httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(200, json=_releases())))
+    tool = Tool(Store(tmp_path / "g.db"), api, ["toppk"])
+    said = await tool.call("github_releases", {"repo": "toppk/chickenbot", "notes": True})
+    assert "published with no notes at all" in said
+    await api.aclose()

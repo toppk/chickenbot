@@ -148,7 +148,7 @@ class GitHub:
         "query($owner:String!,$name:String!,$n:Int!){"
         "repository(owner:$owner,name:$name){isPrivate "
         "releases(first:$n,orderBy:{field:CREATED_AT,direction:DESC}){totalCount nodes{"
-        "tagName name publishedAt isPrerelease isDraft}} "
+        "tagName name publishedAt isPrerelease isDraft description}} "
         'refs(refPrefix:"refs/tags/",first:$n,orderBy:{field:TAG_COMMIT_DATE,direction:DESC})'
         "{totalCount nodes{name}}}}"
     )
@@ -224,6 +224,7 @@ class GitHub:
                     "ts_ms": _ts_ms(r.get("publishedAt")),
                     "draft": bool(r.get("isDraft")),
                     "pre": bool(r.get("isPrerelease")),
+                    "notes": str(r.get("description") or "").strip(),
                 }
                 for r in released
             ],
