@@ -136,3 +136,19 @@ def test_the_committed_snapshot_matches_what_the_code_creates():
     text = snapshot.read_text()
     missing = [sql.splitlines()[0] for sql in live if sql.split("(")[0].strip() not in text]
     assert not missing, f"not in the snapshot: {missing}"
+
+
+def test_no_timestamp_setting_is_left_in_the_old_namespace():
+    """`setting` holds timestamps as text values under a namespaced key, so
+    the column rename cannot protect them -- the namespace has to move with
+    the units, or seconds get read as milliseconds forever."""
+    import re
+    from pathlib import Path
+
+    src = Path(__file__).resolve().parent.parent / "src" / "chickenbot"
+    bad = []
+    for path in src.rglob("*.py"):
+        for call in re.finditer(r"(?:note_)?setting_int\(\s*\"([a-z_]+)\"", path.read_text()):
+            if not call.group(1).endswith("_ms"):
+                bad.append(f"{path.name}: {call.group(1)}")
+    assert not bad, f"namespaces holding a timestamp must end in _ms: {bad}"

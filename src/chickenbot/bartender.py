@@ -17,7 +17,7 @@ import asyncio
 import logging
 import time
 
-from .clock import local_ms
+from .clock import local_ms, ms
 from .brain import ProviderError
 from .dossier import MAX_CHARS, clip
 from .observe import activity, note, note_many
@@ -26,7 +26,7 @@ from .tools import no_tools
 log = logging.getLogger(__name__)
 
 TICK = 3600.0
-EVERY = 20 * 3600  # a day, loosely
+EVERY_MS = ms(20 * 3600)  # a day, loosely
 MIN_LINES = 12  # below this a day has nothing to notice
 MAX_LINES = 400
 MAX_PEOPLE = 6  # per pass; a busy room is read again tomorrow
@@ -83,8 +83,11 @@ class Bartender:
                     await self.read_the_day(tr, room, now)
 
     def _due(self, realm: str, room: str, now: float) -> bool:
-        last = self.h.store.setting_int("bartender", f"{realm}/{room}")
-        return now - last >= EVERY
+        # `bartender_ms`, not `bartender`: the stamp is milliseconds now, and
+        # a namespace that moved means an old reader finds nothing and runs a
+        # pass, rather than finding seconds and reading them as milliseconds.
+        last = self.h.store.setting_int("bartender_ms", f"{realm}/{room}")
+        return ms(now) - last >= EVERY_MS
 
     async def rehearse(self, tr, room: str, *, since: int, until: int, system: str = "") -> tuple[str, str, list[str]]:
         """A pass that changes nothing.
@@ -142,7 +145,7 @@ class Bartender:
             return
         with activity(kind="bartender", realm=tr.realm, room=room, nick=tr.me, account="-"):
             if not force:
-                store.note_setting_int("bartender", f"{tr.realm}/{room}", int(now))
+                store.note_setting_int("bartender_ms", f"{tr.realm}/{room}", ms(now))
             # The live pass reads the last day; a backfill reads a named one.
             # A rolling window means a fresh instance notices people today
             # rather than the day after tomorrow.
