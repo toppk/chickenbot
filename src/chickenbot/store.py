@@ -20,7 +20,7 @@ log = logging.getLogger(__name__)
 MAX_REVISIONS = 50
 # A forced sentence is a clue; a paragraph is a diary that re-reads itself
 # every turn and nobody corrects it.
-NOTE_CHARS = 140
+NOTE_CHARS = 280
 
 # This database's own version, independent of any other. Bumped for anything
 # that changes the schema OR the interpretation of what is already in it: a

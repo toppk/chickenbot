@@ -244,12 +244,12 @@ async def tool_current_time(h: Handler, ctx: Context, args: dict) -> str:
         "way through. Specifics you would otherwise have to look up a second time are "
         "the best thing to write.\n\n"
         "Use it whenever there is a detail worth having later; it costs the room "
-        "nothing. One sentence, 140 characters; longer is cut at a word and you are "
-        "told so."
+        "nothing. A sentence or two, 280 characters; longer is cut at a word and you "
+        "are told so."
     ),
     params={
         "type": "object",
-        "properties": {"note": {"type": "string", "description": "one sentence, to yourself, 140 characters"}},
+        "properties": {"note": {"type": "string", "description": "a sentence or two, to yourself, 280 characters"}},
         "required": ["note"],
     },
 )

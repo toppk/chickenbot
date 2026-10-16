@@ -42,7 +42,7 @@ async def test_too_long_is_cut_at_a_word_and_said(cfg, store):
     dossier, and this made the same mistake."""
     h = Handler(cfg, store, None, None)
     ctx = ctx_for(h)
-    wrote = "x" * 130 + " understanding"
+    wrote = "x" * (NOTE_CHARS - 10) + " understanding"
     said = await ToolBox(h, ctx).run("annotate_reply", {"note": wrote})
     assert f"cut to {NOTE_CHARS}" in said  # told, not done quietly
     assert ctx.note.endswith("\u2026")  # and the join is visible
@@ -51,10 +51,10 @@ async def test_too_long_is_cut_at_a_word_and_said(cfg, store):
 
 
 async def test_one_long_word_is_cut_anyway(cfg, store):
-    """No space to cut at is not a reason to store 200 characters."""
+    """No space to cut at is not a reason to store the lot."""
     h = Handler(cfg, store, None, None)
     ctx = ctx_for(h)
-    await ToolBox(h, ctx).run("annotate_reply", {"note": "y" * 200})
+    await ToolBox(h, ctx).run("annotate_reply", {"note": "y" * (NOTE_CHARS + 60)})
     assert len(ctx.note) == NOTE_CHARS
     assert ctx.note.endswith("\u2026")
 
@@ -171,12 +171,12 @@ async def test_the_history_says_what_the_cap_took(cfg, store):
     tr.rooms = ["#chan"]
     h.transports = {"fake": tr}
     ctx = ctx_for(h, tr)
-    await ToolBox(h, ctx).run("annotate_reply", {"note": "w" * 130 + " and one more thought"})
+    await ToolBox(h, ctx).run("annotate_reply", {"note": "w" * (NOTE_CHARS - 10) + " and one more thought"})
     ctx.say("short answer")
     await h.drain()
 
     line = (await store.recent("fake", "#chan", limit=5))[0]
-    assert line.note_cut == 11  # 151 written, 140 kept
+    assert line.note_cut == 11  # eleven past the cap, whatever the cap is
     assert "11 chars truncated." in render_scrollback([line])
 
 

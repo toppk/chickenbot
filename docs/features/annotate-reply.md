@@ -263,3 +263,10 @@ Separately, the first timeline showed `annotate_reply  from the local
 mirror`. The source field holds whatever answered last and nothing cleared
 it, so a built-in wore the label of an external call two steps earlier. Not
 this feature's bug, but this feature is what exposed it.
+
+**And 140 was too tight.** The cap is 280. One sentence was the right size
+for the aside the plan had in mind; it is the wrong size for a line that has
+to carry a version, a repository and what a tool actually returned. 280 is
+still a line rather than a paragraph, which is what the cap is for. The
+limit above is left as written -- it says what was believed at the time --
+and `NOTE_CHARS` is the only place the number lives.
