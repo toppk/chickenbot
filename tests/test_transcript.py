@@ -699,3 +699,62 @@ def test_a_pause_before_the_turn_has_somewhere_to_live():
     hold = (float(BASE - 5000) / 1000, 5000, "waited", "waiting for the burst to finish")
     call = (float(BASE) / 1000, 797, "model", "Together  tool_calls")
     assert [at for at, *_ in _rebased([hold, call])] == [0.0, 5.0]
+
+
+def test_counting_back_from_the_newest(tmp_path):
+    """The number you want is usually "the last one", and reading it off a
+    listing first is a step for nothing."""
+    from chickenbot.store import Store
+
+    st = Store(tmp_path / "c.db")
+    for n in range(3):
+        st.record_llm_call(
+            LlmCall(reason="ask", realm="irc", room="#chan", nick="toppk", request="", response=f"number {n}"),
+            keep=10,
+            hours=48,
+        )
+    assert st.llm_calls(one=-1)[0]["response"] == "number 2"
+    assert st.llm_calls(one=-2)[0]["response"] == "number 1"
+    assert st.llm_calls(one=-3)[0]["response"] == "number 0"
+    assert st.llm_calls(one=-4) == []
+    assert st.llm_call_count() == 3
+    st.close()
+
+
+def test_counting_back_honours_the_filters(tmp_path):
+    """`-1 --room #lobby` is the last call in that room, not the last call
+    filtered away to nothing."""
+    from chickenbot.store import Store
+
+    st = Store(tmp_path / "c.db")
+    for room in ("#lobby", "#soup", "#lobby", "#soup"):
+        st.record_llm_call(
+            LlmCall(reason="ask", realm="irc", room=room, nick="toppk", request="", response=f"in {room}"),
+            keep=10,
+            hours=48,
+        )
+    assert st.llm_calls(one=-1, room="#lobby")[0]["response"] == "in #lobby"
+    assert st.llm_call_count(room="#soup") == 2
+    st.close()
+
+
+def test_a_number_past_the_end_says_which_kind_of_nothing(tmp_path):
+    """ "Nothing recorded, turn it on" was a lie when the ring was full and
+    the count was simply too far back."""
+    from chickenbot.store import Store
+
+    st = Store(tmp_path / "c.db")
+    st.record_llm_call(
+        LlmCall(reason="ask", realm="irc", room="#chan", nick="toppk", request="", response="only one"),
+        keep=10,
+        hours=48,
+    )
+    st.close()
+
+    code, out = cli(tmp_path, "transcript", "-9", "--color", "never")
+    assert code == 1
+    assert "only 1 to count back through" in out
+
+    code, out = cli(tmp_path, "transcript", "77", "--color", "never")
+    assert code == 1
+    assert "no call 77" in out and "aged out" in out

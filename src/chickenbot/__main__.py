@@ -865,9 +865,19 @@ def visible(text: str) -> str:
 
 def show_transcript(store: Store, args: argparse.Namespace) -> int:
     """The one thing the activity record never held: the words themselves."""
-    rows = store.llm_calls(room=args.room, reason=args.reason, limit=args.last, one=args.id or 0)
+    wanted = args.id or 0
+    rows = store.llm_calls(room=args.room, reason=args.reason, limit=args.last, one=wanted)
     if not rows:
-        print("nothing recorded; `tune llm.transcript 100` turns it on", file=sys.stderr)
+        held = store.llm_calls(room=args.room, reason=args.reason, limit=1)
+        if wanted < 0 and held:
+            print(
+                f"only {store.llm_call_count(room=args.room, reason=args.reason)} to count back through",
+                file=sys.stderr,
+            )
+        elif wanted > 0 and held:
+            print(f"no call {wanted}; the ring drops its oldest, so it may have aged out", file=sys.stderr)
+        else:
+            print("nothing recorded; `tune llm.transcript 100` turns it on", file=sys.stderr)
         return 1
     want = getattr(args, "color", "auto")
     lit = want == "always" or (want == "auto" and sys.stdout.isatty() and not os.environ.get("NO_COLOR"))
@@ -1476,7 +1486,9 @@ def main(argv: list[str] | None = None) -> int:
     rh.add_argument("--prompt", action="store_true", help="print what the model was sent, not just its answer")
 
     tx = sub.add_parser("transcript", help="every call to the model: what was sent, what came back")
-    tx.add_argument("id", nargs="?", type=int, help="one call, in full; omit to list")
+    tx.add_argument(
+        "id", nargs="?", type=int, help="one call, in full; -1 is the last, -2 the one before; omit to list"
+    )
     tx.add_argument("--room", default="", help="only this room")
     tx.add_argument("--reason", default="", help="only these, e.g. bartender, vibe, barfly, follow")
     tx.add_argument("--last", type=int, default=20, help="how many to list (default 20)")

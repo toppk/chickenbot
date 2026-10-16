@@ -640,9 +640,13 @@ class Store:
         self._db.commit()
 
     def llm_calls(self, *, room: str = "", reason: str = "", limit: int = 20, one: int = 0) -> list[sqlite3.Row]:
+        """`one` is an id, or counts back from the newest when negative: -1
+        is the last call, -2 the one before it. Ids are stable and a ring
+        drops its oldest, so the number you read a minute ago still works --
+        and the number you want is usually "the last one"."""
         sql, args = "SELECT * FROM llm_call", []
         where = []
-        if one:
+        if one > 0:
             where.append("id = ?")
             args.append(one)
         if room:
@@ -654,8 +658,27 @@ class Store:
         if where:
             sql += " WHERE " + " AND ".join(where)
         sql += " ORDER BY id DESC LIMIT ?"
-        args.append(limit)
+        # Counting back honours the filters, so `-1 --room #lobby` is the
+        # last call in that room rather than the last call, filtered away.
+        args.append(1 if one < 0 else limit)
+        if one < 0:
+            sql += " OFFSET ?"
+            args.append(-one - 1)
         return self._db.execute(sql, args).fetchall()
+
+    def llm_call_count(self, *, room: str = "", reason: str = "") -> int:
+        """How many are held, for saying how far back counting can go."""
+        sql, args = "SELECT COUNT(*) AS n FROM llm_call", []
+        where = []
+        if room:
+            where.append("room = ? COLLATE NOCASE")
+            args.append(room)
+        if reason:
+            where.append("reason LIKE ?")
+            args.append(f"%{reason}%")
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        return int(self._db.execute(sql, args).fetchone()["n"])
 
     def record_activity(self, fields: dict) -> None:
         columns = (
