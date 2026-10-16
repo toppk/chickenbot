@@ -236,14 +236,16 @@ async def tool_current_time(h: Handler, ctx: Context, args: dict) -> str:
     description=(
         "Keep one short note to yourself beside the reply you are about to send. "
         "It is never sent anywhere: it comes back to you, and only to you, on your own "
-        "line in the conversation history, where it is the one place you have for an "
-        "aside.\n\n"
-        "Use it for what the reply cannot carry: why you said what you said, what you "
-        "suspect but would not assert out loud, what you looked up and left out, what to "
-        "pick up if the subject returns. One sentence, 140 characters; longer is cut at a "
-        "word and you are told so. Optional, and most replies do not need one.\n\n"
-        "It is not a diary and nobody tidies it: write what would help you read this "
-        "exchange cold in an hour, not how you felt about it."
+        "line in the conversation history.\n\n"
+        "It is there to make your own recall better. What a tool told you does not "
+        "survive this turn -- when you read this exchange back, all you will have is "
+        "what you said out loud. So put the detail here: the name, the number, the "
+        "version, the repository, what you checked and what it said, what you were part "
+        "way through. Specifics you would otherwise have to look up a second time are "
+        "the best thing to write.\n\n"
+        "Use it whenever there is a detail worth having later; it costs the room "
+        "nothing. One sentence, 140 characters; longer is cut at a word and you are "
+        "told so."
     ),
     params={
         "type": "object",

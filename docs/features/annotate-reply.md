@@ -236,3 +236,30 @@ happens at 141 characters.
 
 Whether it is any good -- whether the aside actually relaxes the spoken line
 -- is not something tests can say. That wants reading transcripts.
+
+## After it shipped
+
+Deployed 2026-10-16 on eaccel; it used the tool the same day, unprompted.
+
+Two things the plan got wrong, both visible in the first transcript.
+
+**The advice was defensive where it should have been practical.** The
+description framed the note as somewhere to put what the reply could not
+carry -- asides, suspicions, how it read the room -- and then spent a
+sentence warning it off being a diary. That is advice about restraint, for a
+feature whose problem is the opposite: the note is a recall aid, and the
+thing worth recording is detail. What a tool returned does not survive the
+turn, so a fact it looked up and did not say out loud is gone. Names,
+numbers, versions, what was checked and what came back. It now says that,
+and the discouragement -- "most replies do not need one" -- is gone, because
+a note costs the room nothing.
+
+**The answer echoed the note back.** `noted, beside your reply: <note>`
+returned words the model had written a moment earlier and would see again in
+the next turn's history. It says `noted`. The cut path still echoes, because
+there the text changed.
+
+Separately, the first timeline showed `annotate_reply  from the local
+mirror`. The source field holds whatever answered last and nothing cleared
+it, so a built-in wore the label of an external call two steps earlier. Not
+this feature's bug, but this feature is what exposed it.
