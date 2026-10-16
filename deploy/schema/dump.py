@@ -28,8 +28,7 @@ sys.path.insert(0, str(ROOT))
 
 def dump(db: sqlite3.Connection, path: pathlib.Path, title: str, version: int) -> None:
     rows = db.execute(
-        "SELECT sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%'"
-        " ORDER BY type DESC, name"
+        "SELECT sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%' ORDER BY type DESC, name"
     ).fetchall()
     out = [
         f"-- {title}, schema v{version}.",
@@ -50,10 +49,10 @@ def dump(db: sqlite3.Connection, path: pathlib.Path, title: str, version: int) -
 
 
 def main() -> int:
-    from chickenbot.store import SCHEMA_VERSION, Store
-
     from external.github.store import SCHEMA_VERSION as GH_VERSION
     from external.github.store import Store as GhStore
+
+    from chickenbot.store import SCHEMA_VERSION, Store
 
     with tempfile.TemporaryDirectory() as tmp:
         where = pathlib.Path(tmp)

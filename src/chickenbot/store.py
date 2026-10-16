@@ -12,10 +12,9 @@ from pathlib import Path
 from typing import Any
 
 from . import irccase
+from .clock import millis, ms, now_ms
 
 MAX_REVISIONS = 50
-
-from .clock import millis, ms, now_ms
 
 # This database's own version, independent of any other. Bumped for anything
 # that changes the schema OR the interpretation of what is already in it: a
@@ -385,17 +384,14 @@ class Store:
         from . import version
 
         self._db.execute(
-            "INSERT INTO schema_history (version, applied_ms, by) VALUES (?, ?, ?)"
-            " ON CONFLICT(version) DO NOTHING",
+            "INSERT INTO schema_history (version, applied_ms, by) VALUES (?, ?, ?) ON CONFLICT(version) DO NOTHING",
             (SCHEMA_VERSION, now_ms(), version()),
         )
         self._db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     def schema_history(self) -> list[tuple[int, int, str]]:
         """(version, when, by) oldest first."""
-        rows = self._db.execute(
-            "SELECT version, applied_ms, by FROM schema_history ORDER BY version"
-        ).fetchall()
+        rows = self._db.execute("SELECT version, applied_ms, by FROM schema_history ORDER BY version").fetchall()
         return [(r["version"], r["applied_ms"], r["by"]) for r in rows]
 
     def _check_version(self) -> None:
@@ -528,7 +524,8 @@ class Store:
     async def last_seen_ms(self, realm: str, nick: str) -> Line | None:
         def go() -> Line | None:
             row = self._db.execute(
-                "SELECT ts_ms, channel, nick, text FROM chatlog WHERE realm = ? AND nick_key = ? ORDER BY id DESC LIMIT 1",
+                "SELECT ts_ms, channel, nick, text FROM chatlog"
+                " WHERE realm = ? AND nick_key = ? ORDER BY id DESC LIMIT 1",
                 (realm, self.fold(realm, nick)),
             ).fetchone()
             return Line(row["ts_ms"], row["channel"], row["nick"], row["text"]) if row else None
@@ -547,9 +544,7 @@ class Store:
 
         return await self._run(go)
 
-    async def recent(
-        self, realm: str, channel: str, limit: int = 40, since_ms: int = 0, least: int = 0
-    ) -> list[Line]:
+    async def recent(self, realm: str, channel: str, limit: int = 40, since_ms: int = 0, least: int = 0) -> list[Line]:
         """The tail of the room. `since` bounds it in time, because twenty lines
         in a quiet channel can reach back a day and a conversation does not.
         `least` keeps that from returning nothing at all when the room is cold.
@@ -570,7 +565,9 @@ class Store:
             if since_ms:
                 fresh = [r for r in rows if r["ts_ms"] >= millis(since_ms, "a scrollback window")]
                 rows = fresh if len(fresh) >= least else rows[:least]
-            return [Line(r["ts_ms"], r["channel"], r["nick"], r["text"], r["kind"], r["account"]) for r in reversed(rows)]
+            return [
+                Line(r["ts_ms"], r["channel"], r["nick"], r["text"], r["kind"], r["account"]) for r in reversed(rows)
+            ]
 
         return await self._run(go)
 
@@ -843,7 +840,8 @@ class Store:
         """When a person last said anything here, 0 if never. The bot's own
         lines do not count: talking to itself is not a lively room."""
         row = self._db.execute(
-            "SELECT MAX(ts_ms) AS ts_ms FROM chatlog WHERE realm = ? AND channel = ? AND kind IN ('privmsg', 'command')",
+            "SELECT MAX(ts_ms) AS ts_ms FROM chatlog"
+            " WHERE realm = ? AND channel = ? AND kind IN ('privmsg', 'command')",
             (realm, self.fold(realm, room)),
         ).fetchone()
         return int(row["ts_ms"] or 0) if row else 0
@@ -1113,9 +1111,7 @@ class Store:
 
     def set_person_observed(self, person_id: int, text: str) -> None:
         """What the bot noticed, kept apart from what owners wrote."""
-        self._db.execute(
-            "UPDATE person SET observed = ?, updated_at_ms = ? WHERE id = ?", (text, now_ms(), person_id)
-        )
+        self._db.execute("UPDATE person SET observed = ?, updated_at_ms = ? WHERE id = ?", (text, now_ms(), person_id))
         self._keep_revision("person-observed", str(person_id), text, "bartender")
 
     def spoke_on(self, realm: str, room: str, day: str = "", since: int = 0, until: int = 0) -> list[str]:
@@ -1199,9 +1195,7 @@ class Store:
             )
         else:
             if facts is None:
-                self._db.execute(
-                    "UPDATE person SET notes = ?, updated_at_ms = ? WHERE id = ?", (notes, now_ms(), pid)
-                )
+                self._db.execute("UPDATE person SET notes = ?, updated_at_ms = ? WHERE id = ?", (notes, now_ms(), pid))
             else:
                 self._db.execute(
                     "UPDATE person SET notes = ?, facts = ?, updated_at_ms = ? WHERE id = ?",

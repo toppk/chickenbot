@@ -10,11 +10,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-import time
 from collections.abc import Awaitable, Callable
 
-from .events import Event, Kind
 from .clock import now_ms
+from .events import Event, Kind
 from .store import Store
 from .transport import Transport
 

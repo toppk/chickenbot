@@ -16,8 +16,8 @@ import asyncio
 import logging
 import time
 
-from .clock import local_ms, ms, now_ms
 from .brain import ProviderError
+from .clock import local_ms, ms, now_ms
 from .observe import activity, note
 from .rooms import MAX_CHARS
 from .tools import no_tools

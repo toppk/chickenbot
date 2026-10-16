@@ -22,8 +22,8 @@ import time
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-from .github import GitHub, ms, now_ms
-from .store import Store
+from .github import GitHub
+from .store import Store, ms, now_ms
 
 log = logging.getLogger("github-tool")
 
@@ -648,11 +648,10 @@ class Tool:
         except (TypeError, ValueError):
             commits = COMMITS_SHOWN
         commits = max(1, min(commits, 50))
-        if not branch:
-            if (answer := await self._survey(repo, commits)) is not None:
-                return answer
-            # No token: GraphQL has no anonymous tier, so fall back to the
-            # default branch over REST and say that is all this is.
+        # No token falls through: GraphQL has no anonymous tier, so the
+        # answer becomes the default branch over REST, and says so.
+        if not branch and (answer := await self._survey(repo, commits)) is not None:
+            return answer
         return await self._branch_commits(repo, branch, commits)
 
     async def _survey(self, repo: str, commits: int) -> str | None:
@@ -879,10 +878,16 @@ def _declared() -> list[dict]:
     for tool in TOOLS:
         user = ((tool.get("params") or {}).get("properties") or {}).get("user")
         if tool["name"] == "github_activity" and user:
-            tool = {**tool, "params": {**tool["params"], "properties": {
-                **tool["params"]["properties"],
-                "user": {**user, "description": f"one of {', '.join(USERS)}; omit for everyone"},
-            }}}
+            tool = {
+                **tool,
+                "params": {
+                    **tool["params"],
+                    "properties": {
+                        **tool["params"]["properties"],
+                        "user": {**user, "description": f"one of {', '.join(USERS)}; omit for everyone"},
+                    },
+                },
+            }
         out.append(tool)
     return out
 

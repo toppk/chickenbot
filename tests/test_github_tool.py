@@ -1232,7 +1232,9 @@ async def test_a_summary_counts_landings_apart_from_openings(tmp_path):
     store.record(
         [
             Item(id="pr:1", kind="pr", actor="chrisk", repo="a/b", ts_ms=now, title="opened #1"),
-            Item(id="merged:a/b#2", kind="pr", actor="chrisk", repo="a/b", ts_ms=now, title="merged #2", state="merged"),
+            Item(
+                id="merged:a/b#2", kind="pr", actor="chrisk", repo="a/b", ts_ms=now, title="merged #2", state="merged"
+            ),
         ]
     )
     tally = store.tally(actor="chrisk")
@@ -1242,7 +1244,9 @@ async def test_a_summary_counts_landings_apart_from_openings(tmp_path):
 
 async def test_an_unknown_kind_finds_nothing_rather_than_everything(tmp_path):
     store = Store(tmp_path / "g.db")
-    store.record([Item(id="x", kind="commit", actor="chrisk", repo="a/b", ts_ms=int(time.time() * 1000), title="pushed")])
+    store.record(
+        [Item(id="x", kind="commit", actor="chrisk", repo="a/b", ts_ms=int(time.time() * 1000), title="pushed")]
+    )
     tool = Tool(store, None, ["chrisk"])
     assert "no activity" in await tool.call("github_activity", {"user": "chrisk", "kind": "nonsense"})
     store.close()
@@ -1536,7 +1540,6 @@ def test_a_survey_puts_the_busiest_branch_first():
     import asyncio
 
     import httpx
-
     from external.github.github import GitHub
 
     body = {
@@ -1589,7 +1592,6 @@ def test_graphql_says_it_needs_a_token_rather_than_failing_oddly():
     import asyncio
 
     import pytest
-
     from external.github.github import GitHub
 
     async def go():
@@ -1613,9 +1615,7 @@ def test_the_watched_handles_reach_the_schema():
     try:
         M.USERS[:] = ["toppk", "iconidentify"]
         said = [t for t in M._declared() if t["name"] == "github_activity"][0]
-        assert said["params"]["properties"]["user"]["description"] == (
-            "one of toppk, iconidentify; omit for everyone"
-        )
+        assert said["params"]["properties"]["user"]["description"] == ("one of toppk, iconidentify; omit for everyone")
         # The literal is shared: declaring must not write the watch list into it.
         assert M.TOOLS[0] is not said
         assert "toppk" not in before["params"]["properties"]["user"]["description"]
@@ -1633,7 +1633,6 @@ def test_activity_says_its_feed_can_be_behind():
 
 def _api(private=False, handler=None):
     import httpx
-
     from external.github.github import GitHub
 
     api = GitHub("github_pat_x", private=private)
@@ -1776,7 +1775,6 @@ def test_every_search_is_restricted_at_the_one_choke_point():
     import asyncio
 
     import httpx
-
     from external.github.github import GitHub
 
     asked = []
@@ -1831,10 +1829,20 @@ def test_every_stored_stamp_is_on_the_one_clock(tmp_path):
 
     store = Store(tmp_path / "g.db")
     store.save_item(_item_row(2))
-    store.save_repo({
-        "full_name": "a/b", "owner": "a", "name": "b", "private": 0, "fork": 0,
-        "archived": 0, "stars": 1, "open_issues": 0, "pushed_at_ms": now_ms(), "description": "",
-    })
+    store.save_repo(
+        {
+            "full_name": "a/b",
+            "owner": "a",
+            "name": "b",
+            "private": 0,
+            "fork": 0,
+            "archived": 0,
+            "stars": 1,
+            "open_issues": 0,
+            "pushed_at_ms": now_ms(),
+            "description": "",
+        }
+    )
     now = now_ms()
     for table, column in (("item", "seen_at_ms"), ("repo", "seen_at_ms")):
         stamp = store.db.execute(f"SELECT {column} FROM {table}").fetchone()[0]

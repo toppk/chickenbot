@@ -295,7 +295,9 @@ async def test_scrollback_lines_carry_their_age(cfg, transport, store):
     provider = StubProvider()
     handler = Handler(cfg, store, provider, None)
     await store.log_line(transport.realm, "#chan", "toppk", "toppk", "make it so")
-    store._db.execute("UPDATE chatlog SET ts_ms = ? WHERE text = 'make it so'", (int(time.time() * 1000) - (1800) * 1000,))
+    store._db.execute(
+        "UPDATE chatlog SET ts_ms = ? WHERE text = 'make it so'", (int(time.time() * 1000) - (1800) * 1000,)
+    )
     store._db.commit()
 
     await send(handler, transport, "!ask what did i mean")

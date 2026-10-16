@@ -27,6 +27,8 @@ class Turn:
 # which endpoint was slow. A ContextVar rather than state on the provider:
 # two rooms answer at once, and their legs must not mix.
 _LEGS: ContextVar[list[dict] | None] = ContextVar("llm_legs", default=None)
+
+
 def now_ms() -> int:
     """Wall clock, milliseconds. Durations are measured with the monotonic
     clock; only the anchor is wall time, so a step cannot stretch a bar."""

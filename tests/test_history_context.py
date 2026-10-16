@@ -18,7 +18,15 @@ def said(store, text, *, ago_seconds, nick="nate", realm="fake", room="#chan", k
     store._db.execute(
         "INSERT INTO chatlog (ts_ms, realm, channel, nick, nick_key, account, kind, text)"
         " VALUES (?, ?, ?, ?, ?, '', ?, ?)",
-        (int((time.time() - ago_seconds) * 1000), realm, store.fold(realm, room), nick, store.fold(realm, nick), kind, text),
+        (
+            int((time.time() - ago_seconds) * 1000),
+            realm,
+            store.fold(realm, room),
+            nick,
+            store.fold(realm, nick),
+            kind,
+            text,
+        ),
     )
     store._db.commit()
 

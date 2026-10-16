@@ -12,7 +12,7 @@ from datetime import datetime
 
 import httpx
 
-from .store import Item, ms, now_ms
+from .store import Item
 
 log = logging.getLogger(__name__)
 
@@ -27,8 +27,9 @@ def _commit(raw: dict) -> dict:
         "ts_ms": _ts_ms(raw.get("committedDate")),
         # The GitHub login where a commit is linked to an account, the name
         # on the commit where it is not; a blank author reads as nobody.
-        "who": (((raw.get("author") or {}).get("user") or {}).get("login")
-                or (raw.get("author") or {}).get("name") or "?"),
+        "who": (
+            ((raw.get("author") or {}).get("user") or {}).get("login") or (raw.get("author") or {}).get("name") or "?"
+        ),
         "subject": str(raw.get("messageHeadline", "")),
     }
 
@@ -113,7 +114,7 @@ class GitHub:
         "repository(owner:$owner,name:$name){isPrivate "
         "defaultBranchRef{name target{... on Commit{history(first:$n){nodes{"
         "oid committedDate messageHeadline author{name user{login}}}}}}} "
-        "refs(refPrefix:\"refs/heads/\",first:$refs){totalCount nodes{name "
+        'refs(refPrefix:"refs/heads/",first:$refs){totalCount nodes{name '
         "target{... on Commit{committedDate oid messageHeadline author{name user{login}}}}}}}}"
     )
 
@@ -423,5 +424,12 @@ def _from_event(raw: dict) -> Item | None:
         url = node.get("html_url", url)
 
     return Item(
-        id=str(raw.get("id", "")), kind=kind, actor=actor, repo=repo, ts_ms=ts_ms, title=title[:200], url=url, state=state
+        id=str(raw.get("id", "")),
+        kind=kind,
+        actor=actor,
+        repo=repo,
+        ts_ms=ts_ms,
+        title=title[:200],
+        url=url,
+        state=state,
     )

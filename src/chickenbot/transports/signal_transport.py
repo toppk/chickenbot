@@ -7,12 +7,11 @@ empty and every moderation command refuses rather than pretending.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 
-from ..tasks import loose
 from ..config import SignalConfig
 from ..events import Event, Kind
+from ..tasks import loose
 from ..transport import Membership, Sink, chunk
 
 log = logging.getLogger(__name__)

@@ -12,10 +12,10 @@ import os
 import random
 import shutil
 import signal
-from functools import partial
 import sys
 import textwrap
 import time
+from functools import partial
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
@@ -26,6 +26,7 @@ from .brain.recorded import Recorded
 from .cert import DAYS as CERT_DAYS
 from .cert import NAME as CERT_NAME
 from .cert import generate as generate_cert
+from .clock import local_ms, ms, now_ms
 from .commands import Handler
 from .observe import TRACE, set_sink
 from .scheduler import Scheduler
@@ -33,11 +34,10 @@ from .settings import RESTART_ONLY, SETTABLE, Settings, Unsettable
 from .soul import pending as soul_pending
 from .soul import seed as seed_soul
 from .store import Store
+from .tasks import forever
 from .toolsocket import ToolServer
 from .transport import Transport
 from .transports import build
-from .tasks import forever
-from .clock import local_ms, ms, now_ms
 from .transports.irc_transport import IRCTransport
 from .vibe import VibeCheck
 from .watcher import Watcher
@@ -968,10 +968,10 @@ def _events(row) -> list[tuple[float, int, str, str]]:
         )
     laid: list[tuple[float, int, str, str]] = []
     running = 0.0
-    for at, ms, kind, what in out:
+    for at, took, kind, what in out:
         start = at if at else running
-        laid.append((start, ms, kind, what))
-        running = max(running, start + ms / 1000)
+        laid.append((start, took, kind, what))
+        running = max(running, start + took / 1000)
     return sorted(laid)
 
 
@@ -984,17 +984,17 @@ def _sequence(row, paint: Paint) -> None:
     events = _rebased(_events(row))
     if not events:
         return
-    if not any(ms for _at, ms, _kind, _what in events):
+    if not any(took for _at, took, _kind, _what in events):
         return  # nothing to summarise but the total, already printed above
     stages: list[tuple[str, int]] = []
-    for _at, ms, kind, _what in events:
+    for _at, took, kind, _what in events:
         if stages and stages[-1][0] == kind:
-            stages[-1] = (kind, stages[-1][1] + ms)
+            stages[-1] = (kind, stages[-1][1] + took)
         else:
-            stages.append((kind, ms))
+            stages.append((kind, took))
     colours = {"waited": "grey", "tool": "yellow", "model": "cyan"}
     said = {"waited": "held", "tool": "looked", "model": "thought"}
-    parts = [paint(f"{said[kind]} {ms / 1000:.1f}s", colours[kind]) for kind, ms in stages]
+    parts = [paint(f"{said[kind]} {took / 1000:.1f}s", colours[kind]) for kind, took in stages]
     # The row's own ms starts after any pause taken before the turn, so the
     # span of what is drawn above is the honest total.
     total = max(_span(events), row["ms"] / 1000)
@@ -1013,14 +1013,14 @@ def _rebased(events: list[tuple[float, int, str, str]]) -> list[tuple[float, int
     if not events:
         return events
     base = min(at for at, _ms, _kind, _what in events)
-    return [(round(at - base, 3), ms, kind, what) for at, ms, kind, what in events]
+    return [(round(at - base, 3), took, kind, what) for at, took, kind, what in events]
 
 
 def _span(events: list[tuple[float, int, str, str]]) -> float:
     """Seconds from the first thing starting to the last thing ending."""
     if not events:
         return 0.0
-    return max(at + ms / 1000 for at, ms, _kind, _what in events)
+    return max(at + took / 1000 for at, took, _kind, _what in events)
 
 
 def _timeline(row, paint: Paint) -> None:
@@ -1036,7 +1036,7 @@ def _timeline(row, paint: Paint) -> None:
         return
     print()
     print(paint.rule("WHERE THE TIME WENT", "rev", "magenta"))
-    if not any(ms for _at, ms, _kind, _what in laid):
+    if not any(took for _at, took, _kind, _what in laid):
         # Nothing was measured, which is not the same as nothing taking any
         # time. Drawing a row of 0ms bars would be a measurement of zero.
         print(paint("  not recorded: this row predates per-step timing", "dim"))
@@ -1045,11 +1045,11 @@ def _timeline(row, paint: Paint) -> None:
             print(f"  {paint(format(kind, '<7'), 'grey')} {what}")
         return
     colours = {"waited": "grey", "tool": "yellow", "model": "cyan"}
-    for start, ms, kind, what in laid:
-        bar = "\u2588" * max(1, min(round(ms / 100), 40))
+    for start, took, kind, what in laid:
+        bar = "\u2588" * max(1, min(round(took / 100), 40))
         print(
             f"  {paint(f't+{start:5.1f}s', 'grey')}  {paint(format(kind, '<7'), colours[kind])} "
-            f"{ms:>6}ms  {paint(bar, colours[kind])} {what}"
+            f"{took:>6}ms  {paint(bar, colours[kind])} {what}"
         )
 
 

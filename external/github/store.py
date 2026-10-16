@@ -11,6 +11,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+
 # This mirror's own version, numbered independently of chickenbot.db: they
 # are different files with different shapes and no reason to move together.
 # Bumped for anything that changes the schema or the meaning of what is in
@@ -135,8 +136,7 @@ class Store:
 
     def _note_version(self) -> None:
         self.db.execute(
-            "INSERT INTO schema_history (version, applied_ms, by) VALUES (?, ?, ?)"
-            " ON CONFLICT(version) DO NOTHING",
+            "INSERT INTO schema_history (version, applied_ms, by) VALUES (?, ?, ?) ON CONFLICT(version) DO NOTHING",
             (SCHEMA_VERSION, now_ms(), _release()),
         )
         self.db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")

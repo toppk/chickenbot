@@ -14,7 +14,6 @@ understanding should not have to wait, but licence to act on it should.
 from __future__ import annotations
 
 import logging
-import time
 
 from .clock import now_ms
 from .dossier import clip

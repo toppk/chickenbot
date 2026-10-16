@@ -1,0 +1,96 @@
+# Builds and publishes a release when a vX.Y.Z tag is pushed (deploy/release
+# does that). Run it by hand with dry_run to rehearse without publishing.
+#
+# A tag means a release. Nothing else does: deploying does not go through
+# here at all. `deploy/deploy.sh` builds from whatever is checked out and
+# stamps the version it finds -- `0.4.0+3.g1b19257` three commits past a
+# tag -- so a test build costs nothing and leaves no trace on GitHub.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (for example v0.4.0)"
+        required: true
+        type: string
+      dry_run:
+        description: "Build and test only; publish nothing"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+env:
+  TAG: ${{ inputs.tag || github.ref_name }}
+
+jobs:
+  build:
+    name: Test and build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Check
+        run: |
+          uv run ruff check
+          uv run ruff format --check
+          uv run pytest -q
+
+      - name: The tag must agree with the version it claims
+        run: |
+          declared=$(sed -n 's/^version = "\(.*\)"/\1/p' pyproject.toml | head -1)
+          test "${TAG#v}" = "$declared" \
+            || { echo "tag $TAG disagrees with pyproject version $declared" >&2; exit 1; }
+
+      - name: Build
+        # Source only: both distributions, no wheels. What a reader wants
+        # from this project is the source, and an sdist is what an installer
+        # can still build a wheel from.
+        run: |
+          mkdir -p dist
+          : > src/chickenbot/_revision.txt   # a release is not "past a tag"
+          uv build --sdist -o dist
+          (cd external && uv build --sdist -o ../dist)
+          cd dist
+          for f in *; do sha256sum "$f" > "$f.sha256"; done
+          ls -l
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  publish:
+    name: Publish
+    needs: build
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$TAG" \
+            --title "chickenbot $TAG" \
+            --notes-file "release-notes/${TAG#v}.md" \
+            dist/*

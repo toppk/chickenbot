@@ -24,7 +24,6 @@ from .attention import (
 )
 from .brain import Provider, ProviderError, collect_legs, leaked_markup, note_wait
 from .clock import millis, ms, now_ms
-from .tasks import watched
 from .config import Config
 from .dossier import Dossiers
 from .events import Event, Kind
@@ -39,6 +38,7 @@ from .scheduler import MAX_DELAY, describe, parse_delay
 from .settings import RESTART_ONLY, SETTABLE, Settings, Unsettable
 from .soul import Soul
 from .store import Store
+from .tasks import watched
 from .tools import ToolBox, no_tools
 from .transport import BAN, DEOP, DEVOICE, KICK, OP, TOPIC, UNBAN, VOICE, Transport
 from .watcher import FEEDS, Watcher, parse_slug
@@ -1531,9 +1531,7 @@ async def _dump_comms(h: Handler, ctx: Context) -> list[str]:
         out.append("told to be bots: " + ", ".join(f"{handle}@{realm}" for realm, handle, _ts in marked))
     known = await h.store.known_accounts()
     if known:
-        out.append(
-            "known: " + ", ".join(f"{acct}@{t} ({ago_ms(seen_ms)} ago)" for t, acct, _n, seen_ms in known)
-        )
+        out.append("known: " + ", ".join(f"{acct}@{t} ({ago_ms(seen_ms)} ago)" for t, acct, _n, seen_ms in known))
     return out
 
 

@@ -49,8 +49,8 @@ from __future__ import annotations
 import json
 import shutil
 import sqlite3
-import time
 import sys
+import time
 from pathlib import Path
 
 # Named per database: they are versioned independently, and this script

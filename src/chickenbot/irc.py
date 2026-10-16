@@ -13,9 +13,9 @@ from collections import deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 
-from .tasks import loose
 from . import irccase
 from .observe import TRACE
+from .tasks import loose
 
 log = logging.getLogger(__name__)
 

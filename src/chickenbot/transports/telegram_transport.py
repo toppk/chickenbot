@@ -5,9 +5,9 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from ..tasks import loose
 from ..config import TelegramConfig
 from ..events import Event, Kind
+from ..tasks import loose
 from ..transport import BAN, KICK, TOPIC, Membership, Sink, chunk
 
 log = logging.getLogger(__name__)

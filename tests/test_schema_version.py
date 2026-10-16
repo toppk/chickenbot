@@ -32,9 +32,9 @@ def _declared(schema: str) -> set[str]:
 def test_the_migration_knows_every_timestamp_the_schema_has():
     """A column added later and not listed here would keep its seconds and
     be read as milliseconds, which is the failure the rename exists to stop."""
-    from chickenbot.store import SCHEMA
-
     from external.github.store import SCHEMA as GH_SCHEMA
+
+    from chickenbot.store import SCHEMA
 
     script = _script()
     born = script.BORN_AT_V1
@@ -51,9 +51,9 @@ def test_the_migration_knows_every_timestamp_the_schema_has():
 def test_each_database_carries_its_own_version():
     """They are different files with different shapes; nothing says a change
     to one is a change to the other. The script names both explicitly."""
-    from chickenbot.store import SCHEMA_VERSION
-
     from external.github.store import SCHEMA_VERSION as GH_VERSION
+
+    from chickenbot.store import SCHEMA_VERSION
 
     script = _script()
     assert script.MAIN_VERSION == SCHEMA_VERSION
@@ -116,7 +116,6 @@ def test_the_migration_is_safe_to_run_twice(tmp_path):
 def test_the_committed_snapshot_matches_what_the_code_creates():
     """The snapshot is how a fork sees what a version was, so it has to be
     what that version actually is."""
-    import sqlite3
     import tempfile
     from pathlib import Path
 
@@ -128,9 +127,12 @@ def test_the_committed_snapshot_matches_what_the_code_creates():
 
     with tempfile.TemporaryDirectory() as tmp:
         st = Store(Path(tmp) / "a.db")
-        live = {sql.strip() for (sql,) in st._db.execute(
-            "SELECT sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%'"
-        )}
+        live = {
+            sql.strip()
+            for (sql,) in st._db.execute(
+                "SELECT sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%'"
+            )
+        }
         st.close()
 
     text = snapshot.read_text()

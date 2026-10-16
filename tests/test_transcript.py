@@ -198,7 +198,9 @@ async def test_tool_calls_are_kept_with_their_arguments_and_results(store):
         name, supports_tools = "tooled", True
 
         async def reply(self, *, toolbox=None, **kw):
-            toolbox.log.append(Called("chan_who", {"target": "biff"}, "biff (biff@host) [bot]", at_ms=BASE + 400, ms=220))
+            toolbox.log.append(
+                Called("chan_who", {"target": "biff"}, "biff (biff@host) [bot]", at_ms=BASE + 400, ms=220)
+            )
             toolbox.log.append(Called("chan_state", {}, "#lobby: 9 here", at_ms=BASE + 700, ms=2))
             return "three bots, by the flag"
 
@@ -506,7 +508,14 @@ def test_the_timeline_shows_waits_tools_and_calls_in_order(tmp_path):
             response="saw it",
             ms=8512,
             tool_calls=[
-                {"name": "ext_github_activity", "args": {}, "result": "r", "at_ms": BASE + 5900, "ms": 412, "source": "mirror"}
+                {
+                    "name": "ext_github_activity",
+                    "args": {},
+                    "result": "r",
+                    "at_ms": BASE + 5900,
+                    "ms": 412,
+                    "source": "mirror",
+                }
             ],
             details=[
                 {"kind": "wait", "what": "waiting for the burst to finish", "ms": 5000, "at_ms": BASE + 0},
@@ -665,9 +674,11 @@ def test_a_hold_taken_before_the_clock_starts_the_timeline():
     on top of the first model call."""
     from chickenbot.__main__ import _rebased, _span
 
-    events = [(-5.0, 5000, "waited", "waiting for the burst to finish"),
-              (0.0, 797, "model", "Together  tool_calls"),
-              (0.8, 9001, "tool", "ext_github_refresh")]
+    events = [
+        (-5.0, 5000, "waited", "waiting for the burst to finish"),
+        (0.0, 797, "model", "Together  tool_calls"),
+        (0.8, 9001, "tool", "ext_github_refresh"),
+    ]
     laid = _rebased(events)
     assert [at for at, *_ in laid] == [0.0, 5.0, 5.8]
     assert round(_span(laid), 3) == 14.801  # the hold is inside the total, not beside it

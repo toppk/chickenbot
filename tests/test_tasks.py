@@ -3,8 +3,6 @@
 import asyncio
 import logging
 
-import pytest
-
 from chickenbot.tasks import forever, loose, watched
 
 
