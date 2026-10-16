@@ -12,6 +12,7 @@ import os
 import random
 import shutil
 import signal
+from functools import partial
 import sys
 import textwrap
 import time
@@ -35,6 +36,7 @@ from .store import Store
 from .toolsocket import ToolServer
 from .transport import Transport
 from .transports import build
+from .tasks import forever
 from .clock import local_ms, ms, now_ms
 from .transports.irc_transport import IRCTransport
 from .vibe import VibeCheck
@@ -136,22 +138,28 @@ async def run(cfg: config.Config) -> int:
 
     scheduler = Scheduler(store, transports, handler.dispatch)
 
-    tasks = [asyncio.create_task(supervise(tr), name=f"tr:{name}") for name, tr in transports.items()]
-    tasks.append(asyncio.create_task(prune_daily(store, cfg.chatlog_days), name="prune"))
-    tasks.append(asyncio.create_task(scheduler.run(), name="scheduler"))
-    tasks.append(asyncio.create_task(handler.identities.run(), name="identities"))
+    # Every one of these is meant to run until shutdown. `forever` puts one
+    # back if it dies: the alternative is a process that is up and answering
+    # while one of the things it does has quietly stopped.
+    def always(make, name: str) -> asyncio.Task:
+        return asyncio.create_task(forever(make, what=name), name=name)
+
+    tasks = [always(partial(supervise, tr), f"tr:{name}") for name, tr in transports.items()]
+    tasks.append(always(partial(prune_daily, store, cfg.chatlog_days), "prune"))
+    tasks.append(always(scheduler.run, "scheduler"))
+    tasks.append(always(handler.identities.run, "identities"))
     if cfg.tools.enabled:
         tool_server = ToolServer(cfg.tools, transports, handler.dispatch, subjects=store.handles)
         handler.tool_server = tool_server
-        tasks.append(asyncio.create_task(tool_server.run(), name="toolsock"))
+        tasks.append(always(tool_server.run, "toolsock"))
     if watcher is not None:
-        tasks.append(asyncio.create_task(watcher.run(), name="watcher"))
+        tasks.append(always(watcher.run, "watcher"))
     if provider is not None:
         # No configuration: it stays quiet until it has watched a room enough
         # to know when that room is awake.
-        tasks.append(asyncio.create_task(Barfly(handler).run(), name="barfly"))
-        tasks.append(asyncio.create_task(VibeCheck(handler).run(), name="vibe"))
-        tasks.append(asyncio.create_task(Bartender(handler).run(), name="bartender"))
+        tasks.append(always(Barfly(handler).run, "barfly"))
+        tasks.append(always(VibeCheck(handler).run, "vibe"))
+        tasks.append(always(Bartender(handler).run, "bartender"))
 
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
+from ..tasks import loose
 from ..config import DiscordConfig
 from ..events import Event, Kind
 from ..transport import BAN, KICK, TOPIC, Membership, Sink, chunk
@@ -60,7 +61,7 @@ class DiscordTransport:
         return chunk(text, 1900, 4)  # Discord's limit is 2000; markdown is kept
 
     def say(self, room: str, text: str) -> None:
-        asyncio.create_task(self._send(room, text))  # noqa: RUF006 - fire and forget, errors logged
+        loose(self._send(room, text), what="a discord send")
 
     async def _send(self, room: str, text: str) -> None:
         channel = self.client.get_channel(int(room))

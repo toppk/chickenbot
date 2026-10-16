@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
+from ..tasks import loose
 from ..config import TelegramConfig
 from ..events import Event, Kind
 from ..transport import BAN, KICK, TOPIC, Membership, Sink, chunk
@@ -54,7 +55,7 @@ class TelegramTransport:
         return chunk(text, 3900, 4)  # Telegram's limit is 4096
 
     def say(self, room: str, text: str) -> None:
-        asyncio.create_task(self._send(room, text))  # noqa: RUF006 - fire and forget, errors logged
+        loose(self._send(room, text), what="a telegram send")
 
     async def _send(self, room: str, text: str) -> None:
         try:

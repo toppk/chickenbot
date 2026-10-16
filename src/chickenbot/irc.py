@@ -13,6 +13,7 @@ from collections import deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 
+from .tasks import loose
 from . import irccase
 from .observe import TRACE
 
@@ -473,9 +474,9 @@ class Client:
         self.umodes = set()
         self.away.clear()
         self.nick = self.wanted_nick
-        drain = asyncio.create_task(self._drain_outbox())
+        drain = loose(self._drain_outbox(), what="the irc outbox")
         self._inbox = asyncio.Queue(maxsize=INBOX)
-        work = asyncio.create_task(self._work_inbox())
+        work = loose(self._work_inbox(), what="the irc inbox")
         try:
             self.send("CAP", "LS", "302")
             if self.server_password:
@@ -713,7 +714,7 @@ class Client:
     def _check_bot_mode(self) -> None:
         if self._bot_check is not None:
             self._bot_check.cancel()
-        self._bot_check = asyncio.create_task(self._confirm_bot_mode())
+        self._bot_check = loose(self._confirm_bot_mode(), what="confirming bot mode")
 
     async def _confirm_bot_mode(self) -> None:
         """Ask again if the server never said we got it."""

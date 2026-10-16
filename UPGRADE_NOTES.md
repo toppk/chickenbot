@@ -7,6 +7,31 @@ it back.
 Releases themselves are the git tags (`git tag -l 'v*'`); this file is only
 the by-hand part.
 
+## v0.3.5
+
+Nothing to do. Noted because it changes what a failure looks like.
+
+Background work is supervised now. Every long-lived loop -- the transports,
+the scheduler, the barfly, the vibe check, the bartender, the tool socket,
+the watcher -- is restarted if it dies, with the pause doubling from 5s to a
+five minute cap. More than five failures in ten minutes and it stops trying
+and says so, rather than retrying a corpse forever at a steady rate. A run
+that lasted longer than ten minutes counts as healthy and resets the pause.
+
+Before this, a loop that raised took its subsystem with it and left the
+process running: up, answering questions, and quietly no longer doing one of
+the things it does. Nothing in the log said so.
+
+Fire-and-forget work -- logging our own lines, delayed greetings, sends on
+Discord, Telegram and Signal, the IRC inbox and outbox pumps -- now reports
+what it raised. An unawaited task swallows its exception until garbage
+collection, into the default handler, or never.
+
+**What to watch for**: `<name> died`, `restarting <name> in Ns`, and
+`<name> has failed N times in 600s and is not coming back`. The last one is
+the only one that means a subsystem is gone for good, and it is now said out
+loud instead of being inferred from silence.
+
 ## v0.3.4
 
 ### Timestamps are milliseconds: run the migration, services stopped

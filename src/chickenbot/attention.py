@@ -19,6 +19,8 @@ import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 
+from .tasks import loose
+
 log = logging.getLogger(__name__)
 
 SILENT = "<silent>"
@@ -183,7 +185,9 @@ class Attention:
         spot.add(nick, account, text, claim)
         if spot.timer is not None:
             spot.timer.cancel()
-        spot.timer = asyncio.create_task(self._wait_then_fire(key))
+        # Routinely cancelled when somebody keeps typing, which `report`
+        # treats as ordinary; anything else it raises is worth hearing about.
+        spot.timer = loose(self._wait_then_fire(key), what=f"following {key}")
 
     def held_for(self, key: str) -> float:
         """What the last hold in this room actually drew, or 0 if none."""

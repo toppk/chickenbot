@@ -24,6 +24,7 @@ from .attention import (
 )
 from .brain import Provider, ProviderError, collect_legs, leaked_markup, note_wait
 from .clock import millis, ms, now_ms
+from .tasks import watched
 from .config import Config
 from .dossier import Dossiers
 from .events import Event, Kind
@@ -579,9 +580,7 @@ class Handler:
             tr.say(room, said)
             self.opened_with(tr, room, said)
 
-        task = asyncio.create_task(later())
-        self._writes.add(task)
-        task.add_done_callback(self._writes.discard)
+        watched(self._writes, later(), what="a delayed greeting")
 
     def _beaten_to_it(self, tr: Transport, room: str, about: str, since: int) -> bool:
         """Did another bot address the same person while we were waiting?
@@ -608,17 +607,13 @@ class Handler:
 
     def remember_own(self, tr: Transport, room: str, text: str, kind: str = "self") -> None:
         """Fire and forget: the reply has already gone out, logging must not block it."""
-        task = asyncio.create_task(self.store.log_line(tr.realm, room, tr.me, "", text, kind))
-        self._writes.add(task)
-        task.add_done_callback(self._writes.discard)
+        watched(self._writes, self.store.log_line(tr.realm, room, tr.me, "", text, kind), what="logging our own line")
 
     def aliases_changed(self, realm: str) -> None:
         """Somebody learned a new handle. Tools watching that realm want to know."""
         if self.tool_server is None:
             return
-        task = asyncio.create_task(self.tool_server.announce_subjects(realm))
-        self._writes.add(task)
-        task.add_done_callback(self._writes.discard)
+        watched(self._writes, self.tool_server.announce_subjects(realm), what="announcing handles to tools")
 
     async def drain(self) -> None:
         """Wait for fire-and-forget log writes. For shutdown and for tests:
@@ -654,9 +649,7 @@ class Handler:
                     with resumed(record):
                         await work
 
-        task = asyncio.create_task(thinking())
-        self._thinking.add(task)
-        task.add_done_callback(self._thinking.discard)
+        watched(self._thinking, thinking(), what="answering")
 
     def _context(self, event: Event, args: str) -> Context:
         tr = event.transport
