@@ -140,6 +140,19 @@ class GitHub:
         "target{... on Commit{committedDate oid messageHeadline author{name user{login}}}}}}}}"
     )
 
+    # Releases and tags together, because a repo can have one without the
+    # other: this project had eight tags and no releases until somebody
+    # wired the publishing up, and "no releases" would have read as "nothing
+    # has ever shipped".
+    RELEASES = (
+        "query($owner:String!,$name:String!,$n:Int!){"
+        "repository(owner:$owner,name:$name){isPrivate "
+        "releases(first:$n,orderBy:{field:CREATED_AT,direction:DESC}){totalCount nodes{"
+        "tagName name publishedAt isPrerelease isDraft}} "
+        'refs(refPrefix:"refs/tags/",first:$n,orderBy:{field:TAG_COMMIT_DATE,direction:DESC})'
+        "{totalCount nodes{name}}}}"
+    )
+
     async def graphql(self, query: str, **variables) -> dict:
         """One POST. GraphQL has no anonymous tier at all, unlike REST."""
         if not self.token:
@@ -190,6 +203,33 @@ class GitHub:
             "branches": tips,
             "total": (repository.get("refs") or {}).get("totalCount") or len(tips),
             "recent": [_commit(node) for node in history],
+        }
+
+    async def releases(self, repo: str, limit: int = 5) -> dict:
+        """What this repository says it has shipped, and what it has tagged."""
+        owner, _, name = repo.partition("/")
+        data = await self.graphql(self.RELEASES, owner=owner, name=name, n=max(1, min(limit, 50)))
+        repository = data.get("repository") or {}
+        if not repository:
+            return {}
+        if repository.get("isPrivate") and not self.private:
+            raise RuntimeError(f"{repo} is private and this instance does not read private repositories")
+        released = (repository.get("releases") or {}).get("nodes") or []
+        tagged = (repository.get("refs") or {}).get("nodes") or []
+        return {
+            "releases": [
+                {
+                    "tag": str(r.get("tagName", "")),
+                    "title": str(r.get("name") or ""),
+                    "ts_ms": _ts_ms(r.get("publishedAt")),
+                    "draft": bool(r.get("isDraft")),
+                    "pre": bool(r.get("isPrerelease")),
+                }
+                for r in released
+            ],
+            "total": (repository.get("releases") or {}).get("totalCount") or len(released),
+            "tags": [str(t.get("name", "")) for t in tagged],
+            "tags_total": (repository.get("refs") or {}).get("totalCount") or len(tagged),
         }
 
     async def commits(self, repo: str, branch: str = "", limit: int = 10) -> list[dict]:

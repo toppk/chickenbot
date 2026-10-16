@@ -66,6 +66,13 @@ BODY_CHARS = 3000  # an issue body can be a design document
 COMMENT_CHARS = 1200
 BRANCHES_SHOWN = 12  # a busy fork has hundreds and the names stop meaning anything
 COMMITS_SHOWN = 5  # a room cannot read a changelog; this is "what just landed"
+RELEASES_SHOWN = 5  # the current one and enough history to see the pace
+# The mirror exists so a model can ask as often as it likes without us
+# hammering GitHub. The live tools have no mirror to answer from, so they
+# get a memo instead: short, because the point is a repeat inside one
+# conversation, not a cache of somebody else's data.
+LIVE_MEMO = 300.0
+LIVE_MEMOS = 32  # ...and only this many, because it is a memo and not a mirror
 README_CHARS = 12000  # a long README is the point; an unbounded one is a context leak
 
 
@@ -266,6 +273,36 @@ TOOLS = [
         },
     },
     {
+        "name": "github_releases",
+        "description": (
+            "What a repository has shipped: its releases, newest first, and its tags. "
+            "Use it for 'what version is out', 'has X been released', 'what is the latest' "
+            "-- and when somebody says they have just cut one.\n\n"
+            "Releases and tags are different things and both come back. A repository can "
+            "have tags and no releases, which means somebody versions their work but does "
+            "not publish release notes; saying 'no releases' about one of those reads as "
+            "nothing having ever shipped, which is wrong. A tag with no release beside it "
+            "is worth saying plainly.\n\n"
+            "This is the repository itself, not the mirrored events feed, so it is current, "
+            "and repeats inside a few minutes are free.\n\n"
+            "Takes owner/repo, or just the repo name when it belongs to one of the watched "
+            "users. It says nothing about what "
+            "changed in a release -- the notes are not fetched; github_commits is where "
+            "what landed lives."
+        ),
+        "params": {
+            "type": "object",
+            "properties": {
+                "repo": {
+                    "type": "string",
+                    "description": "owner/repo, or just the repo name if it is a watched user's",
+                },
+                "limit": {"type": "integer", "description": "how many, 1-50 (default 5)"},
+            },
+            "required": ["repo"],
+        },
+    },
+    {
         "name": "github_readme",
         "description": (
             "Read a repository's root README, live. This is how you learn what a project "
@@ -307,7 +344,13 @@ TOOLS = [
     },
     {
         "name": "github_repos",
-        "description": "Repositories owned by the watched users, with stars and last push.",
+        "description": (
+            "Repositories owned by the watched users: what each one is, its stars, and "
+            "when it was last pushed to. Use it to find out what somebody has.\n\n"
+            "Mirrored, so it is cheap and may be a few hours behind. Deliberately says "
+            "nothing about versions or about what changed -- naming those here only drew "
+            "the questions to the wrong tool."
+        ),
         "params": {
             "type": "object",
             "properties": {"user": {"type": "string"}, "limit": {"type": "integer"}},
@@ -384,6 +427,8 @@ class Tool:
         self._refreshing: asyncio.Task | None = None
         # Ad-hoc lookups, remembered briefly. A memo, not a mirror.
         self._looked_up: dict[str, tuple[float, str]] = {}
+        # Live answers, remembered briefly: see LIVE_MEMO.
+        self._live_memo: dict[str, tuple[float, str]] = {}
 
     def watch(self, users: list[str]) -> bool:
         """Replace who we follow. Returns whether it actually changed."""
@@ -637,6 +682,41 @@ class Tool:
             return f"no {repo}#{number} that I can see"
         return _render_issue(repo, found)
 
+    def _full_name(self, given: str) -> str:
+        """`owner/repo` from whatever was asked for.
+
+        A bare name is resolved against the mirror, because that is what a
+        room actually says: "the latest chickenbot release", not
+        "toppk/chickenbot". Without this the model reached for a tool it
+        could call with a bare name instead of the one that answers the
+        question -- which was the right choice on its part, and the wrong
+        tool for the job.
+        """
+        given = given.strip().strip("/")
+        if "/" in given or not given:
+            return given
+        matched = [r["full_name"] for r in self.store.repos() if r["name"].casefold() == given.casefold()]
+        if len(matched) == 1:
+            return matched[0]
+        if matched:
+            return f"error: {given} is ambiguous: {', '.join(sorted(matched))}"
+        return f"error: give {given} as owner/repo; it is not one the mirror knows"
+
+    def _remembered(self, key: str) -> str | None:
+        """An identical live question asked again within LIVE_MEMO."""
+        if (memo := self._live_memo.get(key)) and time.monotonic() - memo[0] < LIVE_MEMO:
+            self.source = "remembered"
+            return memo[1]
+        return None
+
+    def _remember(self, key: str, answer: str) -> str:
+        if not answer.startswith(("error:", "could not")):
+            self._live_memo[key] = (time.monotonic(), answer)
+        if len(self._live_memo) > LIVE_MEMOS:
+            oldest = min(self._live_memo, key=lambda k: self._live_memo[k][0])
+            self._live_memo.pop(oldest, None)
+        return answer
+
     async def github_commits(self, args: dict) -> str:
         """The repository's own answer, which the mirror cannot give: the
         events feed is published late and sometimes hours late, and a room
@@ -648,7 +728,9 @@ class Tool:
         ref in a repository, and a list of branch tips on a single-branch
         repo reads as that repo having one commit.
         """
-        repo = str(args.get("repo") or "").strip().strip("/")
+        repo = self._full_name(str(args.get("repo") or ""))
+        if repo.startswith("error:"):
+            return repo
         if repo.count("/") != 1 or not all(_LOGIN.fullmatch(part) for part in repo.split("/")):
             return "error: give a repository as owner/repo"
         if self.api is None:
@@ -659,11 +741,14 @@ class Tool:
         except (TypeError, ValueError):
             commits = COMMITS_SHOWN
         commits = max(1, min(commits, 50))
+        key = f"commits:{repo}:{branch}:{commits}"
+        if (said := self._remembered(key)) is not None:
+            return said
         # No token falls through: GraphQL has no anonymous tier, so the
         # answer becomes the default branch over REST, and says so.
         if not branch and (answer := await self._survey(repo, commits)) is not None:
-            return answer
-        return await self._branch_commits(repo, branch, commits)
+            return self._remember(key, answer)
+        return self._remember(key, await self._branch_commits(repo, branch, commits))
 
     async def _survey(self, repo: str, commits: int) -> str | None:
         """None means GraphQL was not available, not that nothing was found."""
@@ -704,6 +789,55 @@ class Tool:
             return f"no commits visible on {where}"
         return f"{where}, newest first: " + " | ".join(_said(c, why=True) for c in found)
 
+    async def github_releases(self, args: dict) -> str:
+        """What has shipped, which the mirror has no notion of at all."""
+        repo = self._full_name(str(args.get("repo") or ""))
+        if repo.startswith("error:"):
+            return repo
+        if repo.count("/") != 1 or not all(_LOGIN.fullmatch(part) for part in repo.split("/")):
+            return "error: give a repository as owner/repo"
+        if self.api is None:
+            return "error: no github client configured"
+        try:
+            limit = int(args.get("limit") or RELEASES_SHOWN)
+        except (TypeError, ValueError):
+            limit = RELEASES_SHOWN
+        limit = max(1, min(limit, 50))
+        key = f"releases:{repo}:{limit}"
+        if (said := self._remembered(key)) is not None:
+            return said
+        try:
+            found = await self.api.releases(repo, limit)
+        except RuntimeError as exc:
+            if "GITHUB_TOKEN" in str(exc):
+                return f"reading {repo}'s releases needs a GITHUB_TOKEN"
+            return str(exc)
+        except Exception as exc:  # noqa: BLE001 - reported, not raised at the room
+            return f"could not read {repo}'s releases ({type(exc).__name__})"
+        if not found:
+            return f"no such repository as {repo}, or nothing visible in it"
+
+        tags, total = found["tags"], found["total"]
+        if not total:
+            if tags:
+                return (
+                    f"{repo} has published no releases, but {found['tags_total']} tag(s): "
+                    f"{', '.join(tags[:limit])} -- versioned, without release notes"
+                )
+            return f"{repo} has no releases and no tags"
+        said = []
+        for one in found["releases"][:limit]:
+            marks = [m for m, on in (("draft", one["draft"]), ("prerelease", one["pre"])) if on]
+            titled = one["title"] and one["title"] != one["tag"]
+            name = one["tag"] + (f" \u201c{one['title']}\u201d" if titled else "")
+            when = f" {ago_ms(one['ts_ms'])} ago" if one["ts_ms"] else " unpublished"
+            said.append(name + when + (f" ({', '.join(marks)})" if marks else ""))
+        more = f", and {total - len(said)} older" if total > len(said) else ""
+        loose = ""
+        if (untagged := [t for t in tags if t not in {r["tag"] for r in found["releases"]}]) and tags:
+            loose = f"; tag(s) with no release: {', '.join(untagged[:5])}"
+        return self._remember(key, f"{repo}, newest release first: " + " | ".join(said) + more + loose)
+
     async def github_readme(self, args: dict) -> str:
         """A project in its own words, trimmed to something a room can hold.
 
@@ -739,6 +873,7 @@ class Tool:
             return "error: that is not a github login"
         now = time.time()
         if (memo := self._looked_up.get(user.casefold())) and now - memo[0] < LOOKUP_MEMO:
+            self.source = "remembered"
             return f"{memo[1]} [looked up {ago(int(now - memo[0]))} ago]"
 
         try:
@@ -777,12 +912,15 @@ class Tool:
         user = str(args.get("user") or "")
         known = {u.casefold() for u in self.users}
         if user and user.casefold() not in known:
+            self.source = "unfetched"
             return f"{user} is not watched here, so there is nothing to refresh"
         who = [u for u in self.users if not user or u.casefold() == user.casefold()]
         if not who:
+            self.source = "unfetched"
             return "nobody is watched here yet"
         since = min((self.store.cursor(f"user:{u}")[1] or 0) for u in who)
         if since and now_ms() - since < ms(REFRESH_GAP):
+            self.source = "unfetched"
             return f"fetched {ago((now_ms() - since) // 1000)} ago already; nothing will have changed"
         # Join the fetch already running rather than starting a second one:
         # two passes over the same handles is twice the quota for one answer,
@@ -795,6 +933,7 @@ class Tool:
         done, _pending = await asyncio.wait({task}, timeout=REFRESH_BUDGET)
         if not done:
             # Waiting stopped; the fetch did not. "Ask again" is a real offer.
+            self.source = "fetching"
             return "still fetching, and still going; ask again in a moment"
         try:
             fresh = task.result()
@@ -813,21 +952,26 @@ class Tool:
         task = self._refreshing
         return RETRY_AFTER if task is not None and not task.done() else 0.0
 
-    # Set by the last call: the mirror, GitHub, or both. Read by the socket
-    # layer straight after, in the same single-threaded request loop.
+    # Where the last answer came from. Read by the socket layer straight
+    # after, in the same single-threaded request loop.
+    #
+    # Set where the work happens, not from the tool's name up front: a
+    # refresh inside REFRESH_GAP opens no socket and said "fetched from
+    # GitHub" for a 0ms call, which is the opposite of what this is for.
     source = ""
 
     async def call(self, name: str, args: dict) -> str:
         """Every tool but one answers from the mirror without waiting. The
         exception is `github_refresh`, which is the point of it."""
-        # Everything but the mirrored tools goes to GitHub as it is asked.
-        self.source = "mirror" if name.startswith("github_") and name in MIRRORED else "github"
+        self.source = "mirror" if name in MIRRORED else "github"
         if name == "github_lookup":
             return await self.github_lookup(args)
         if name == "github_readme":
             return await self.github_readme(args)
         if name == "github_commits":
             return await self.github_commits(args)
+        if name == "github_releases":
+            return await self.github_releases(args)
         if name == "github_issue":
             return await self.github_issue(args)
         if name == "github_refresh":

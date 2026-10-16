@@ -6,7 +6,7 @@ import time
 import pytest
 from external.github.__main__ import RANGES, TOOLS, Tool, ago
 from external.github.github import _from_event, _ts_ms
-from external.github.store import Item, Store
+from external.github.store import Item, Store, now_ms
 
 
 @pytest.fixture
@@ -1970,3 +1970,167 @@ async def test_a_connected_tool_does_not_hold_shutdown_open(tmp_path, cfg, store
     writer.close()
     with contextlib.suppress(Exception):
         await writer.wait_closed()
+
+
+def _releases(**over):
+    body = {
+        "releases": {
+            "totalCount": 1,
+            "nodes": [
+                {
+                    "tagName": "v0.4.0",
+                    "name": "chickenbot v0.4.0",
+                    "publishedAt": "2026-10-16T09:41:46Z",
+                    "isDraft": False,
+                    "isPrerelease": False,
+                }
+            ],
+        },
+        "refs": {"totalCount": 5, "nodes": [{"name": n} for n in ("v0.4.0", "v0.3.5", "v0.3.4")]},
+        "isPrivate": False,
+    }
+    body.update(over)
+    return {"data": {"repository": body}}
+
+
+async def _releases_tool(tmp_path, body):
+    import httpx
+    from external.github.github import GitHub
+    from external.github.store import Store
+
+    api = GitHub("github_pat_x")
+    api.client = httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(200, json=body)))
+    tool = Tool(Store(tmp_path / "g.db"), api, ["toppk"])
+    said = await tool.call("github_releases", {"repo": "toppk/chickenbot"})
+    await api.aclose()
+    return said, tool
+
+
+async def test_a_tag_with_no_release_beside_it_is_said(tmp_path):
+    """Our own repo had eight tags and no releases: "no releases" would have
+    read as nothing having ever shipped."""
+    said, _tool = await _releases_tool(tmp_path, _releases())
+    assert "v0.4.0" in said and "chickenbot v0.4.0" in said
+    assert "no release: v0.3.5, v0.3.4" in said
+
+
+async def test_tags_without_any_release_are_not_nothing(tmp_path):
+    said, _tool = await _releases_tool(tmp_path, _releases(releases={"totalCount": 0, "nodes": []}))
+    assert "published no releases" in said
+    assert "versioned, without release notes" in said
+    assert "v0.3.5" in said
+
+
+async def test_a_repo_that_has_shipped_nothing_says_so(tmp_path):
+    said, _tool = await _releases_tool(
+        tmp_path,
+        _releases(releases={"totalCount": 0, "nodes": []}, refs={"totalCount": 0, "nodes": []}),
+    )
+    assert said.endswith("has no releases and no tags")
+
+
+async def test_a_draft_or_prerelease_is_labelled(tmp_path):
+    body = _releases()
+    body["data"]["repository"]["releases"]["nodes"][0]["isPrerelease"] = True
+    said, _tool = await _releases_tool(tmp_path, body)
+    assert "prerelease" in said
+
+
+async def test_a_refresh_that_fetched_nothing_does_not_claim_to_have(tmp_path, gh):
+    """It reported "fetched from GitHub" for a 0ms call that opened no
+    socket, which is the opposite of what the label is for."""
+    gh.store.set_cursor("user:toppk", "", now_ms())  # fetched just now
+    said = await gh.call("github_refresh", {"user": "toppk"})
+    assert "nothing will have changed" in said
+    assert gh.source == "unfetched"
+
+
+async def test_a_refresh_that_did_fetch_says_so(tmp_path, gh, monkeypatch):
+    async def polled(*a, **kw):
+        return 3
+
+    monkeypatch.setattr(gh, "poll_once", polled)
+    gh.store.set_cursor("user:toppk", "", now_ms() - 10 * 60 * 1000)
+    said = await gh.call("github_refresh", {"user": "toppk"})
+    assert "3 new item(s)" in said
+    assert gh.source == "github"
+
+
+def test_a_bare_repo_name_is_resolved_against_the_mirror(tmp_path):
+    """A room says "the latest chickenbot release", not "toppk/chickenbot".
+    Without this the model reached for a tool it could call with a bare name
+    rather than the one that answers the question."""
+    from external.github.store import Store
+
+    store = Store(tmp_path / "g.db")
+    for full in ("toppk/chickenbot", "iconidentify/aurora-linux"):
+        owner, _, name = full.partition("/")
+        store.save_repo(
+            {
+                "full_name": full,
+                "owner": owner,
+                "name": name,
+                "private": 0,
+                "fork": 0,
+                "archived": 0,
+                "stars": 0,
+                "open_issues": 0,
+                "pushed_at_ms": 0,
+                "description": "",
+            }
+        )
+    tool = Tool(store, None, ["toppk"])
+    assert tool._full_name("chickenbot") == "toppk/chickenbot"
+    assert tool._full_name("toppk/chickenbot") == "toppk/chickenbot"
+    assert "not one the mirror knows" in tool._full_name("something-else")
+    store.close()
+
+
+def test_an_ambiguous_bare_name_says_which(tmp_path):
+    from external.github.store import Store
+
+    store = Store(tmp_path / "g.db")
+    for owner in ("toppk", "someone"):
+        store.save_repo(
+            {
+                "full_name": f"{owner}/tailscale",
+                "owner": owner,
+                "name": "tailscale",
+                "private": 0,
+                "fork": 0,
+                "archived": 0,
+                "stars": 0,
+                "open_issues": 0,
+                "pushed_at_ms": 0,
+                "description": "",
+            }
+        )
+    said = Tool(store, None, ["toppk"])._full_name("tailscale")
+    assert "ambiguous" in said and "someone/tailscale" in said and "toppk/tailscale" in said
+    store.close()
+
+
+async def test_asking_the_same_live_question_twice_costs_one_call(tmp_path):
+    """The mirror exists so a model can ask as often as it likes. The live
+    tools have no mirror to answer from, so they get a memo instead."""
+    import httpx
+    from external.github.github import GitHub
+    from external.github.store import Store
+
+    calls = []
+
+    def handler(request):
+        calls.append(str(request.url))
+        return httpx.Response(200, json=_releases())
+
+    api = GitHub("github_pat_x")
+    api.client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    tool = Tool(Store(tmp_path / "g.db"), api, ["toppk"])
+
+    first = await tool.call("github_releases", {"repo": "toppk/chickenbot"})
+    assert tool.source == "github"
+    second = await tool.call("github_releases", {"repo": "toppk/chickenbot"})
+    assert second == first
+    assert tool.source == "remembered"  # and says so, rather than claiming a fetch
+    assert len(calls) == 1
+    await api.aclose()

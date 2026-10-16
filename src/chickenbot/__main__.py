@@ -954,6 +954,9 @@ WHENCE = {
     "mirror": "from the local mirror",
     "github": "fetched from GitHub",
     "mirror, refreshed first": "from the mirror, fetched first",
+    "unfetched": "answered without fetching",
+    "fetching": "still fetching when it answered",
+    "remembered": "from a memo, not a call",
 }
 
 
