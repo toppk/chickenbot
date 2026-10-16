@@ -9,6 +9,61 @@ the by-hand part.
 
 ## v0.3.4
 
+### Timestamps are milliseconds: run the migration, services stopped
+
+**Why.** Every stored timestamp was epoch seconds, and the transcript's own
+legs were *relative* to the start of a turn. Relative cannot represent a
+pause taken before the turn's first call, so a five second hold was clamped
+onto t=0, drawn on top of the first model call, and left out of the total.
+Second resolution is also too coarse to order a 797ms call against a 253ms
+one. Storage is now epoch milliseconds throughout; relative is computed for
+display only.
+
+Every converted column is renamed `*_ms`. That is deliberate: nothing in
+`PRAGMA table_info` tells seconds from milliseconds, so a read that was
+never converted would have been silently wrong by a factor of a thousand.
+Renamed, it throws `no such column`. Both databases now carry
+`PRAGMA user_version` and a `schema_history` table; see `docs/schema.md`.
+
+**A database from before this is refused at startup**, not read. That is the
+whole point of the version.
+
+**Do this.** Services down for the whole of it:
+
+```bash
+systemctl --user stop chickenbot@<instance> chickenbot-github@<instance>
+
+# dry run first; it prints what it would do and changes nothing
+python3 deploy/migrate_db_schema_v0_v1.py ~/server/chickenbot/<instance>
+python3 deploy/migrate_db_schema_v0_v1.py ~/server/chickenbot/<instance> --write
+
+deploy/deploy.sh <instance>
+systemctl --user start chickenbot@<instance> chickenbot-github@<instance>
+```
+
+Be on v0.3.3, having started it at least once: column *additions* are applied
+at startup, and this script converts units assuming every column exists.
+
+The mirror (`cache/github-tool.db`) is a cache. Deleting it is a perfectly
+good migration and costs a few hundred API calls to refill:
+
+```bash
+rm -f ~/server/chickenbot/<instance>/cache/github-tool.db*
+```
+
+**Check it worked.**
+
+```bash
+chickenbot -c <config> transcript          # rows list, with real dates
+chickenbot -c <config> log --days          # per-day counts, not 1970
+```
+
+The next followed turn's timeline should open with the hold at `t+0.0s` and
+the first model call after it, rather than both at zero.
+
+**Put it back**: stop the services, move each `*.v0.bak` back over the
+original, and install v0.3.3. There is no reverse migration.
+
 ### A new GitHub tool needs a grant, or only owners can reach it
 
 **Why.** `github_commits` reads a repository directly instead of through the
