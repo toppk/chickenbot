@@ -808,9 +808,11 @@ class Paint:
         self.on = on
 
     def __call__(self, text: str, *styles: str) -> str:
-        if not self.on or not styles:
+        # "" is a style: callers pick one with a conditional and mean "plain".
+        codes = [self.CODES[s] for s in styles if s] if self.on else []
+        if not codes:
             return text
-        return "\x1b[" + ";".join(self.CODES[s] for s in styles) + "m" + text + "\x1b[0m"
+        return "\x1b[" + ";".join(codes) + "m" + text + "\x1b[0m"
 
     def rule(self, title: str, *styles: str) -> str:
         """A banner across the terminal, so sections are findable by eye."""

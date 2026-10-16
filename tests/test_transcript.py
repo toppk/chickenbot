@@ -632,3 +632,14 @@ def test_an_unmeasured_row_says_so_rather_than_drawing_zeros(tmp_path):
     assert "ext_github_activity" in out
     assert "0ms" not in out  # never a bar claiming it took no time
     assert ">>>>" not in out  # and no shape of a turn we cannot see
+
+
+def test_an_empty_style_means_plain_not_a_crash():
+    """Callers pick a colour with a conditional; the else branch is "", and
+    --details died on it for every row whose finish reason was not tool_calls."""
+    from chickenbot.__main__ import Paint
+
+    on = Paint(True)
+    assert on("x", "") == "x"
+    assert on("x", "", "yellow") == on("x", "yellow")
+    assert Paint(False)("x", "") == "x"
