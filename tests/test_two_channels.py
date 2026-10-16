@@ -163,6 +163,7 @@ async def test_it_joins_the_conversation_it_is_already_in(both, store):
     room, somebody else adding to that exchange is adding to the same one."""
     h, tr = both
     h.attention.pause_seconds = 0.01  # captured at construction, not read per line
+    h.attention.pause_max_seconds = 0.01  # no jitter: the test waits on this
     await h.dispatch(tr.envelope("chickenbot: you back?", room="#lobby", sender="toppk", account="toppk"))
     await h.drain()
     h.provider.prompts.clear()
@@ -180,6 +181,7 @@ async def test_it_may_still_decide_that_line_was_not_for_it(both):
 
     h, tr = both
     h.attention.pause_seconds = 0.01  # captured at construction, not read per line
+    h.attention.pause_max_seconds = 0.01  # no jitter: the test waits on this
     await h.dispatch(tr.envelope("chickenbot: you back?", room="#lobby", sender="toppk", account="toppk"))
     await h.drain()
     await h.dispatch(tr.envelope("unrelated chatter", room="#lobby", sender="chrisk", account="chrisk"))

@@ -18,6 +18,7 @@ from .test_commands import StubProvider
 @pytest.fixture
 def handler(cfg, store) -> Handler:
     cfg.llm.pause_seconds = 0.01
+    cfg.llm.pause_max_seconds = 0.01  # no jitter: the test waits on this
     return Handler(cfg, store, StubProvider("42"), None)
 
 

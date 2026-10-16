@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -69,6 +70,7 @@ class Engagement:
     pending: list[tuple[str, str, str, str]] = field(default_factory=list)  # nick, account, text, claim
     silences: int = 0
     timer: asyncio.Task | None = None
+    waited: float = 0.0  # what the last hold actually drew, not the nominal
 
     def add(self, nick: str, account: str, text: str, claim: str = OVERHEARD) -> None:
         self.pending.append((nick, account, text, claim))
@@ -83,12 +85,16 @@ class Attention:
         self,
         *,
         follow_seconds: int = 60,
-        pause_seconds: float = 5.0,
+        pause_seconds: float = 3.5,
+        # None, not a number: a caller that sets only the floor -- a test
+        # asking for no pause at all -- must not inherit a ceiling.
+        pause_max_seconds: float | None = None,
         max_silences: int = 3,
         on_ready: Callable[[str, list[tuple[str, str, str, str]]], Awaitable[None]] | None = None,
     ) -> None:
         self.follow_seconds = follow_seconds
         self.pause_seconds = pause_seconds
+        self.pause_max_seconds = pause_seconds if pause_max_seconds is None else pause_max_seconds
         self.max_silences = max_silences
         self.on_ready = on_ready
         self.rooms: dict[str, Engagement] = {}
@@ -179,15 +185,29 @@ class Attention:
             spot.timer.cancel()
         spot.timer = asyncio.create_task(self._wait_then_fire(key))
 
+    def held_for(self, key: str) -> float:
+        """What the last hold in this room actually drew, or 0 if none."""
+        spot = self.rooms.get(key)
+        return spot.waited if spot else 0.0
+
+    def hold_for(self) -> float:
+        """How long to let a burst settle. Varied, because a fixed pause is a
+        tell: answering exactly five seconds after the last line, every time,
+        reads as a machine waiting rather than somebody reading."""
+        low, high = self.pause_seconds, max(self.pause_max_seconds, self.pause_seconds)
+        return low if high == low else random.uniform(low, high)
+
     async def _wait_then_fire(self, key: str) -> None:
+        held_for = self.hold_for()
         try:
-            await asyncio.sleep(self.pause_seconds)
+            await asyncio.sleep(held_for)
         except asyncio.CancelledError:
             return  # someone kept typing; the newer timer owns it now
         spot = self.rooms.get(key)
         if spot is None:
             return
         spot.timer = None
+        spot.waited = held_for
         held = spot.take()
         if held and self.on_ready is not None:
             try:

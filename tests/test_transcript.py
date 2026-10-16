@@ -523,7 +523,7 @@ def test_the_timeline_shows_waits_tools_and_calls_in_order(tmp_path):
     assert "waiting for the burst" in order[0] and "waited" in order[0]
     assert any("ext_github_activity  from the local mirror" in line for line in order)
     # The total moved into the one-line summary under what it said.
-    assert "(8.5s total)" in out
+    assert "(8.5s in all)" in out
 
 
 def test_a_tool_says_whether_it_answered_from_its_mirror():
@@ -558,7 +558,7 @@ def test_the_shape_of_the_turn_is_one_line_at_the_bottom(tmp_path):
     )
     st.close()
     out = cli(tmp_path, "transcript", "1", "--color", "never")[1]
-    assert "held 5.0s >>>> looked 0.4s >>>> thought 3.3s >>>> spoke  (8.5s total)" in out
+    assert "held 5.0s → looked 0.4s → thought 3.3s → spoke  (8.5s in all)" in out
     # Last thing on the page, after what it actually said.
     assert out.index("held 5.0s") > out.index("WHAT IT SAID")
 
@@ -583,7 +583,7 @@ def test_consecutive_stages_of_a_kind_collapse(tmp_path):
     )
     st.close()
     out = cli(tmp_path, "transcript", "1", "--color", "never")[1]
-    assert "thought 3.0s >>>> spoke" in out
+    assert "thought 3.0s → spoke" in out
     assert out.count("thought") == 1
 
 
@@ -653,3 +653,24 @@ def test_where_a_tool_answered_from_reads_as_a_sentence():
     assert _whence("mirror") == "from the local mirror"
     assert _whence("mirror, refreshed first") == "from the mirror, fetched first"
     assert _whence("something new") == "something new"
+
+
+def test_a_hold_taken_before_the_clock_starts_the_timeline():
+    """The burst is held before the turn's clock begins, so the pause is
+    recorded at a negative offset; it used to be clamped to zero and drawn
+    on top of the first model call."""
+    from chickenbot.__main__ import _rebased, _span
+
+    events = [(-5.0, 5000, "waited", "waiting for the burst to finish"),
+              (0.0, 797, "model", "Together  tool_calls"),
+              (0.8, 9001, "tool", "ext_github_refresh")]
+    laid = _rebased(events)
+    assert [at for at, *_ in laid] == [0.0, 5.0, 5.8]
+    assert round(_span(laid), 3) == 14.801  # the hold is inside the total, not beside it
+
+
+def test_a_timeline_that_starts_at_zero_is_left_alone():
+    from chickenbot.__main__ import _rebased
+
+    events = [(0.0, 10, "model", "a"), (1.0, 20, "tool", "b")]
+    assert _rebased(events) == events

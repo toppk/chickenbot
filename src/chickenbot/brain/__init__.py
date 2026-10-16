@@ -55,7 +55,10 @@ def note_wait(what: str, seconds: float) -> None:
     that only shows how long the whole thing took.
     """
     started = _STARTED.get()
-    at = round(max(time.monotonic() - started - seconds, 0.0), 3) if started else 0.0
+    # Negative on purpose. The burst is held before the turn's clock starts,
+    # so clamping to zero drew a five second bar on top of the first model
+    # call and left the pause out of the total.
+    at = round(time.monotonic() - started - seconds, 3) if started else 0.0
     note_leg({"kind": "wait", "what": what, "ms": int(seconds * 1000), "at": at})
 
 

@@ -408,6 +408,7 @@ class Handler:
         self.attention = Attention(
             follow_seconds=cfg.llm.follow_seconds,
             pause_seconds=cfg.llm.pause_seconds,
+            pause_max_seconds=cfg.llm.pause_max_seconds,
             max_silences=cfg.llm.max_silences,
             on_ready=self._follow_up,
         )
@@ -729,7 +730,9 @@ class Handler:
             note(asked=len(asked), held=len(held), claim=",".join(sorted({line[3] for line in held})))
             # Opened before the pause is noted, or the note lands nowhere.
             # Held the burst on purpose before answering any of it.
-            note_wait("waiting for the burst to finish", self.cfg.llm.pause_seconds)
+            # What it actually drew, not the nominal: the hold is varied.
+            held_for = self.attention.held_for(key) or self.cfg.llm.pause_seconds
+            note_wait("waiting for the burst to finish", held_for)
             waited = time.monotonic()
             # Silence is for a conversation it was merely party to. A question
             # put to it directly gets an answer.

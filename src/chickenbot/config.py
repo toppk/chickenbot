@@ -188,7 +188,10 @@ class LLMConfig:
     # when they next sit down needs longer, so the window is stretched towards
     # this by how quiet the room has actually been.
     follow_max_seconds: int = 600
-    pause_seconds: float = 5.0  # wait for a gap, so a burst is one exchange
+    # Wait for a gap, so a burst is one exchange. A range, not a number: a
+    # reply exactly this long after the last line, every time, is a tell.
+    pause_seconds: float = 3.5
+    pause_max_seconds: float = 8.5
     max_silences: int = 3  # consecutive "nothing to add" before it stops listening
     # Voice lives in a file so it can be edited without touching the config.
     # Empty, or a missing file, falls back to `persona`.

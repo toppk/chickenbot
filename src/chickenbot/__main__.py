@@ -969,7 +969,7 @@ def _sequence(row, paint: Paint) -> None:
     Consecutive events of a kind collapse, so what is left is the story --
     held, thought, looked it up, thought again, spoke.
     """
-    events = _events(row)
+    events = _rebased(_events(row))
     if not events:
         return
     if not any(ms for _at, ms, _kind, _what in events):
@@ -983,9 +983,33 @@ def _sequence(row, paint: Paint) -> None:
     colours = {"waited": "grey", "tool": "yellow", "model": "cyan"}
     said = {"waited": "held", "tool": "looked", "model": "thought"}
     parts = [paint(f"{said[kind]} {ms / 1000:.1f}s", colours[kind]) for kind, ms in stages]
-    arrow = paint(" >>>> ", "dim")
+    # The row's own ms starts after any pause taken before the turn, so the
+    # span of what is drawn above is the honest total.
+    total = max(_span(events), row["ms"] / 1000)
+    arrow = paint(" \u2192 ", "dim")
     print()
-    print("  " + arrow.join(parts) + arrow + paint(f"spoke  ({row['ms'] / 1000:.1f}s total)", "green", "bold"))
+    print("  " + arrow.join(parts) + arrow + paint(f"spoke  ({total:.1f}s in all)", "green", "bold"))
+
+
+def _rebased(events: list[tuple[float, int, str, str]]) -> list[tuple[float, int, str, str]]:
+    """Put t=0 at the earliest thing that happened, not at the model's clock.
+
+    A pause taken before the turn begins is recorded at a negative offset,
+    which is the truth; a reader wants it at the top of the timeline.
+    """
+    if not events:
+        return events
+    base = min(at for at, _ms, _kind, _what in events)
+    if base >= 0:
+        return events
+    return [(round(at - base, 3), ms, kind, what) for at, ms, kind, what in events]
+
+
+def _span(events: list[tuple[float, int, str, str]]) -> float:
+    """Seconds from the first thing starting to the last thing ending."""
+    if not events:
+        return 0.0
+    return max(at + ms / 1000 for at, ms, _kind, _what in events)
 
 
 def _timeline(row, paint: Paint) -> None:
@@ -996,7 +1020,7 @@ def _timeline(row, paint: Paint) -> None:
     not: an intentional pause is labelled as one, a cached tool answer takes
     a millisecond and a fetched one takes hundreds.
     """
-    laid = _events(row)
+    laid = _rebased(_events(row))
     if not laid:
         return
     print()

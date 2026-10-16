@@ -30,6 +30,7 @@ class Spy:
 def fast(cfg):
     """Real timings are seconds; tests should not be."""
     cfg.llm.pause_seconds = 0.02
+    cfg.llm.pause_max_seconds = 0.02  # no jitter: the test waits on this
     cfg.llm.follow_seconds = 1
     cfg.llm.max_silences = 2
     return cfg
@@ -174,6 +175,7 @@ async def test_commands_are_never_delayed(fast, transport, store):
 async def test_following_can_be_switched_off(cfg, transport, store):
     cfg.llm.follow = False
     cfg.llm.pause_seconds = 0.02
+    cfg.llm.pause_max_seconds = 0.02  # no jitter: the test waits on this
     spy = Spy("hi", "should not happen")
     handler = Handler(cfg, store, spy, None)
     await send(handler, transport, "chickenbot: hello")
@@ -194,3 +196,21 @@ async def test_the_doubled_nick_prefix_is_stripped(fast, transport, store):
     handler = Handler(fast, store, Spy("nate: sure thing"), None)
     await send(handler, transport, "chickenbot: hello")
     assert transport.said()[-1] == "nate: sure thing"
+
+
+def test_the_hold_is_varied_rather_than_a_fixed_tell():
+    """Answering exactly five seconds after the last line, every time, reads
+    as a machine waiting rather than somebody reading."""
+    from chickenbot.attention import Attention
+
+    a = Attention(pause_seconds=3.5, pause_max_seconds=8.5)
+    drawn = {round(a.hold_for(), 3) for _ in range(50)}
+    assert len(drawn) > 40  # varied, not a constant
+    assert all(3.5 <= s <= 8.5 for s in drawn)
+
+
+def test_asking_for_no_pause_does_not_inherit_a_ceiling():
+    from chickenbot.attention import Attention
+
+    a = Attention(pause_seconds=0.0)
+    assert {a.hold_for() for _ in range(10)} == {0.0}

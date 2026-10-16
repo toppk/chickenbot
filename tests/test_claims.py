@@ -31,6 +31,7 @@ async def test_a_line_to_another_bot_is_never_answered(cfg, store):
     p = LoudProvider()
     h = Handler(cfg, store, p, None)
     h.attention.pause_seconds = 0.01
+    h.attention.pause_max_seconds = 0.01  # no jitter: the test waits on this
     tr = FakeTransport(owners=("toppk",), here=[("eggbot", "", ""), ("nate", "", ""), ("chickenbot", "", "")])
     await h.dispatch(tr.envelope("chickenbot: hello", sender="nate", account="nate"))
     await h.drain()
@@ -49,6 +50,7 @@ async def test_an_overheard_line_still_reaches_the_model(cfg, store):
     p = LoudProvider()
     h = Handler(cfg, store, p, None)
     h.attention.pause_seconds = 0.01
+    h.attention.pause_max_seconds = 0.01  # no jitter: the test waits on this
     tr = FakeTransport(owners=("toppk",), here=[("nate", "", ""), ("chickenbot", "", "")])
     await h.dispatch(tr.envelope("chickenbot: hello", sender="nate", account="nate"))
     await h.drain()
