@@ -588,7 +588,7 @@ def browse(cfg: config.Config, args: argparse.Namespace) -> int:
         lines = store.conversation(
             transport, room, day=args.date or "", since=since, grep=args.grep or "", limit=args.limit
         )
-        for ts, nick, _account, kind, text in lines:
+        for ts, nick, _account, kind, text, _note in lines:
             stamp = time.strftime("%H:%M" if (args.date or since) else "%m-%d %H:%M", local_ms(ts))
             print(f"{stamp} {MARKS.get(kind, '?')}{nick:>12} {text}")
         if not lines:
@@ -717,7 +717,7 @@ def export(cfg: config.Config, args: argparse.Namespace) -> int:
                 target = root / transport / channel.lstrip("#&") / f"{day}.jsonl"
                 target.parent.mkdir(parents=True, exist_ok=True)
                 with target.open("w", encoding="utf-8") as handle:
-                    for ts, nick, account, kind, text in rows:
+                    for ts, nick, account, kind, text, note in rows:
                         handle.write(
                             json.dumps(
                                 {
@@ -727,6 +727,7 @@ def export(cfg: config.Config, args: argparse.Namespace) -> int:
                                     "room": channel,
                                     "nick": nick,
                                     "account": account,
+                                    "note": note,
                                     "kind": kind,
                                     "text": text,
                                 },

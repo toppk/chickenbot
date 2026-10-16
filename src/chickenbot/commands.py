@@ -592,7 +592,7 @@ class Handler:
         and the second one is noise.
         """
         folded = tr.fold(about)
-        for _ts, nick, _account, kind, text in self.store.conversation(tr.realm, room, since=since, limit=20):
+        for _ts, nick, _account, kind, text, _note in self.store.conversation(tr.realm, room, since=since, limit=20):
             if kind == "bot" and tr.fold(nick) != tr.fold(tr.me) and names(tr.fold(text), folded):
                 return True
         return False

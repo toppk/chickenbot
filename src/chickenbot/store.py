@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import sqlite3
 import time
 from collections.abc import Callable, Iterable
@@ -14,7 +15,12 @@ from typing import Any
 from . import irccase
 from .clock import millis, ms, now_ms
 
+log = logging.getLogger(__name__)
+
 MAX_REVISIONS = 50
+# A forced sentence is a clue; a paragraph is a diary that re-reads itself
+# every turn and nobody corrects it.
+NOTE_CHARS = 140
 
 # This database's own version, independent of any other. Bumped for anything
 # that changes the schema OR the interpretation of what is already in it: a
@@ -25,7 +31,14 @@ MAX_REVISIONS = 50
 # `deploy/schema/chickenbot-v<N>.sql` is the shape at each version and
 # `deploy/migrate_db_schema_v<N-1>_v<N>.py` is how to get there. See
 # docs/schema.md.
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+
+# Versions this code can reach on its own, without the offline script: a
+# column added with a default is applied in `_migrate` and an older reader
+# simply never looks at it. A change of *units* is not in here and never
+# can be, because nothing in the schema distinguishes seconds from
+# milliseconds. Keyed by the version arrived at.
+IN_PLACE = frozenset({2})
 
 
 class SchemaTooOld(RuntimeError):
@@ -42,7 +55,8 @@ CREATE TABLE IF NOT EXISTS chatlog (
     nick_key  TEXT NOT NULL DEFAULT '',
     account   TEXT NOT NULL DEFAULT '',
     kind      TEXT NOT NULL DEFAULT 'privmsg',
-    text      TEXT NOT NULL
+    text      TEXT NOT NULL,
+    note      TEXT NOT NULL DEFAULT ''   -- its own aside; see annotate_reply
 );
 CREATE INDEX IF NOT EXISTS chatlog_room_id ON chatlog (realm, channel, id DESC);
 CREATE INDEX IF NOT EXISTS chatlog_who_id  ON chatlog (realm, nick_key, id DESC);
@@ -303,6 +317,7 @@ class Line:
     text: str
     kind: str = "privmsg"
     account: str = ""
+    note: str = ""  # its own aside, on its own lines only
 
 
 @dataclass(slots=True)
@@ -409,6 +424,11 @@ class Store:
         ).fetchone()
         if empty:
             return  # a new database is created at the current version
+        # Every step from here to now applied in place: `_migrate` will do
+        # it, and nobody has to stop the services for a column.
+        if all(step in IN_PLACE for step in range(version + 1, SCHEMA_VERSION + 1)):
+            log.info("schema v%d: applying v%d in place", version, SCHEMA_VERSION)
+            return
         raise SchemaTooOld(
             f"{self.path} is schema v{version}; this release needs v{SCHEMA_VERSION}. "
             "Timestamps moved from seconds to milliseconds, which cannot be detected in place. "
@@ -418,6 +438,8 @@ class Store:
     def _migrate(self) -> None:
         """Runs before SCHEMA, because the new indexes cannot be built without the columns."""
         cols = {r["name"] for r in self._db.execute("PRAGMA table_info(chatlog)")}
+        if cols and "note" not in cols:
+            self._db.execute("ALTER TABLE chatlog ADD COLUMN note TEXT NOT NULL DEFAULT ''")
         if cols and "nick_key" not in cols:
             self._db.execute("ALTER TABLE chatlog ADD COLUMN nick_key TEXT NOT NULL DEFAULT ''")
             for row in self._db.execute("SELECT DISTINCT nick FROM chatlog").fetchall():
@@ -500,12 +522,22 @@ class Store:
     # -- chat log --------------------------------------------------------
 
     async def log_line(
-        self, realm: str, channel: str, nick: str, account: str, text: str, kind: str = "privmsg"
+        self,
+        realm: str,
+        channel: str,
+        nick: str,
+        account: str,
+        text: str,
+        kind: str = "privmsg",
+        note: str = "",
     ) -> None:
+        """`note` is its own aside, kept beside the line and rendered back
+        only into its own scrollback. Nobody else ever reads it."""
+
         def go() -> None:
             self._db.execute(
-                "INSERT INTO chatlog (ts_ms, realm, channel, nick, nick_key, account, kind, text)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO chatlog (ts_ms, realm, channel, nick, nick_key, account, kind, text, note)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     now_ms(),
                     realm,
@@ -515,6 +547,7 @@ class Store:
                     account,
                     kind,
                     text[:900],
+                    note[:NOTE_CHARS],
                 ),
             )
             self._db.commit()
@@ -556,7 +589,7 @@ class Store:
 
         def go() -> list[Line]:
             rows = self._db.execute(
-                "SELECT ts_ms, channel, nick, text, kind, account FROM chatlog"
+                "SELECT ts_ms, channel, nick, text, kind, account, note FROM chatlog"
                 " WHERE realm = ? AND channel = ?"
                 " AND kind IN ('privmsg', 'command', 'self', 'bot')"
                 " ORDER BY id DESC LIMIT ?",
@@ -566,7 +599,8 @@ class Store:
                 fresh = [r for r in rows if r["ts_ms"] >= millis(since_ms, "a scrollback window")]
                 rows = fresh if len(fresh) >= least else rows[:least]
             return [
-                Line(r["ts_ms"], r["channel"], r["nick"], r["text"], r["kind"], r["account"]) for r in reversed(rows)
+                Line(r["ts_ms"], r["channel"], r["nick"], r["text"], r["kind"], r["account"], r["note"])
+                for r in reversed(rows)
             ]
 
         return await self._run(go)
@@ -779,10 +813,11 @@ class Store:
         until: int = 0,
         grep: str = "",
         limit: int = 500,
-    ) -> list[tuple[int, str, str, str, str]]:
-        """(ts_ms, nick, account, kind, text) oldest first: everything said, including
-        the bot's own lines and other bots', unlike the model's scrollback."""
-        sql = "SELECT ts_ms, nick, account, kind, text FROM chatlog WHERE realm = ? AND channel = ?"
+    ) -> list[tuple[int, str, str, str, str, str]]:
+        """(ts_ms, nick, account, kind, text, note) oldest first: everything said,
+        including the bot's own lines and other bots', unlike the model's
+        scrollback. `note` is empty on everything but its own."""
+        sql = "SELECT ts_ms, nick, account, kind, text, note FROM chatlog WHERE realm = ? AND channel = ?"
         args: list = [realm, self.fold(realm, channel)]
         if day:
             sql += " AND date(ts_ms / 1000.0, 'unixepoch', 'localtime') = ?"
@@ -799,7 +834,7 @@ class Store:
         sql += " ORDER BY id DESC LIMIT ?"
         args.append(limit)
         rows = self._db.execute(sql, args).fetchall()
-        return [(r["ts_ms"], r["nick"], r["account"], r["kind"], r["text"]) for r in reversed(rows)]
+        return [(r["ts_ms"], r["nick"], r["account"], r["kind"], r["text"], r["note"]) for r in reversed(rows)]
 
     async def prune(self, keep_days: int) -> int:
         def go() -> int:

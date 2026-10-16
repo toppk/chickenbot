@@ -55,9 +55,25 @@ def test_each_database_carries_its_own_version():
 
     from chickenbot.store import SCHEMA_VERSION
 
+    # A script's target is the version it was written for and never moves:
+    # v0_v1 takes both databases to 1, whatever they have reached since.
     script = _script()
-    assert script.MAIN_VERSION == SCHEMA_VERSION
-    assert script.GITHUB_VERSION == GH_VERSION
+    assert script.MAIN_VERSION == 1
+    assert script.GITHUB_VERSION == 1
+    assert SCHEMA_VERSION >= script.MAIN_VERSION
+    assert GH_VERSION >= script.GITHUB_VERSION
+
+
+def test_a_version_is_either_reachable_in_place_or_has_a_script():
+    """Every step has to be takeable somehow, or a database is stranded."""
+    from pathlib import Path
+
+    from chickenbot.store import IN_PLACE, SCHEMA_VERSION
+
+    here = Path(__file__).resolve().parent.parent / "deploy"
+    for step in range(1, SCHEMA_VERSION + 1):
+        scripted = (here / f"migrate_db_schema_v{step - 1}_v{step}.py").is_file()
+        assert step in IN_PLACE or scripted, f"v{step} can be neither applied nor migrated"
 
 
 def test_reaching_a_version_is_written_down(tmp_path):
@@ -204,3 +220,36 @@ def test_the_barfly_waits_the_right_length_of_time():
     assert QUIET_MS == 45 * 60 * 1000
     assert SPELL_MS == 4 * 3600 * 1000
     assert TODAY_MS == 8 * 3600 * 1000
+
+
+def test_a_v1_database_opens_and_gains_the_column(tmp_path):
+    """A column with a default needs no stopped services: the gate used to
+    refuse any older version, which was right for a change of units and
+    wrong for this."""
+    import sqlite3
+
+    from chickenbot.store import SCHEMA_VERSION, Store
+
+    # Built as v1 actually was, rather than by dropping the column: a real
+    # v1 database never had it, and DROP COLUMN is its own adventure.
+    path = tmp_path / "v1.db"
+    raw = sqlite3.connect(path)
+    raw.execute(
+        "CREATE TABLE chatlog (id INTEGER PRIMARY KEY, ts_ms INTEGER NOT NULL,"
+        " realm TEXT NOT NULL DEFAULT 'irc', channel TEXT NOT NULL, nick TEXT NOT NULL,"
+        " nick_key TEXT NOT NULL DEFAULT '', account TEXT NOT NULL DEFAULT '',"
+        " kind TEXT NOT NULL DEFAULT 'privmsg', text TEXT NOT NULL)"
+    )
+    raw.execute("INSERT INTO chatlog (ts_ms, channel, nick, text) VALUES (1, '#c', 'nate', 'hi')")
+    raw.execute("PRAGMA user_version = 1")
+    raw.commit()
+    raw.close()
+
+    st = Store(path)  # no exception, and no script
+    try:
+        assert "note" in {r["name"] for r in st._db.execute("PRAGMA table_info(chatlog)")}
+        assert int(st._db.execute("PRAGMA user_version").fetchone()[0]) == SCHEMA_VERSION
+        kept = st._db.execute("SELECT text, note FROM chatlog").fetchone()
+        assert (kept["text"], kept["note"]) == ("hi", "")  # and the rows survive
+    finally:
+        st.close()
