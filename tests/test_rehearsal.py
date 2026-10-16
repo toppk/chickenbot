@@ -33,7 +33,7 @@ class Echo:
 
 def said(store, who, when, text, room="#lobby", realm="fake"):
     store._db.execute(
-        "INSERT INTO chatlog (ts, realm, channel, nick, nick_key, account, kind, text)"
+        "INSERT INTO chatlog (ts_ms, realm, channel, nick, nick_key, account, kind, text)"
         " VALUES (?, ?, ?, ?, ?, ?, 'privmsg', ?)",
         (int(when), realm, store.fold(realm, room), who, store.fold(realm, who), who, text),
     )

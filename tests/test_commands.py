@@ -3,7 +3,7 @@ import time
 import pytest
 
 from chickenbot.brain import ProviderError
-from chickenbot.commands import Handler, ago
+from chickenbot.commands import Handler, ago_ms
 from chickenbot.transport import KICK, TOPIC
 
 from .conftest import FakeTransport, declare
@@ -44,7 +44,7 @@ async def send(h, tr, text, **kw):
 
 async def test_logs_room_chat_even_when_not_addressed(handler, transport, store):
     await send(handler, transport, "just chatting")
-    seen = await store.last_seen("fake", "nate")
+    seen = await store.last_seen_ms("fake", "nate")
     assert seen is not None and seen.text == "just chatting"
     assert transport.said() == []
 
@@ -189,7 +189,7 @@ async def test_messages_from_a_flagged_bot_are_logged_not_obeyed(handler, transp
     await send(handler, transport, "!topic hijacked", sender="otherbot", account="alice", is_bot=True)
     assert transport.sent == []
     # Still logged, so the room record stays complete.
-    assert (await store.last_seen("fake", "otherbot")).text == "!topic hijacked"
+    assert (await store.last_seen_ms("fake", "otherbot")).text == "!topic hijacked"
     assert await store.search("fake", "#chan", "hijacked") == []
 
 
@@ -228,11 +228,11 @@ async def test_announce_goes_to_the_transport_that_owns_the_watch(handler, trans
 
 
 def test_ago_formats_coarsely():
-    now = int(time.time())
-    assert ago(now).endswith("s")
-    assert ago(now - 120) == "2m"
-    assert ago(now - 7500) == "2h5m"
-    assert ago(now - 200000) == "2d7h"
+    now = int(time.time() * 1000)
+    assert ago_ms(now).endswith("s")
+    assert ago_ms(now - 120_000) == "2m"
+    assert ago_ms(now - 7_500_000) == "2h5m"
+    assert ago_ms(now - 200_000_000) == "2d7h"
 
 
 async def test_the_prompt_says_which_network_and_room_it_is_in(cfg, transport, store):
@@ -295,7 +295,7 @@ async def test_scrollback_lines_carry_their_age(cfg, transport, store):
     provider = StubProvider()
     handler = Handler(cfg, store, provider, None)
     await store.log_line(transport.realm, "#chan", "toppk", "toppk", "make it so")
-    store._db.execute("UPDATE chatlog SET ts = ? WHERE text = 'make it so'", (int(time.time()) - 1800,))
+    store._db.execute("UPDATE chatlog SET ts_ms = ? WHERE text = 'make it so'", (int(time.time() * 1000) - (1800) * 1000,))
     store._db.commit()
 
     await send(handler, transport, "!ask what did i mean")

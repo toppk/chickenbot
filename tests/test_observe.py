@@ -187,9 +187,9 @@ def test_the_prompt_command_shows_what_would_be_sent(tmp_path):
     st.set_soul("be terse")
     st.set_person("irc:host", "toppk", "runs the bot")
     st._db.execute(
-        "INSERT INTO chatlog (ts, realm, channel, nick, nick_key, account, kind, text)"
+        "INSERT INTO chatlog (ts_ms, realm, channel, nick, nick_key, account, kind, text)"
         " VALUES (?, 'irc:host', '#soup', 'toppk', 'toppk', 'toppk', 'privmsg', 'make it so')",
-        (int(clock.time()) - 1800,),
+        (int(clock.time() * 1000) - 1_800_000,),
     )
     st._db.commit()
     st.close()

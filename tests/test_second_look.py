@@ -83,7 +83,7 @@ async def test_the_question_is_asked_again(cfg, store):
     assert len(jobs) == 1
     assert jobs[0].command.endswith("ask what landed?")
     assert jobs[0].room == "#chan" and jobs[0].nick == "toppk"
-    assert 40 <= jobs[0].due_at - int(time.time()) <= 46
+    assert 40_000 <= jobs[0].due_at_ms - int(time.time() * 1000) <= 46_000
 
 
 async def test_a_second_look_never_earns_a_third(cfg, store):
@@ -120,7 +120,7 @@ async def test_however_late_a_tool_says_it_will_be_the_wait_is_capped(cfg, store
     h, tr = wired(cfg, store, retry_after=99999.0)
     ctx = ctx_for(h, tr)
     await come_back_to_it(h, ctx, await box_after_a_call(h, ctx))
-    assert (await store.jobs())[0].due_at - int(time.time()) <= RETRY_CAP
+    assert (await store.jobs())[0].due_at_ms - int(time.time() * 1000) <= RETRY_CAP * 1000
 
 
 async def test_a_scheduled_run_is_marked_as_a_second_look(cfg, store):

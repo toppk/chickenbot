@@ -26,17 +26,17 @@ def logged(tmp_path):
     # the previous day when the suite runs just after midnight, and the
     # per-day file count would change underneath the test.
     midday = time.mktime(time.localtime()[:3] + (12, 0, 0, 0, 0, -1))
-    now = int(midday)
+    now = int(midday * 1000)
     rows = [
-        ("irc:irc.chonkbase.net", "#soup", "toppk", "toppk", "the kettle is broken", "privmsg", now - 7200),
-        ("irc:irc.chonkbase.net", "#soup", "toppk", "toppk", ".ask about kettles", "command", now - 3600),
-        ("irc:irc.chonkbase.net", "#soup", "chickenbot", "", "toppk: kettles boil water", "self", now - 3500),
-        ("irc:irc.chonkbase.net", "#soup", "otherbot", "", "beep", "bot", now - 3400),
-        ("signal", "g1", "Nate", "uuid", "hello there", "privmsg", now - 60),
+        ("irc:irc.chonkbase.net", "#soup", "toppk", "toppk", "the kettle is broken", "privmsg", now - 7200000),
+        ("irc:irc.chonkbase.net", "#soup", "toppk", "toppk", ".ask about kettles", "command", now - 3600000),
+        ("irc:irc.chonkbase.net", "#soup", "chickenbot", "", "toppk: kettles boil water", "self", now - 3500000),
+        ("irc:irc.chonkbase.net", "#soup", "otherbot", "", "beep", "bot", now - 3400000),
+        ("signal", "g1", "Nate", "uuid", "hello there", "privmsg", now - 60000),
     ]
     for transport, room, nick, account, text, kind, ts in rows:
         st._db.execute(
-            "INSERT INTO chatlog (ts, realm, channel, nick, nick_key, account, kind, text)"
+            "INSERT INTO chatlog (ts_ms, realm, channel, nick, nick_key, account, kind, text)"
             " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (ts, transport, room, nick, nick.casefold(), account, kind, text),
         )
@@ -178,7 +178,7 @@ def test_a_failed_action_is_not_recorded_as_done(cfg, store):
 
 def test_rekeying_moves_old_rows_to_their_network(store):
     store._db.execute(
-        "INSERT INTO chatlog (ts, realm, channel, nick, nick_key, account, kind, text)"
+        "INSERT INTO chatlog (ts_ms, realm, channel, nick, nick_key, account, kind, text)"
         " VALUES (1, 'irc', '#soup', 'toppk', 'toppk', 'toppk', 'privmsg', 'old')"
     )
     store._db.commit()

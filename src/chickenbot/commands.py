@@ -23,6 +23,7 @@ from .attention import (
     addressed_elsewhere,
 )
 from .brain import Provider, ProviderError, collect_legs, leaked_markup, note_wait
+from .clock import ms, now_ms
 from .config import Config
 from .dossier import Dossiers
 from .events import Event, Kind
@@ -141,7 +142,7 @@ def render_scrollback(recent: list) -> str:
         if previous is not None and _same_breath(previous, line):
             out[-1] += " " + line.text
         else:
-            out.append(f"[{ago(line.ts)} ago] <{speaker(line)}> {line.text}")
+            out.append(f"[{ago_ms(line.ts_ms)} ago] <{speaker(line)}> {line.text}")
         previous = line
     return "\n".join(out)
 
@@ -151,7 +152,7 @@ def _same_breath(previous, line) -> bool:
     return (
         previous.nick == line.nick
         and getattr(previous, "kind", "") == getattr(line, "kind", "")
-        and 0 <= line.ts - previous.ts <= BREATH
+        and 0 <= line.ts_ms - previous.ts_ms <= BREATH
     )
 
 
@@ -229,7 +230,7 @@ def compose(
         # Its own version, because asked for one it invented a commit hash
         # rather than saying it had no way to know. Anything it should be able
         # to state about itself belongs here, not in its guesses.
-        f" now={now} running_for={ago(int(h.started))} version={version()} model={_model(h)}</context>"
+        f" now={now} running_for={ago_ms(int(h.started))} version={version()} model={_model(h)}</context>"
     )
     # What it can actually do here, right now. Without this the model finds out
     # by proposing a kick it has no power to perform and relaying the refusal.
@@ -379,8 +380,10 @@ def names(line: str, word: str) -> bool:
     return False
 
 
-def ago(ts: int) -> str:
-    seconds = max(0, int(time.time()) - ts)
+def ago_ms(ts_ms: int) -> str:
+    """Takes the stored clock. Renamed with the columns: a timestamp handed
+    to the old seconds version read as 1970 rather than as wrong."""
+    seconds = max(0, (now_ms() - ts_ms) // 1000)
     if seconds < 60:
         return f"{seconds}s"
     if seconds < 3600:
@@ -483,7 +486,7 @@ class Handler:
         """
         if not ctx.in_channel or self.cfg.llm.history_lines <= 0:
             return ""
-        since = int(time.time()) - self.cfg.llm.history_minutes * 60 if self.cfg.llm.history_minutes else 0
+        since = now_ms() - ms(self.cfg.llm.history_minutes * 60) if self.cfg.llm.history_minutes else 0
         recent = await self.store.recent(
             ctx.transport.realm, ctx.channel, self.cfg.llm.history_lines, since=since, least=HISTORY_FLOOR
         )
@@ -550,7 +553,7 @@ class Handler:
         seconds later, and was no longer being listened to.
         """
         cfg = self.cfg.llm
-        lines = self.store.lines_since(tr.realm, room, int(time.time()) - 3600)
+        lines = self.store.lines_since(tr.realm, room, now_ms() - ms(3600))
         gap = 3600.0 / max(lines, 1)  # the room's recent pace, seconds per line
         return min(max(float(cfg.follow_seconds), gap * 2), float(cfg.follow_max_seconds))
 
@@ -566,7 +569,7 @@ class Handler:
         delay = random.uniform(0.5, self.cfg.jitter_seconds) if self.cfg.jitter_seconds > 0 else 0.0
 
         async def later() -> None:
-            since = int(time.time())
+            since = now_ms()
             if delay:
                 await asyncio.sleep(delay)
             if about and self._beaten_to_it(tr, room, about, since):
@@ -1042,7 +1045,7 @@ async def cmd_help(h: Handler, ctx: Context) -> None:
 
 @command("uptime", blurb="how long i have been up")
 async def cmd_uptime(h: Handler, ctx: Context) -> None:
-    ctx.say(f"up {ago(int(h.started))}, watching {len(await h.store.watches())} repo feeds")
+    ctx.say(f"up {ago_ms(int(h.started))}, watching {len(await h.store.watches())} repo feeds")
 
 
 @command("seen", usage="seen <nick>", blurb="when a nick last spoke")
@@ -1054,11 +1057,11 @@ async def cmd_seen(h: Handler, ctx: Context) -> None:
     if ctx.transport.fold(who) == ctx.transport.fold(ctx.transport.me):
         ctx.say("i am right here")
         return
-    line = await h.store.last_seen(ctx.transport.realm, who)
+    line = await h.store.last_seen_ms(ctx.transport.realm, who)
     if line is None:
         ctx.say(f"i have not seen {who}")
         return
-    ctx.say(f'{line.nick} was last seen {ago(line.ts)} ago in {line.channel}: "{line.text}"')
+    ctx.say(f'{line.nick} was last seen {ago_ms(line.ts_ms)} ago in {line.channel}: "{line.text}"')
 
 
 @command("history", usage="history <words>", blurb="search this channel's log")
@@ -1071,7 +1074,7 @@ async def cmd_history(h: Handler, ctx: Context) -> None:
         ctx.say(f"nothing matching {ctx.args!r}")
         return
     for line in reversed(lines):
-        ctx.say(f"{ago(line.ts)} ago <{line.nick}> {line.text}")
+        ctx.say(f"{ago_ms(line.ts_ms)} ago <{line.nick}> {line.text}")
 
 
 @command("ask", usage="ask <question>", blurb="ask the model; it searches when it needs to", slow=True)
@@ -1159,7 +1162,7 @@ async def come_back_to_it(h: Handler, ctx: Context, toolbox: ToolBox | None) -> 
     if not later or ctx.again or not ctx.in_channel or not ctx.args.strip():
         return
     await h.store.add_job(
-        due_at=int(time.time() + min(later, RETRY_CAP)),
+        due_at_ms=now_ms() + ms(min(later, RETRY_CAP)),
         realm=ctx.transport.realm,
         room=ctx.channel,
         nick=ctx.nick,
@@ -1460,7 +1463,7 @@ async def cmd_activity(h: Handler, ctx: Context) -> None:
         return
     for row in reversed(rows):
         extra = " ".join(f"{f}={row[f]}" for f in ("command", "outcome", "tools", "error") if row[f])
-        ctx.say(f"{ago(row['ts'])} ago {row['kind']} {row['nick'] or '-'} {extra}")
+        ctx.say(f"{ago_ms(row['ts_ms'])} ago {row['kind']} {row['nick'] or '-'} {extra}")
 
 
 @command("say", owner=True, tier=ALL, usage="say <text>", blurb="speak")
@@ -1485,7 +1488,7 @@ async def cmd_in(h: Handler, ctx: Context) -> None:
         ctx.say(f"no command called {name}")
         return
     job_id = await h.store.add_job(
-        due_at=int(time.time()) + delay,
+        due_at_ms=now_ms() + ms(delay),
         realm=ctx.transport.realm,
         room=ctx.channel,
         nick=ctx.nick,
@@ -1502,8 +1505,8 @@ async def cmd_jobs(h: Handler, ctx: Context) -> None:
     if not jobs:
         ctx.say("nothing scheduled here")
         return
-    now = int(time.time())
-    ctx.say(", ".join(f"{j.id}: {j.command} (in {describe(j.due_at - now)})" for j in jobs[:5]))
+    now = now_ms()
+    ctx.say(", ".join(f"{j.id}: {j.command} (in {describe((j.due_at_ms - now) // 1000)})" for j in jobs[:5]))
 
 
 @command("unschedule", owner=True, tier=ALL, usage="unschedule <id>", blurb="cancel a scheduled job")
@@ -1536,13 +1539,13 @@ async def _dump_comms(h: Handler, ctx: Context) -> list[str]:
     known = await h.store.known_accounts()
     if known:
         out.append(
-            "known: " + ", ".join(f"{acct}@{transport} ({ago(seen)} ago)" for transport, acct, _n, seen in known)
+            "known: " + ", ".join(f"{acct}@{transport} ({ago_ms(seen)} ago)" for transport, acct, _n, seen in known)
         )
     return out
 
 
 async def _dump_engines(h: Handler, ctx: Context) -> list[str]:
-    out = [f"up {ago(int(h.started))}, prefix {h.cfg.prefix!r}"]
+    out = [f"up {ago_ms(int(h.started))}, prefix {h.cfg.prefix!r}"]
     if h.provider is None:
         out.append("llm: none configured")
     else:
@@ -1554,8 +1557,8 @@ async def _dump_engines(h: Handler, ctx: Context) -> list[str]:
         )
         out.append(f"soul: {h.cfg.llm.soul_path if h.soul.loaded else 'not loaded, using llm.persona'}")
     jobs = await h.store.jobs()
-    now = int(time.time())
-    soonest = f", next in {describe(min(j.due_at for j in jobs) - now)}" if jobs else ""
+    now = now_ms()
+    soonest = f", next in {describe((min(j.due_at_ms for j in jobs) - now) // 1000)}" if jobs else ""
     out.append(f"scheduler: {len(jobs)} job(s){soonest}")
     watches = await h.store.watches()
     out.append(f"github: {'on' if h.cfg.github.enabled else 'off'}, {len(watches)} watch(es)")
@@ -1580,7 +1583,7 @@ async def _dump_rhythm(h: Handler, ctx: Context) -> list[str]:
     for tr in sorted(h.transports.values(), key=lambda t: t.realm):
         for room in tr.rooms:
             last = h.store.last_human_line(tr.realm, room)
-            quiet = f"quiet {ago(last)}" if last else "never heard anyone"
+            quiet = f"quiet {ago_ms(last)}" if last else "never heard anyone"
             awake = "awake now" if h.rhythm.lively_now(tr.realm, room) else "off hours"
             out.append(f"[{tr.realm}] {room}: {awake}, {quiet}")
             out.append(f"  hours: {h.rhythm.describe(tr.realm, room)}")

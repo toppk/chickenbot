@@ -20,10 +20,22 @@ API = "https://api.github.com"
 PER_PAGE = 100
 
 
-def _ts(value: str | None) -> int:
+def now_ms() -> int:
+    """Everything stored by this tool is epoch millis, and every column that
+    holds one is named `*_ms`, so a stale read fails loudly."""
+    return int(time.time() * 1000)
+
+
+def ms(seconds: float) -> int:
+    """A window said in seconds, as the stored clock counts it."""
+    return int(seconds * 1000)
+
+
+def _ts_ms(value: str | None) -> int:
+    """GitHub answers in ISO 8601; everything stored here is epoch millis."""
     if not value:
         return 0
-    return int(datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp())
+    return int(datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp() * 1000)
 
 
 class GitHub:
@@ -129,12 +141,12 @@ class GitHub:
                 {
                     "name": node.get("name", ""),
                     "sha": str(target.get("oid", ""))[:7],
-                    "ts": _ts(target.get("committedDate")),
+                    "ts_ms": _ts_ms(target.get("committedDate")),
                     "who": ((target.get("author") or {}).get("user") or {}).get("login") or "",
                     "subject": str(target.get("messageHeadline", "")),
                 }
             )
-        out.sort(key=lambda b: b["ts"], reverse=True)
+        out.sort(key=lambda b: b["ts_ms"], reverse=True)
         return default, out
 
     async def commits(self, repo: str, branch: str = "", limit: int = 10) -> list[dict]:
@@ -156,14 +168,14 @@ class GitHub:
             out.append(
                 {
                     "sha": str(raw.get("sha", ""))[:7],
-                    "ts": _ts((commit.get("committer") or {}).get("date")),
+                    "ts_ms": _ts_ms((commit.get("committer") or {}).get("date")),
                     "who": ((raw.get("author") or {}).get("login") or (commit.get("author") or {}).get("name") or ""),
                     "subject": str(commit.get("message", "")).split("\n", 1)[0],
                 }
             )
         return out
 
-    async def pushed_at(self, repo: str) -> int:
+    async def pushed_at_ms(self, repo: str) -> int:
         """When the repository itself says it last moved. One cheap call, and
         unlike the events feed it is never behind."""
         payload, _ = await self.get(f"/repos/{repo}")
@@ -171,7 +183,7 @@ class GitHub:
             return 0
         if payload.get("private") and not self.private:
             raise RuntimeError(f"{repo} is private and this instance does not read private repositories")
-        return _ts(payload.get("pushed_at"))
+        return _ts_ms(payload.get("pushed_at_ms"))
 
     async def issue(self, repo: str, number: int, comments: int = 0) -> dict:
         """One issue or pull request, with its body and the latest comments.
@@ -199,15 +211,15 @@ class GitHub:
             "state": payload.get("state", ""),
             "author": (payload.get("user") or {}).get("login", ""),
             "labels": [str((label or {}).get("name", "")) for label in payload.get("labels") or []],
-            "created_at": payload.get("created_at", ""),
-            "updated_at": payload.get("updated_at", ""),
+            "created_at_ms": payload.get("created_at_ms", ""),
+            "updated_at_ms": payload.get("updated_at_ms", ""),
             "url": payload.get("html_url", f"https://github.com/{repo}/issues/{number}"),
             "body": payload.get("body") or "",
             "comment_count": payload.get("comments", 0),
             "comments": [
                 {
                     "author": (c.get("user") or {}).get("login", ""),
-                    "at": c.get("created_at", ""),
+                    "at": c.get("created_at_ms", ""),
                     "body": c.get("body") or "",
                 }
                 for c in said
@@ -246,7 +258,7 @@ class GitHub:
                 "archived": int(bool(r.get("archived"))),
                 "stars": int(r.get("stargazers_count", 0)),
                 "open_issues": int(r.get("open_issues_count", 0)),
-                "pushed_at": _ts(r.get("pushed_at")),
+                "pushed_at_ms": _ts_ms(r.get("pushed_at_ms")),
                 "description": (r.get("description") or "")[:200],
             }
             for r in payload
@@ -284,8 +296,8 @@ class GitHub:
                     "url": raw.get("html_url", ""),
                     "draft": int(bool((raw.get("pull_request") or {}).get("draft") or raw.get("draft"))),
                     "comments": int(raw.get("comments", 0)),
-                    "created_at": _ts(raw.get("created_at")),
-                    "updated_at": _ts(raw.get("updated_at")),
+                    "created_at_ms": _ts_ms(raw.get("created_at_ms")),
+                    "updated_at_ms": _ts_ms(raw.get("updated_at_ms")),
                 }
             )
         return out
@@ -310,14 +322,14 @@ class GitHub:
             number = raw.get("number")
             if not repo or "/" not in repo or not number:
                 continue
-            when = _ts((raw.get("pull_request") or {}).get("merged_at")) or _ts(raw.get("closed_at"))
+            when = _ts_ms((raw.get("pull_request") or {}).get("merged_at")) or _ts_ms(raw.get("closed_at"))
             items.append(
                 Item(
                     id=f"merged:{repo}#{number}",
                     kind="pr",
                     actor=user,
                     repo=repo,
-                    ts=when or _ts(raw.get("updated_at")),
+                    ts_ms=when or _ts_ms(raw.get("updated_at_ms")),
                     title=f"merged #{number}: {(raw.get('title') or '')[:80]}",
                     url=raw.get("html_url", ""),
                     state="merged",
@@ -355,7 +367,7 @@ def _from_event(raw: dict) -> Item | None:
         return None
     actor = (raw.get("actor") or {}).get("login", "")
     repo = (raw.get("repo") or {}).get("name", "")
-    ts = _ts(raw.get("created_at"))
+    ts_ms = _ts_ms(raw.get("created_at_ms"))
     payload = raw.get("payload") or {}
     title, url, state = "", f"https://github.com/{repo}", ""
 
@@ -395,5 +407,5 @@ def _from_event(raw: dict) -> Item | None:
         url = node.get("html_url", url)
 
     return Item(
-        id=str(raw.get("id", "")), kind=kind, actor=actor, repo=repo, ts=ts, title=title[:200], url=url, state=state
+        id=str(raw.get("id", "")), kind=kind, actor=actor, repo=repo, ts_ms=ts_ms, title=title[:200], url=url, state=state
     )

@@ -4,7 +4,7 @@ import time
 
 import pytest
 from external.github.__main__ import RANGES, TOOLS, Tool, ago
-from external.github.github import _from_event, _ts
+from external.github.github import _from_event, _ts_ms
 from external.github.store import Item, Store
 
 
@@ -24,7 +24,7 @@ def seed(tool: Tool, *, ago_s: int, kind: str, actor: str = "toppk", ident: str 
                 kind=kind,
                 actor=actor,
                 repo="toppk/chickenbot",
-                ts=int(time.time()) - ago_s,
+                ts_ms=int(time.time() * 1000) - ago_s * 1000,
                 title=f"a {kind}",
             )
         ]
@@ -41,7 +41,7 @@ def test_push_events_become_commits():
             "type": "PushEvent",
             "actor": {"login": "toppk"},
             "repo": {"name": "toppk/chickenbot"},
-            "created_at": "2026-09-27T10:00:00Z",
+            "created_at_ms": "2026-09-27T10:00:00Z",
             "payload": {"size": 3, "commits": [{"message": "fix the thing\n\ndetail"}]},
         }
     )
@@ -56,7 +56,7 @@ def test_pull_request_events_carry_number_and_state():
             "type": "PullRequestEvent",
             "actor": {"login": "a2f0"},
             "repo": {"name": "x/y"},
-            "created_at": "2026-09-27T10:00:00Z",
+            "created_at_ms": "2026-09-27T10:00:00Z",
             "payload": {
                 "action": "opened",
                 "pull_request": {"number": 7, "title": "T", "state": "open", "html_url": "https://example/7"},
@@ -73,15 +73,15 @@ def test_uninteresting_event_types_are_dropped():
 
 
 def test_timestamps_parse_and_tolerate_missing():
-    assert _ts("2026-09-27T10:00:00Z") > 0
-    assert _ts(None) == 0
+    assert _ts_ms("2026-09-27T10:00:00Z") > 0
+    assert _ts_ms(None) == 0
 
 
 # -- the mirror ----------------------------------------------------------
 
 
 def test_recording_the_same_item_twice_is_idempotent(gh):
-    item = Item(id="x1", kind="commit", actor="toppk", repo="r", ts=int(time.time()))
+    item = Item(id="x1", kind="commit", actor="toppk", repo="r", ts_ms=int(time.time() * 1000))
     assert gh.store.record([item]) == 1
     assert gh.store.record([item]) == 0  # a re-poll announces nothing
 
@@ -96,7 +96,7 @@ def test_repos_upsert_rather_than_duplicate(gh):
         "archived": 0,
         "stars": 1,
         "open_issues": 0,
-        "pushed_at": 100,
+        "pushed_at_ms": 100,
         "description": "d",
     }
     gh.store.save_repo(row)
@@ -155,7 +155,7 @@ def test_repos_reports_stars_and_recency(gh):
             "archived": 0,
             "stars": 3,
             "open_issues": 2,
-            "pushed_at": int(time.time()) - 3600,
+            "pushed_at_ms": int(time.time() * 1000) - (3600) * 1000,
             "description": "d",
         }
     )
@@ -319,7 +319,7 @@ def test_a_push_reports_the_branch_when_github_omits_the_count():
             "type": "PushEvent",
             "actor": {"login": "iconidentify"},
             "repo": {"name": "iconidentify/aurora-linux"},
-            "created_at": "2026-09-27T10:00:00Z",
+            "created_at_ms": "2026-09-27T10:00:00Z",
             "payload": {
                 "ref": "refs/heads/tb-dp-tunnel-t8103",
                 "head": "5eb7f83a961aa48bf5a4c9f72fb6c6d9f010c0e0",
@@ -339,7 +339,7 @@ def test_a_push_still_uses_the_count_when_one_is_present():
             "type": "PushEvent",
             "actor": {"login": "toppk"},
             "repo": {"name": "toppk/x"},
-            "created_at": "2026-09-27T10:00:00Z",
+            "created_at_ms": "2026-09-27T10:00:00Z",
             "payload": {"ref": "refs/heads/main", "size": 3, "commits": [{"message": "fix it\n\nmore"}]},
         }
     )
@@ -357,7 +357,7 @@ def test_repo_output_spells_stars_rather_than_using_an_asterisk(gh):
             "archived": 0,
             "stars": 4,
             "open_issues": 1,
-            "pushed_at": int(time.time()),
+            "pushed_at_ms": int(time.time() * 1000),
             "description": "",
         }
     )
@@ -367,12 +367,12 @@ def test_repo_output_spells_stars_rather_than_using_an_asterisk(gh):
 
 def test_a_fresh_mirror_is_not_refetched_on_startup(gh):
     """Restarting to debug something should not cost an API call per user."""
-    gh.store.set_cursor("user:toppk", "", int(time.time()) - 60)
+    gh.store.set_cursor("user:toppk", "", int(time.time() * 1000) - (60) * 1000)
     assert gh.due_in(900) == pytest.approx(840, abs=2)
 
 
 def test_a_stale_mirror_polls_at_once(gh):
-    gh.store.set_cursor("user:toppk", "", int(time.time()) - 5000)
+    gh.store.set_cursor("user:toppk", "", int(time.time() * 1000) - (5000) * 1000)
     assert gh.due_in(900) == 0
 
 
@@ -395,8 +395,8 @@ def item(**kw) -> dict:
         "url": "u",
         "draft": 0,
         "comments": 0,
-        "created_at": 100,
-        "updated_at": 200,
+        "created_at_ms": 100,
+        "updated_at_ms": 200,
     }
     return {**base, **kw}
 
@@ -420,7 +420,7 @@ def hunted(tmp_path):
             author="toppk",
             number=3,
             kind="pr",
-            updated_at=300,
+            updated_at_ms=300,
         )
     )
     # a stranger's, on a stranger's repo: neither of ours
@@ -495,8 +495,8 @@ def test_search_results_are_normalised(tmp_path):
         "title": "a title",
         "html_url": "https://example/7",
         "comments": 3,
-        "created_at": "2026-09-01T10:00:00Z",
-        "updated_at": "2026-09-27T10:00:00Z",
+        "created_at_ms": "2026-09-01T10:00:00Z",
+        "updated_at_ms": "2026-09-27T10:00:00Z",
         "repository_url": "https://api.github.com/repos/ghostty-org/ghostty",
         "user": {"login": "toppk"},
         "pull_request": {"draft": True},
@@ -537,14 +537,14 @@ def test_the_declared_queries_name_a_kind():
 def test_a_fresh_user_is_skipped(gh):
     gh.interval = 900
     gh.users = ["toppk", "newcomer"]
-    gh.store.set_cursor("user:toppk", "", int(time.time()) - 60)
+    gh.store.set_cursor("user:toppk", "", int(time.time() * 1000) - (60) * 1000)
     assert gh.stale("toppk") is False
     assert gh.stale("newcomer") is True  # never polled
 
 
 def test_a_stale_user_is_not(gh):
     gh.interval = 900
-    gh.store.set_cursor("user:toppk", "", int(time.time()) - 5000)
+    gh.store.set_cursor("user:toppk", "", int(time.time() * 1000) - (5000) * 1000)
     assert gh.stale("toppk") is True
 
 
@@ -591,7 +591,7 @@ async def test_forgetting_closed_items_waits_for_a_full_pass(gh, monkeypatch):
     """Skipping a fresh user must not evict that user's open items."""
     seen: list[int] = []
     gh.interval = 900
-    gh.store.set_cursor("user:toppk", "", int(time.time()))  # fresh, will be skipped
+    gh.store.set_cursor("user:toppk", "", int(time.time() * 1000))  # fresh, will be skipped
     gh.users = ["toppk", "other"]
 
     async def nothing(*a, **k):
@@ -622,7 +622,7 @@ async def test_forgetting_closed_items_waits_for_a_full_pass(gh, monkeypatch):
 
 async def test_the_answer_says_how_old_it_is(gh):
     seed(gh, ago_s=60, kind="commit")
-    gh.store.set_cursor("user:toppk", "", int(time.time()) - 7200)
+    gh.store.set_cursor("user:toppk", "", int(time.time() * 1000) - (7200) * 1000)
     gh.users = ["toppk"]
     assert "[as of 2h ago]" in await gh.call("github_activity", {"user": "toppk", "summarize": True})
 
@@ -676,7 +676,7 @@ async def test_a_fresh_mirror_triggers_no_refresh(gh, monkeypatch):
 
     gh.users = ["toppk"]
     gh.interval = 900
-    gh.store.set_cursor("user:toppk", "", int(time.time()))
+    gh.store.set_cursor("user:toppk", "", int(time.time() * 1000))
     gh.api = type("Api", (), {"repos": staticmethod(boom)})()
     await gh.call("github_activity", {"user": "toppk"})
     assert gh._refreshing is None and called == []
@@ -751,7 +751,7 @@ async def test_refreshing_twice_in_a_minute_is_just_quota(gh, monkeypatch):
 
     monkeypatch.setattr(gh, "poll_once", poll)
     gh.watch(["toppk"])
-    gh.store.set_cursor("user:toppk", "", int(time.time()))
+    gh.store.set_cursor("user:toppk", "", int(time.time() * 1000))
     answer = await gh.call("github_refresh", {"user": "toppk"})
     assert "already" in answer and polls == []
     assert ghmod.REFRESH_GAP > 0
@@ -858,13 +858,13 @@ def repo(name, stars=0, pushed=None):
         "archived": 0,
         "stars": stars,
         "open_issues": 0,
-        "pushed_at": pushed or int(time.time()),
+        "pushed_at_ms": pushed or int(time.time() * 1000),
         "description": "",
     }
 
 
 def event(kind="commit", when=None):
-    return Item(id="e1", kind=kind, actor="someone", repo="someone/thing", ts=when or int(time.time()))
+    return Item(id="e1", kind=kind, actor="someone", repo="someone/thing", ts_ms=when or int(time.time() * 1000))
 
 
 async def test_anybody_can_be_looked_up_watched_or_not(tmp_path):
@@ -949,7 +949,7 @@ async def test_repos_say_what_they_are(tmp_path):
             "archived": 0,
             "stars": 76,
             "open_issues": 73,
-            "pushed_at": int(time.time()),
+            "pushed_at_ms": int(time.time() * 1000),
             "description": "A traditional floating compositor for Omarchy",
         }
     )
@@ -972,7 +972,7 @@ async def test_a_repo_with_no_description_says_nothing_extra(tmp_path):
             "archived": 0,
             "stars": 0,
             "open_issues": 0,
-            "pushed_at": int(time.time()),
+            "pushed_at_ms": int(time.time() * 1000),
             "description": "",
         }
     )
@@ -996,7 +996,7 @@ async def test_a_long_description_is_trimmed(tmp_path):
             "archived": 0,
             "stars": 1,
             "open_issues": 0,
-            "pushed_at": int(time.time()),
+            "pushed_at_ms": int(time.time() * 1000),
             "description": "x" * 400,
         }
     )
@@ -1017,7 +1017,7 @@ def _repo_row(name, **over):
         "archived": 0,
         "stars": 0,
         "open_issues": 0,
-        "pushed_at": int(time.time()),
+        "pushed_at_ms": int(time.time() * 1000),
         "description": "",
     }
     return row | over
@@ -1049,7 +1049,7 @@ async def test_their_own_work_carries_no_marks(tmp_path):
 
 
 def _item_row(number, **over):
-    now = int(time.time())
+    now = int(time.time() * 1000)
     row = {
         "id": f"someone/thing#{number}",
         "kind": "issue",
@@ -1061,14 +1061,14 @@ def _item_row(number, **over):
         "url": "",
         "draft": 0,
         "comments": 0,
-        "created_at": now - 90 * 86400,
-        "updated_at": now - 86400,
+        "created_at_ms": now - 90 * 86400 * 1000,
+        "updated_at_ms": now - 86400 * 1000,
     }
     return row | over
 
 
 async def test_an_unanswered_question_says_so(tmp_path):
-    """`updated_at` alone cannot tell a question nobody answered from a thread
+    """`updated_at_ms` alone cannot tell a question nobody answered from a thread
     that ran and went quiet."""
     store = Store(tmp_path / "g.db")
     store.save_item(_item_row(1, comments=0))
@@ -1111,7 +1111,7 @@ async def test_a_pr_merged_by_somebody_else_is_recorded(tmp_path, monkeypatch):
         kind="pr",
         actor="iconidentify",
         repo="aurora-silicon/linux",
-        ts=int(time.time()) - 3600,
+        ts_ms=int(time.time() * 1000) - (3600) * 1000,
         title="merged #8: SEP keystore",
         state="merged",
     )
@@ -1149,7 +1149,7 @@ async def test_the_same_merge_twice_is_one_landing(tmp_path, monkeypatch):
         kind="pr",
         actor="iconidentify",
         repo="aurora-silicon/linux",
-        ts=int(time.time()),
+        ts_ms=int(time.time() * 1000),
         title="merged #8",
         state="merged",
     )
@@ -1201,10 +1201,10 @@ async def test_a_landing_is_not_hidden_by_a_busy_afternoon(tmp_path):
     """A merge five hours old fell off the end behind newer pushes, and the
     honest report of what it could see read as "nothing merged"."""
     store = Store(tmp_path / "g.db")
-    now = int(time.time())
+    now = int(time.time() * 1000)
     store.record(
         [
-            Item(id=f"push:{i}", kind="commit", actor="chrisk", repo="a/b", ts=now - 3600, title=f"pushed {i}")
+            Item(id=f"push:{i}", kind="commit", actor="chrisk", repo="a/b", ts_ms=now - 3600, title=f"pushed {i}")
             for i in range(20)
         ]
         + [
@@ -1213,7 +1213,7 @@ async def test_a_landing_is_not_hidden_by_a_busy_afternoon(tmp_path):
                 kind="pr",
                 actor="chrisk",
                 repo="c/d",
-                ts=now - 5 * 3600,
+                ts_ms=now - 5 * 3600,
                 title="merged #58: SEP",
                 state="merged",
             )
@@ -1228,11 +1228,11 @@ async def test_a_summary_counts_landings_apart_from_openings(tmp_path):
     """They were counted back in with the ordinary pull requests, because the
     GROUP BY bound to the table column rather than the alias."""
     store = Store(tmp_path / "g.db")
-    now = int(time.time())
+    now = int(time.time() * 1000)
     store.record(
         [
-            Item(id="pr:1", kind="pr", actor="chrisk", repo="a/b", ts=now, title="opened #1"),
-            Item(id="merged:a/b#2", kind="pr", actor="chrisk", repo="a/b", ts=now, title="merged #2", state="merged"),
+            Item(id="pr:1", kind="pr", actor="chrisk", repo="a/b", ts_ms=now, title="opened #1"),
+            Item(id="merged:a/b#2", kind="pr", actor="chrisk", repo="a/b", ts_ms=now, title="merged #2", state="merged"),
         ]
     )
     tally = store.tally(actor="chrisk")
@@ -1242,7 +1242,7 @@ async def test_a_summary_counts_landings_apart_from_openings(tmp_path):
 
 async def test_an_unknown_kind_finds_nothing_rather_than_everything(tmp_path):
     store = Store(tmp_path / "g.db")
-    store.record([Item(id="x", kind="commit", actor="chrisk", repo="a/b", ts=int(time.time()), title="pushed")])
+    store.record([Item(id="x", kind="commit", actor="chrisk", repo="a/b", ts_ms=int(time.time() * 1000), title="pushed")])
     tool = Tool(store, None, ["chrisk"])
     assert "no activity" in await tool.call("github_activity", {"user": "chrisk", "kind": "nonsense"})
     store.close()
@@ -1419,7 +1419,7 @@ def _event(kind, **payload):
         "id": "1",
         "actor": {"login": "chrisk"},
         "repo": {"name": "iconidentify/aurora-linux"},
-        "created_at": "2026-10-04T12:00:00Z",
+        "created_at_ms": "2026-10-04T12:00:00Z",
         "payload": payload,
     }
 
@@ -1471,8 +1471,8 @@ def an_issue(**over):
         "state": "open",
         "author": "iconidentify",
         "labels": ["sep", "help wanted"],
-        "created_at": "2026-10-01T10:00:00Z",
-        "updated_at": "2026-10-06T22:41:00Z",
+        "created_at_ms": "2026-10-01T10:00:00Z",
+        "updated_at_ms": "2026-10-06T22:41:00Z",
         "url": "https://github.com/iconidentify/aurora-linux/issues/35",
         "body": "Tracking what the agents find.",
         "comment_count": 12,

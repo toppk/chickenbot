@@ -10,11 +10,11 @@ from .conftest import FakeTransport
 
 def sat_in(store, *, realm="fake", room="#soup", days=1, lines=0) -> None:
     """`lines` lines of chat spread evenly over the last `days` days."""
-    now = time.time()
-    rows = [(now - (i % days) * 86400 - 60, f"line {i}") for i in range(lines)]
+    now = time.time() * 1000
+    rows = [(now - (i % days) * 86400_000 - 60_000, f"line {i}") for i in range(lines)]
     for ts, text in rows:
         store._db.execute(
-            "INSERT INTO chatlog (ts, realm, channel, nick, nick_key, account, kind, text)"
+            "INSERT INTO chatlog (ts_ms, realm, channel, nick, nick_key, account, kind, text)"
             " VALUES (?, ?, ?, 'nate', 'nate', '', 'privmsg', ?)",
             (int(ts), realm, store.fold(realm, room), text),
         )

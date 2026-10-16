@@ -15,9 +15,9 @@ from .conftest import FakeTransport
 
 def said_by_a_bot(store, nick, text, room="#chan", realm="fake"):
     store._db.execute(
-        "INSERT INTO chatlog (ts, realm, channel, nick, nick_key, account, kind, text)"
+        "INSERT INTO chatlog (ts_ms, realm, channel, nick, nick_key, account, kind, text)"
         " VALUES (?, ?, ?, ?, ?, '', 'bot', ?)",
-        (int(time.time()) + 1, realm, store.fold(realm, room), nick, store.fold(realm, nick), text),
+        (int(time.time() * 1000) + 1, realm, store.fold(realm, room), nick, store.fold(realm, nick), text),
     )
     store._db.commit()
 
@@ -81,9 +81,9 @@ async def test_a_person_saying_the_name_is_not_another_bot_greeting(cfg, store):
     h = Handler(cfg, store, None, None)
     tr = FakeTransport()
     store._db.execute(
-        "INSERT INTO chatlog (ts, realm, channel, nick, nick_key, account, kind, text)"
+        "INSERT INTO chatlog (ts_ms, realm, channel, nick, nick_key, account, kind, text)"
         " VALUES (?, 'fake', ?, 'nate', 'nate', 'nate', 'privmsg', 'chrisk: you about?')",
-        (int(time.time()) + 1, store.fold("fake", "#chan")),
+        (int(time.time() * 1000) + 1, store.fold("fake", "#chan")),
     )
     store._db.commit()
     h.unprompted(tr, "#chan", "hey chrisk", about="chrisk")

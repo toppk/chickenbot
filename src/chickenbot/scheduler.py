@@ -14,6 +14,7 @@ import time
 from collections.abc import Awaitable, Callable
 
 from .events import Event, Kind
+from .clock import now_ms
 from .store import Store
 from .transport import Transport
 
@@ -61,7 +62,7 @@ class Scheduler:
             await asyncio.sleep(TICK)
 
     async def tick(self) -> None:
-        for job in await self.store.due_jobs(int(time.time())):
+        for job in await self.store.due_jobs(now_ms()):
             tr = next((t for t in self.transports.values() if t.realm == job.realm), None)
             if tr is None:
                 # The network it was scheduled on is gone. Fail closed.

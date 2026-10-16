@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from .brain import now_ms
+from .clock import local_ms, ms
 from .observe import note_many
 from .rooms import GUEST
 from .transport import BAN, TOPIC
@@ -359,7 +360,7 @@ async def tool_chan_history(h: Handler, ctx: Context, args: dict) -> str:
         limit = max(1, min(int(args.get("limit") or 20), HISTORY_MAX_LINES))
     except (TypeError, ValueError):
         return "error: hours and limit must be numbers"
-    since = int(time.time()) - hours * 3600
+    since = now_ms() - ms(hours * 3600)
     realm, room = ctx.transport.realm, ctx.channel
     if contains := str(args.get("contains", "")).strip():
         lines = await h.store.search(realm, room, contains, limit=limit, since=since)
@@ -418,7 +419,7 @@ async def tool_self_activity(h: Handler, ctx: Context, args: dict) -> str:
         return f"nothing in your record for the last {hours}h"
     out = []
     for row in reversed(rows):
-        when = time.strftime("%m-%d %H:%M", time.localtime(row["ts"]))
+        when = time.strftime("%m-%d %H:%M", local_ms(row["ts_ms"]))
         bits = [f"{when} {row['kind']}", row["room"] or "-", row["nick"] or "-"]
         for field in ("command", "outcome", "llm", "model", "served", "tools", "error"):
             if row[field]:

@@ -33,9 +33,9 @@ def both(cfg, store):
 
 def said(store, room, text, *, nick="nate", ago_seconds=60) -> None:
     store._db.execute(
-        "INSERT INTO chatlog (ts, realm, channel, nick, nick_key, account, kind, text)"
+        "INSERT INTO chatlog (ts_ms, realm, channel, nick, nick_key, account, kind, text)"
         " VALUES (?, 'fake', ?, ?, ?, '', 'privmsg', ?)",
-        (int(time.time() - ago_seconds), room, nick, nick, text),
+        (int((time.time() - ago_seconds) * 1000), room, nick, nick, text),
     )
     store._db.commit()
 

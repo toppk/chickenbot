@@ -100,7 +100,7 @@ def test_since_filters_by_hours(tmp_path):
 
     st = Store(tmp_path / "c.db")
     st.record_activity({"kind": "message", "nick": "recent", "outcome": "chat"})
-    st._db.execute("UPDATE activity SET ts = ? WHERE nick = 'recent'", (int(time.time()) - 90000,))
+    st._db.execute("UPDATE activity SET ts_ms = ? WHERE nick = 'recent'", (int(time.time() * 1000) - (90000) * 1000,))
     st._db.commit()
     st.record_activity({"kind": "message", "nick": "now", "outcome": "chat"})
     st.close()
@@ -115,8 +115,8 @@ async def test_filtering_by_kind_isolates_what_it_did_unbidden(recorded, store):
     handler, tr = recorded
     await handler.dispatch(tr.envelope("chatter"))
     await handler.drain()
-    store.record_activity({"ts": int(time.time()), "kind": "barfly", "room": "#chan", "outcome": "remarked"})
-    store.record_activity({"ts": int(time.time()), "kind": "vibe", "room": "#chan", "outcome": "noted"})
+    store.record_activity({"ts_ms": int(time.time() * 1000), "kind": "barfly", "room": "#chan", "outcome": "remarked"})
+    store.record_activity({"ts_ms": int(time.time() * 1000), "kind": "vibe", "room": "#chan", "outcome": "noted"})
 
     assert [r["outcome"] for r in store.activity(kind="barfly")] == ["remarked"]
     assert [r["outcome"] for r in store.activity(kind="vibe")] == ["noted"]
@@ -127,7 +127,7 @@ async def test_filtering_by_room(recorded, store):
     handler, tr = recorded
     await handler.dispatch(tr.envelope("chatter"))
     await handler.drain()
-    store.record_activity({"ts": int(time.time()), "kind": "barfly", "room": "#other", "outcome": "remarked"})
+    store.record_activity({"ts_ms": int(time.time() * 1000), "kind": "barfly", "room": "#other", "outcome": "remarked"})
 
     assert [r["room"] for r in store.activity(room="#chan")] == ["#chan"]
     assert [r["room"] for r in store.activity(room="#OTHER")] == ["#other"]  # rooms fold
@@ -163,7 +163,7 @@ async def test_excluding_the_bookkeeping_a_restart_produces(recorded, store):
     await handler.dispatch(tr.envelope("chatter"))
     await handler.drain()
     for kind in ("mode", "topic", "roster"):
-        store.record_activity({"ts": int(time.time()), "kind": kind, "room": "#chan", "outcome": "observed"})
+        store.record_activity({"ts_ms": int(time.time() * 1000), "kind": kind, "room": "#chan", "outcome": "observed"})
 
     assert len(store.activity()) == 4
     kinds = [r["kind"] for r in store.activity(exclude=["mode", "topic", "roster"])]

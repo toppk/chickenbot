@@ -20,9 +20,9 @@ from .test_barfly import FakeProvider
 def said(store, who, text, *, room="#soup", realm="fake", ago_seconds=60, account=None):
     account = who if account is None else account
     store._db.execute(
-        "INSERT INTO chatlog (ts, realm, channel, nick, nick_key, account, kind, text)"
+        "INSERT INTO chatlog (ts_ms, realm, channel, nick, nick_key, account, kind, text)"
         " VALUES (?, ?, ?, ?, ?, ?, 'privmsg', ?)",
-        (int(time.time() - ago_seconds), realm, room, who, who, account, text),
+        (int((time.time() - ago_seconds) * 1000), realm, room, who, who, account, text),
     )
     store._db.commit()
 

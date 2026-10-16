@@ -85,16 +85,16 @@ async def test_store_folds_nicks_with_each_networks_mapping(tmp_path):
     st = Store(tmp_path / "t.db", fold)
     try:
         await st.log_line("irc", "#chan", "nate[m]", "nate", "hi")
-        assert (await st.last_seen("irc", "NATE{M}")).text == "hi"
+        assert (await st.last_seen_ms("irc", "NATE{M}")).text == "hi"
         # The same string on another network folds by that network's rules.
         await st.log_line("signal", "g1", "nate[m]", "uuid", "hello")
-        assert await st.last_seen("signal", "NATE{M}") is None
-        assert (await st.last_seen("signal", "NATE[M]")).text == "hello"
+        assert await st.last_seen_ms("signal", "NATE{M}") is None
+        assert (await st.last_seen_ms("signal", "NATE[M]")).text == "hello"
     finally:
         st.close()
 
 
-async def test_store_backfills_nick_key_for_an_older_database(tmp_path):
+async def test_a_database_from_before_the_clock_changed_is_refused(tmp_path):
     path = tmp_path / "old.db"
     old = sqlite3.connect(path)
     old.execute(
@@ -106,8 +106,9 @@ async def test_store_backfills_nick_key_for_an_older_database(tmp_path):
     old.commit()
     old.close()
 
-    st = Store(path)
-    try:
-        assert (await st.last_seen("irc", "nate{m}")).text == "hi"
-    finally:
-        st.close()
+    import pytest
+
+    from chickenbot.store import SchemaTooOld
+
+    with pytest.raises(SchemaTooOld, match="migrate_db_schema_v0_v1"):
+        Store(path)

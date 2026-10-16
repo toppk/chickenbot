@@ -21,7 +21,7 @@ def settle_in(store, realm="fake", room="#chan", days=5, lines=250) -> None:
     for line in range(lines):
         day = line % days
         store._db.execute(
-            "INSERT INTO chatlog (ts, realm, channel, nick, nick_key, account, kind, text)"
+            "INSERT INTO chatlog (ts_ms, realm, channel, nick, nick_key, account, kind, text)"
             " VALUES (?, ?, ?, 'nate', 'nate', '', 'privmsg', 'hi')",
             (int(now - day * 86400), realm, store.fold(realm, room)),
         )

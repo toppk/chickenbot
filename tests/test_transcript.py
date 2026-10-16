@@ -91,7 +91,7 @@ async def test_age_bounds_it_too(store):
 
     p = wrapped(store, keep=100, hours=48)
     await call(p, kind="message")
-    store._db.execute("UPDATE llm_call SET ts = ?", (int(time.time()) - 72 * 3600,))
+    store._db.execute("UPDATE llm_call SET ts_ms = ?", (int(time.time() * 1000) - (72 * 3600) * 1000,))
     store._db.commit()
     await call(p, kind="message")
     assert len(store.llm_calls(limit=99)) == 1

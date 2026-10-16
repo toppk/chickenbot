@@ -37,8 +37,8 @@ def spent(store, amount, *, hours_ago=0.0) -> None:
     """Backdated directly: record_activity stamps now, which is right for the
     bot and no use for testing a window."""
     store._db.execute(
-        "INSERT INTO activity (ts, kind, room, cost) VALUES (?, 'message', '#chan', ?)",
-        (int(time.time() - hours_ago * 3600), amount),
+        "INSERT INTO activity (ts_ms, kind, room, cost) VALUES (?, 'message', '#chan', ?)",
+        (int((time.time() - hours_ago * 3600) * 1000), amount),
     )
     store._db.commit()
 
@@ -77,7 +77,7 @@ def test_nothing_spent_reads_as_zero(store):
 
 def test_free_calls_are_not_counted_as_spend(store):
     """activity_cost counts rows that cost something; a free model is not one."""
-    store.record_activity({"ts": int(time.time()), "kind": "message", "cost": 0})
+    store.record_activity({"ts_ms": int(time.time() * 1000), "kind": "message", "cost": 0})
     assert "all $0.0000 over 0 call(s)" in ours(store)
 
 

@@ -16,6 +16,7 @@ import asyncio
 import logging
 import time
 
+from .clock import local_ms, ms, now_ms
 from .brain import ProviderError
 from .observe import activity, note
 from .rooms import MAX_CHARS
@@ -25,8 +26,8 @@ from .transport import Transport
 log = logging.getLogger(__name__)
 
 TICK = 3600.0
-EVERY = 20 * 3600  # a day, loosely: better to drift earlier than to skip one
-LOOK_BACK = 30 * 86400  # a month, so even a trickle eventually adds up to something to read
+EVERY_MS = ms(20 * 3600)  # a day, loosely: better to drift earlier than to skip one
+LOOK_BACK_MS = ms(30 * 86400)  # a month, so even a trickle adds up to something to read
 MIN_LINES = 10  # below this there is nothing to characterise
 MAX_LINES = 400
 
@@ -62,25 +63,25 @@ class VibeCheck:
                 log.exception("vibe check tick failed")
             await asyncio.sleep(TICK)
 
-    async def tick(self, now: float | None = None) -> None:
-        now = now or time.time()
+    async def tick(self, now_ms_: int | None = None) -> None:
+        now = now_ms_ or now_ms()
         for tr in self.h.transports.values():
             for room in list(tr.rooms):
                 if self._due(tr.realm, room, now):
                     await self.check(tr, room, now)
 
-    def _due(self, realm: str, room: str, now: float) -> bool:
+    def _due(self, realm: str, room: str, now: int) -> bool:
         checked = self.h.store.room_checked(realm, room)
-        if now - checked < EVERY:
+        if now - checked < EVERY_MS:
             return False
         # Nothing said since last time means nothing new to learn.
         return self.h.store.lines_since(realm, room, checked) >= MIN_LINES
 
-    async def check(self, tr: Transport, room: str, now: float) -> None:
+    async def check(self, tr: Transport, room: str, now: int) -> None:
         if self.h.provider is None:
             return
         with activity(kind="vibe", realm=tr.realm, room=room, nick=tr.me, account="-"):
-            lines = self.h.store.conversation(tr.realm, room, since=int(now - LOOK_BACK), limit=MAX_LINES)
+            lines = self.h.store.conversation(tr.realm, room, since=int(now - LOOK_BACK_MS), limit=MAX_LINES)
             if len(lines) < MIN_LINES:
                 note(outcome="too-quiet", lines=len(lines))
                 # Stamped anyway: re-reading the same handful tomorrow is waste.
@@ -110,7 +111,7 @@ class VibeCheck:
     def _prompt(self, tr: Transport, room: str, lines: list) -> str:
         previous = self.h.store.room_observed(tr.realm, room)
         transcript = "\n".join(
-            f"[{time.strftime('%a %H:%M', time.localtime(ts))}] <{nick}> {text}" for ts, nick, _a, _k, text in lines
+            f"[{time.strftime('%a %H:%M', local_ms(ts))}] <{nick}> {text}" for ts, nick, _a, _k, text in lines
         )
         head = f"Room {room} on {tr.realm}."
         if previous:

@@ -5,7 +5,7 @@ import time
 from chickenbot.brain import ProviderError
 from chickenbot.commands import Handler
 from chickenbot.rooms import Rooms
-from chickenbot.vibe import EVERY, MIN_LINES, VibeCheck
+from chickenbot.vibe import EVERY_MS, MIN_LINES, VibeCheck
 
 from .conftest import FakeTransport
 from .test_barfly import FakeProvider
@@ -17,7 +17,7 @@ def setup(cfg, store, provider=None, *, room="#soup"):
     tr.rooms = [room]
     h = Handler(cfg, store, provider or FakeProvider("the printer joke is sacred"), None)
     h.transports = {"fake": tr}
-    return h, tr, time.time()
+    return h, tr, int(time.time() * 1000)
 
 
 async def test_a_room_with_enough_said_in_it_gets_read(cfg, store):
@@ -58,7 +58,7 @@ async def test_a_day_later_with_nothing_new_said_is_skipped(cfg, store):
     sat_in(store, lines=MIN_LINES + 5)
     check = VibeCheck(h)
     await check.tick(now)
-    await check.tick(now + EVERY + 60)
+    await check.tick(now + EVERY_MS + 60)
     assert len(provider.prompts) == 1  # the log has not moved
 
 
@@ -70,12 +70,12 @@ async def test_fresh_chat_earns_another_read(cfg, store):
     await check.tick(now)
     for _ in range(MIN_LINES + 1):
         store._db.execute(
-            "INSERT INTO chatlog (ts, realm, channel, nick, nick_key, account, kind, text)"
+            "INSERT INTO chatlog (ts_ms, realm, channel, nick, nick_key, account, kind, text)"
             " VALUES (?, 'fake', '#soup', 'nate', 'nate', '', 'privmsg', 'more')",
-            (int(now + EVERY + 30),),
+            (int(now + EVERY_MS + 30),),
         )
     store._db.commit()
-    await check.tick(now + EVERY + 60)
+    await check.tick(now + EVERY_MS + 60)
     assert len(provider.prompts) == 2
     assert "second pass" in Rooms(store).observed("fake", "#soup")
 
@@ -84,7 +84,7 @@ async def test_the_previous_reading_is_offered_for_revision(cfg, store):
     provider = FakeProvider("first pass", "second pass")
     h, _tr, now = setup(cfg, store, provider)
     sat_in(store, lines=MIN_LINES + 5)
-    store.set_room_observed("fake", "#soup", "an old impression", now - EVERY * 2)
+    store.set_room_observed("fake", "#soup", "an old impression", now - EVERY_MS * 2)
     await VibeCheck(h).tick(now)
     assert "an old impression" in provider.prompts[0]
 
@@ -92,7 +92,7 @@ async def test_the_previous_reading_is_offered_for_revision(cfg, store):
 async def test_a_model_failure_leaves_the_old_reading_alone(cfg, store):
     h, _tr, now = setup(cfg, store, FakeProvider(ProviderError("down")))
     sat_in(store, lines=MIN_LINES + 5)
-    store.set_room_observed("fake", "#soup", "an old impression", now - EVERY * 2)
+    store.set_room_observed("fake", "#soup", "an old impression", now - EVERY_MS * 2)
     await VibeCheck(h).tick(now)
     assert Rooms(store).observed("fake", "#soup") == "an old impression"
 
@@ -112,6 +112,6 @@ async def test_every_reading_is_kept(cfg, store):
     provider = FakeProvider("first pass", "second pass")
     h, _tr, now = setup(cfg, store, provider)
     sat_in(store, lines=MIN_LINES + 5)
-    store.set_room_observed("fake", "#soup", "older still", now - EVERY * 3)
+    store.set_room_observed("fake", "#soup", "older still", now - EVERY_MS * 3)
     await VibeCheck(h).tick(now)
     assert len(store.revisions("room-observed", "fake/#soup")) == 2

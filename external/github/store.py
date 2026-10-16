@@ -11,6 +11,13 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+SCHEMA_VERSION = 1
+
+
+class SchemaTooOld(RuntimeError):
+    """The mirror predates a conversion no code can do safely in place."""
+
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS repo (
     full_name  TEXT PRIMARY KEY,
@@ -21,9 +28,9 @@ CREATE TABLE IF NOT EXISTS repo (
     archived   INTEGER NOT NULL DEFAULT 0,
     stars      INTEGER NOT NULL DEFAULT 0,
     open_issues INTEGER NOT NULL DEFAULT 0,
-    pushed_at  INTEGER NOT NULL DEFAULT 0,
+    pushed_at_ms  INTEGER NOT NULL DEFAULT 0,
     description TEXT NOT NULL DEFAULT '',
-    seen_at    INTEGER NOT NULL
+    seen_at_ms    INTEGER NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS activity (
@@ -31,14 +38,14 @@ CREATE TABLE IF NOT EXISTS activity (
     kind      TEXT NOT NULL,         -- commit | issue | pr | star | release
     actor     TEXT NOT NULL,
     repo      TEXT NOT NULL,
-    ts        INTEGER NOT NULL,
+    ts_ms        INTEGER NOT NULL,
     title     TEXT NOT NULL DEFAULT '',
     url       TEXT NOT NULL DEFAULT '',
     state     TEXT NOT NULL DEFAULT ''
 );
-CREATE INDEX IF NOT EXISTS activity_ts    ON activity (ts DESC);
-CREATE INDEX IF NOT EXISTS activity_actor ON activity (actor, ts DESC);
-CREATE INDEX IF NOT EXISTS activity_repo  ON activity (repo, ts DESC);
+CREATE INDEX IF NOT EXISTS activity_ts    ON activity (ts_ms DESC);
+CREATE INDEX IF NOT EXISTS activity_actor ON activity (actor, ts_ms DESC);
+CREATE INDEX IF NOT EXISTS activity_repo  ON activity (repo, ts_ms DESC);
 
 -- Open issues and pull requests, from both directions: things sitting on our
 -- own repositories waiting to be dealt with, and things we have opened in
@@ -55,17 +62,17 @@ CREATE TABLE IF NOT EXISTS item (
     url        TEXT NOT NULL DEFAULT '',
     draft      INTEGER NOT NULL DEFAULT 0,
     comments   INTEGER NOT NULL DEFAULT 0,
-    created_at INTEGER NOT NULL DEFAULT 0,
-    updated_at INTEGER NOT NULL DEFAULT 0,
-    seen_at    INTEGER NOT NULL
+    created_at_ms INTEGER NOT NULL DEFAULT 0,
+    updated_at_ms INTEGER NOT NULL DEFAULT 0,
+    seen_at_ms    INTEGER NOT NULL
 );
-CREATE INDEX IF NOT EXISTS item_owner  ON item (repo_owner, updated_at DESC);
-CREATE INDEX IF NOT EXISTS item_author ON item (author, updated_at DESC);
+CREATE INDEX IF NOT EXISTS item_owner  ON item (repo_owner, updated_at_ms DESC);
+CREATE INDEX IF NOT EXISTS item_author ON item (author, updated_at_ms DESC);
 
 CREATE TABLE IF NOT EXISTS poll (
     scope   TEXT PRIMARY KEY,        -- what was polled, e.g. "user:toppk"
     etag    TEXT NOT NULL DEFAULT '',
-    last_at INTEGER NOT NULL DEFAULT 0
+    last_at_ms INTEGER NOT NULL DEFAULT 0
 );
 """
 
@@ -76,7 +83,7 @@ class Item:
     kind: str
     actor: str
     repo: str
-    ts: int
+    ts_ms: int
     title: str = ""
     url: str = ""
     state: str = ""
@@ -89,8 +96,31 @@ class Store:
         self.db = sqlite3.connect(self.path)
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA journal_mode=WAL")
+        self._check_version()
         self.db.executescript(SCHEMA)
+        self.db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         self.db.commit()
+
+    def _check_version(self) -> None:
+        """A change of units cannot be detected in place, so an older mirror
+        is refused rather than read as if its seconds were milliseconds.
+
+        This one is only a cache, so deleting it is a fair answer too; the
+        script is offered because a rebuild costs a few hundred API calls.
+        """
+        version = int(self.db.execute("PRAGMA user_version").fetchone()[0])
+        if version >= SCHEMA_VERSION:
+            return
+        empty = not self.db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' LIMIT 1"
+        ).fetchone()
+        if empty:
+            return
+        raise SchemaTooOld(
+            f"{self.path} is schema v{version}; this release needs v{SCHEMA_VERSION}. "
+            "Timestamps moved from seconds to milliseconds. Stop the services and run "
+            "deploy/migrate_db_schema_v0_v1.py, or simply delete this file and let it refill."
+        )
 
     def close(self) -> None:
         self.db.close()
@@ -100,11 +130,11 @@ class Store:
     def save_repo(self, row: dict) -> None:
         self.db.execute(
             "INSERT INTO repo (full_name, owner, name, private, fork, archived, stars,"
-            " open_issues, pushed_at, description, seen_at)"
+            " open_issues, pushed_at_ms, description, seen_at_ms)"
             " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
             " ON CONFLICT(full_name) DO UPDATE SET stars=excluded.stars,"
-            " open_issues=excluded.open_issues, pushed_at=excluded.pushed_at,"
-            " archived=excluded.archived, description=excluded.description, seen_at=excluded.seen_at",
+            " open_issues=excluded.open_issues, pushed_at_ms=excluded.pushed_at_ms,"
+            " archived=excluded.archived, description=excluded.description, seen_at_ms=excluded.seen_at_ms",
             (
                 row["full_name"],
                 row["owner"],
@@ -114,7 +144,7 @@ class Store:
                 row["archived"],
                 row["stars"],
                 row["open_issues"],
-                row["pushed_at"],
+                row["pushed_at_ms"],
                 row["description"],
                 int(time.time()),
             ),
@@ -124,9 +154,9 @@ class Store:
     def repos(self, owner: str = "") -> list[sqlite3.Row]:
         if owner:
             return self.db.execute(
-                "SELECT * FROM repo WHERE owner = ? COLLATE NOCASE ORDER BY pushed_at DESC", (owner,)
+                "SELECT * FROM repo WHERE owner = ? COLLATE NOCASE ORDER BY pushed_at_ms DESC", (owner,)
             ).fetchall()
-        return self.db.execute("SELECT * FROM repo ORDER BY pushed_at DESC").fetchall()
+        return self.db.execute("SELECT * FROM repo ORDER BY pushed_at_ms DESC").fetchall()
 
     def open_counts(self, repo: str) -> tuple[int, int]:
         """(issues, pull requests) open on this repo, as mirrored.
@@ -151,9 +181,9 @@ class Store:
         fresh = 0
         for item in items:
             cur = self.db.execute(
-                "INSERT OR IGNORE INTO activity (id, kind, actor, repo, ts, title, url, state)"
+                "INSERT OR IGNORE INTO activity (id, kind, actor, repo, ts_ms, title, url, state)"
                 " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (item.id, item.kind, item.actor, item.repo, item.ts, item.title, item.url, item.state),
+                (item.id, item.kind, item.actor, item.repo, item.ts_ms, item.title, item.url, item.state),
             )
             fresh += cur.rowcount
         self.db.commit()
@@ -162,7 +192,7 @@ class Store:
     def activity(
         self, *, actor: str = "", repo: str = "", kind: str = "", since: int = 0, limit: int = 50
     ) -> list[sqlite3.Row]:
-        sql = "SELECT * FROM activity WHERE ts >= ?"
+        sql = "SELECT * FROM activity WHERE ts_ms >= ?"
         args: list = [since]
         if kind == "merged":
             # A landing is a pull request in a particular state, not a kind of
@@ -177,14 +207,14 @@ class Store:
         if repo:
             sql += " AND repo LIKE ?"
             args.append(f"%{repo}%")
-        sql += " ORDER BY ts DESC LIMIT ?"
+        sql += " ORDER BY ts_ms DESC LIMIT ?"
         args.append(limit)
         return self.db.execute(sql, args).fetchall()
 
     def tally(self, *, actor: str = "", since: int = 0) -> dict[str, int]:
         sql = (
             "SELECT CASE WHEN state = 'merged' THEN 'merged' ELSE kind END AS kind,"
-            " COUNT(*) AS n FROM activity WHERE ts >= ?"
+            " COUNT(*) AS n FROM activity WHERE ts_ms >= ?"
         )
         args: list = [since]
         if actor:
@@ -200,10 +230,10 @@ class Store:
     def save_item(self, row: dict) -> None:
         self.db.execute(
             "INSERT INTO item (id, kind, repo, repo_owner, number, author, title, url, draft,"
-            " comments, created_at, updated_at, seen_at)"
+            " comments, created_at_ms, updated_at_ms, seen_at_ms)"
             " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
             " ON CONFLICT(id) DO UPDATE SET title=excluded.title, draft=excluded.draft,"
-            " comments=excluded.comments, updated_at=excluded.updated_at, seen_at=excluded.seen_at",
+            " comments=excluded.comments, updated_at_ms=excluded.updated_at_ms, seen_at_ms=excluded.seen_at_ms",
             (
                 row["id"],
                 row["kind"],
@@ -215,8 +245,8 @@ class Store:
                 row["url"],
                 row["draft"],
                 row["comments"],
-                row["created_at"],
-                row["updated_at"],
+                row["created_at_ms"],
+                row["updated_at_ms"],
                 int(time.time()),
             ),
         )
@@ -224,7 +254,7 @@ class Store:
 
     def forget_closed(self, before: int) -> int:
         """Anything a full pass did not see again has been closed or merged."""
-        cur = self.db.execute("DELETE FROM item WHERE seen_at < ?", (before,))
+        cur = self.db.execute("DELETE FROM item WHERE seen_at_ms < ?", (before,))
         self.db.commit()
         return cur.rowcount
 
@@ -235,7 +265,7 @@ class Store:
             return []
         marks = ",".join("?" * len(wanted))
         return self.db.execute(
-            f"SELECT * FROM item WHERE repo_owner IN ({marks}) COLLATE NOCASE ORDER BY updated_at DESC LIMIT ?",
+            f"SELECT * FROM item WHERE repo_owner IN ({marks}) COLLATE NOCASE ORDER BY updated_at_ms DESC LIMIT ?",
             (*wanted, limit),
         ).fetchall()
 
@@ -249,20 +279,20 @@ class Store:
         return self.db.execute(
             f"SELECT * FROM item WHERE author IN ({authors}) COLLATE NOCASE"
             f" AND repo_owner NOT IN ({ours}) COLLATE NOCASE"
-            " ORDER BY updated_at DESC LIMIT ?",
+            " ORDER BY updated_at_ms DESC LIMIT ?",
             (*wanted, *owners, limit),
         ).fetchall()
 
     # -- poll cursors ------------------------------------------------------
 
     def cursor(self, scope: str) -> tuple[str, int]:
-        row = self.db.execute("SELECT etag, last_at FROM poll WHERE scope = ?", (scope,)).fetchone()
-        return (row["etag"], row["last_at"]) if row else ("", 0)
+        row = self.db.execute("SELECT etag, last_at_ms FROM poll WHERE scope = ?", (scope,)).fetchone()
+        return (row["etag"], row["last_at_ms"]) if row else ("", 0)
 
-    def set_cursor(self, scope: str, etag: str, last_at: int) -> None:
+    def set_cursor(self, scope: str, etag: str, last_at_ms: int) -> None:
         self.db.execute(
-            "INSERT INTO poll (scope, etag, last_at) VALUES (?, ?, ?)"
-            " ON CONFLICT(scope) DO UPDATE SET etag=excluded.etag, last_at=excluded.last_at",
-            (scope, etag, last_at),
+            "INSERT INTO poll (scope, etag, last_at_ms) VALUES (?, ?, ?)"
+            " ON CONFLICT(scope) DO UPDATE SET etag=excluded.etag, last_at_ms=excluded.last_at_ms",
+            (scope, etag, last_at_ms),
         )
         self.db.commit()

@@ -269,7 +269,7 @@ async def test_a_later_remark_is_its_own_utterance(cfg, store):
     from chickenbot.commands import BREATH, render_scrollback
 
     store._db.execute(
-        "INSERT INTO chatlog (ts, realm, channel, nick, nick_key, account, kind, text)"
+        "INSERT INTO chatlog (ts_ms, realm, channel, nick, nick_key, account, kind, text)"
         " VALUES (?, 'fake', '#chan', 'nate', 'nate', 'nate', 'privmsg', 'first')",
         (int(clock.time()) - BREATH - 60,),
     )

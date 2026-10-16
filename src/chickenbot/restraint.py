@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 import time
 
+from .clock import ms
 from .store import Store
 
 log = logging.getLogger(__name__)
@@ -66,7 +67,7 @@ class Restraint:
         if spent_this_request >= PER_REQUEST:
             raise Refused(f"one at a time: i have already acted once this turn. ask again for {target}")
 
-        recent = self.store.moderation_since(realm, room, int(now - 3600))
+        recent = self.store.moderation_since(realm, room, ms(now - 3600))
         if len(recent) >= PER_HOUR:
             raise Refused(f"that is {len(recent)} moderation actions in {room} within the hour; i am stopping here")
 

@@ -270,8 +270,10 @@ def test_a_person_can_be_rolled_back(tmp_path):
     assert "gh: wrong" in cli(tmp_path, "dossier", "irc", "chrisk")[1]
 
 
-def test_the_old_two_column_table_migrates_to_aliases(tmp_path):
-    """Rows written before one person could have several handles."""
+def test_a_database_from_before_the_clock_changed_is_refused(tmp_path):
+    """Rows written before one person could have several handles -- and
+    before timestamps were milliseconds, which is the part that cannot be
+    worked out from the schema."""
     import sqlite3
 
     path = tmp_path / "old.db"
@@ -284,15 +286,15 @@ def test_the_old_two_column_table_migrates_to_aliases(tmp_path):
     old.commit()
     old.close()
 
-    from chickenbot.store import Store
+    import pytest
 
-    st = Store(path)
-    try:
-        assert st.person("irc:host", "chrisk") == "the notes"
-        pid = st.person_id("irc:host", "chrisk")
-        assert st.aliases(pid) == [("irc:host", "chrisk")]
-    finally:
-        st.close()
+    from chickenbot.store import SchemaTooOld, Store
+
+    # Units cannot be detected in place, so a database from before the clock
+    # changed is refused and pointed at the offline migration rather than
+    # read as if its seconds were milliseconds.
+    with pytest.raises(SchemaTooOld, match="migrate_db_schema_v0_v1"):
+        Store(path)
 
 
 def test_a_mistyped_handle_can_be_dropped_without_the_person(store):

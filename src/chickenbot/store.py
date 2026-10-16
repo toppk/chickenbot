@@ -15,10 +15,21 @@ from . import irccase
 
 MAX_REVISIONS = 50
 
+from .clock import ms, now_ms
+
+# Bumped when stored *values* change meaning, not when a column is added:
+# additions are detected in `_migrate`, a change of units cannot be.
+SCHEMA_VERSION = 1
+
+
+class SchemaTooOld(RuntimeError):
+    """The database predates a conversion no code can do safely in place."""
+
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS chatlog (
     id        INTEGER PRIMARY KEY,
-    ts        INTEGER NOT NULL,
+    ts_ms        INTEGER NOT NULL,
     realm     TEXT NOT NULL DEFAULT 'irc',
     channel   TEXT NOT NULL,
     nick      TEXT NOT NULL,
@@ -38,7 +49,7 @@ CREATE TABLE IF NOT EXISTS watch (
     channel   TEXT NOT NULL,
     feeds     TEXT NOT NULL DEFAULT 'releases',
     added_by  TEXT NOT NULL DEFAULT '',
-    added_at  INTEGER NOT NULL,
+    added_at_ms  INTEGER NOT NULL,
     UNIQUE (realm, owner, repo, channel)
 );
 
@@ -46,7 +57,7 @@ CREATE TABLE IF NOT EXISTS watch (
 CREATE TABLE IF NOT EXISTS soul (
     id         INTEGER PRIMARY KEY CHECK (id = 1),
     text       TEXT NOT NULL,
-    updated_at INTEGER NOT NULL
+    updated_at_ms INTEGER NOT NULL
 );
 
 -- A person, and the handles they go by. One human, many identities: chrisk on
@@ -62,7 +73,7 @@ CREATE TABLE IF NOT EXISTS person (
     notes      TEXT NOT NULL DEFAULT '',
     observed   TEXT NOT NULL DEFAULT '',
     facts      TEXT NOT NULL DEFAULT '{}',
-    updated_at INTEGER NOT NULL
+    updated_at_ms INTEGER NOT NULL
 );
 
 -- realm is a network (irc:irc.chonkbase.net, telegram) or an external service
@@ -72,7 +83,7 @@ CREATE TABLE IF NOT EXISTS alias (
     handle    TEXT NOT NULL,
     person_id INTEGER NOT NULL REFERENCES person(id) ON DELETE CASCADE,
     source    TEXT NOT NULL DEFAULT 'cli',  -- who said so: cli, or an account
-    added_at  INTEGER NOT NULL DEFAULT 0,
+    added_at_ms  INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (realm, handle)
 );
 CREATE INDEX IF NOT EXISTS alias_handle ON alias (handle COLLATE NOCASE);
@@ -84,8 +95,8 @@ CREATE TABLE IF NOT EXISTS membership (
     room       TEXT NOT NULL,
     person_id  INTEGER NOT NULL REFERENCES person(id) ON DELETE CASCADE,
     nick       TEXT NOT NULL DEFAULT '',   -- the last one they used there
-    first_seen INTEGER NOT NULL,
-    last_seen  INTEGER NOT NULL,
+    first_seen_ms INTEGER NOT NULL,
+    last_seen_ms  INTEGER NOT NULL,
     PRIMARY KEY (realm, room, person_id)
 );
 
@@ -101,8 +112,8 @@ CREATE TABLE IF NOT EXISTS room (
     name       TEXT NOT NULL,
     notes      TEXT NOT NULL DEFAULT '',
     observed   TEXT NOT NULL DEFAULT '',
-    checked_at INTEGER NOT NULL DEFAULT 0,
-    updated_at INTEGER NOT NULL,
+    checked_at_ms INTEGER NOT NULL DEFAULT 0,
+    updated_at_ms INTEGER NOT NULL,
     PRIMARY KEY (realm, name)
 );
 
@@ -113,7 +124,7 @@ CREATE TABLE IF NOT EXISTS bot (
     realm    TEXT NOT NULL,
     handle   TEXT NOT NULL,
     author   TEXT NOT NULL DEFAULT 'cli',
-    added_at INTEGER NOT NULL,
+    added_at_ms INTEGER NOT NULL,
     PRIMARY KEY (realm, handle)
 );
 
@@ -122,7 +133,7 @@ CREATE TABLE IF NOT EXISTS bot (
 -- difference between restoring it and inventing a new one.
 CREATE TABLE IF NOT EXISTS topic_log (
     id    INTEGER PRIMARY KEY,
-    ts    INTEGER NOT NULL,
+    ts_ms    INTEGER NOT NULL,
     realm TEXT NOT NULL,
     room  TEXT NOT NULL,
     topic TEXT NOT NULL,
@@ -134,7 +145,7 @@ CREATE INDEX IF NOT EXISTS topic_log_room ON topic_log (realm, room, id DESC);
 -- the thing the hourly budget is counted from.
 CREATE TABLE IF NOT EXISTS moderation (
     id     INTEGER PRIMARY KEY,
-    ts     INTEGER NOT NULL,
+    ts_ms     INTEGER NOT NULL,
     realm  TEXT NOT NULL,
     room   TEXT NOT NULL,
     action TEXT NOT NULL,
@@ -142,7 +153,7 @@ CREATE TABLE IF NOT EXISTS moderation (
     actor  TEXT NOT NULL DEFAULT '',   -- the account that asked for it
     result TEXT NOT NULL DEFAULT ''
 );
-CREATE INDEX IF NOT EXISTS moderation_room ON moderation (realm, room, ts DESC);
+CREATE INDEX IF NOT EXISTS moderation_room ON moderation (realm, room, ts_ms DESC);
 
 -- Behaviour, set at runtime. The toml is the default; a row here overrides it.
 -- Connection details and authority are not in here on purpose -- see
@@ -151,7 +162,7 @@ CREATE TABLE IF NOT EXISTS setting (
     key        TEXT PRIMARY KEY,
     value      TEXT NOT NULL,
     author     TEXT NOT NULL DEFAULT 'cli',
-    updated_at INTEGER NOT NULL
+    updated_at_ms INTEGER NOT NULL
 );
 
 -- Every change to a soul or a dossier, append-only. These are mutable state
@@ -163,7 +174,7 @@ CREATE TABLE IF NOT EXISTS revision (
     key    TEXT NOT NULL DEFAULT '',   -- '' for the soul, realm/account for a person
     text   TEXT NOT NULL,              -- the value as of this change
     author TEXT NOT NULL DEFAULT '',
-    ts     INTEGER NOT NULL
+    ts_ms     INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS revision_key ON revision (kind, key, id DESC);
 
@@ -183,13 +194,13 @@ CREATE INDEX IF NOT EXISTS revision_key ON revision (kind, key, id DESC);
 -- has no business in the list of knobs somebody can turn.
 CREATE TABLE IF NOT EXISTS soul_patch (
     id      TEXT PRIMARY KEY,
-    at      INTEGER NOT NULL,
+    at_ms   INTEGER NOT NULL,
     outcome TEXT NOT NULL DEFAULT ''   -- applied | by-hand
 );
 
 CREATE TABLE IF NOT EXISTS llm_call (
     id       INTEGER PRIMARY KEY,
-    ts       INTEGER NOT NULL,
+    ts_ms       INTEGER NOT NULL,
     reason   TEXT NOT NULL DEFAULT '',   -- what asked: ask, follow, bartender, vibe, barfly
     realm    TEXT NOT NULL DEFAULT '',
     room     TEXT NOT NULL DEFAULT '',
@@ -202,11 +213,11 @@ CREATE TABLE IF NOT EXISTS llm_call (
     details  TEXT NOT NULL DEFAULT '[]',   -- json: one entry per HTTP leg of the turn
     ms       INTEGER NOT NULL DEFAULT 0
 );
-CREATE INDEX IF NOT EXISTS llm_call_ts ON llm_call (ts DESC);
+CREATE INDEX IF NOT EXISTS llm_call_ts ON llm_call (ts_ms DESC);
 
 CREATE TABLE IF NOT EXISTS activity (
     id      INTEGER PRIMARY KEY,
-    ts      INTEGER NOT NULL,
+    ts_ms      INTEGER NOT NULL,
     kind    TEXT NOT NULL DEFAULT '',
     realm   TEXT NOT NULL DEFAULT '',
     room    TEXT NOT NULL DEFAULT '',
@@ -222,7 +233,7 @@ CREATE TABLE IF NOT EXISTS activity (
     cost    REAL NOT NULL DEFAULT 0,
     ms      INTEGER NOT NULL DEFAULT 0
 );
-CREATE INDEX IF NOT EXISTS activity_ts ON activity (ts DESC);
+CREATE INDEX IF NOT EXISTS activity_ts ON activity (ts_ms DESC);
 
 -- When a room is actually alive, counted per hour of the week. The bot learns
 -- the rhythm of a place by sitting in it, and the decision engine uses the
@@ -248,16 +259,16 @@ CREATE TABLE IF NOT EXISTS greeting (
 
 CREATE TABLE IF NOT EXISTS job (
     id         INTEGER PRIMARY KEY,
-    due_at     INTEGER NOT NULL,
+    due_at_ms     INTEGER NOT NULL,
     realm  TEXT NOT NULL,
     room       TEXT NOT NULL,
     nick       TEXT NOT NULL,
     account    TEXT NOT NULL,
     is_group   INTEGER NOT NULL DEFAULT 1,
     command    TEXT NOT NULL,
-    created_at INTEGER NOT NULL
+    created_at_ms INTEGER NOT NULL
 );
-CREATE INDEX IF NOT EXISTS job_due ON job (due_at);
+CREATE INDEX IF NOT EXISTS job_due ON job (due_at_ms);
 
 CREATE TABLE IF NOT EXISTS cursor (
     watch_id INTEGER NOT NULL REFERENCES watch(id) ON DELETE CASCADE,
@@ -271,7 +282,7 @@ CREATE TABLE IF NOT EXISTS cursor (
 
 @dataclass(frozen=True, slots=True)
 class Line:
-    ts: int
+    ts_ms: int
     channel: str
     nick: str
     text: str
@@ -309,7 +320,7 @@ class LlmCall:
 @dataclass(frozen=True, slots=True)
 class Job:
     id: int
-    due_at: int
+    due_at_ms: int
     realm: str
     room: str
     nick: str
@@ -346,10 +357,33 @@ class Store:
         self._db.row_factory = sqlite3.Row
         self._db.execute("PRAGMA journal_mode=WAL")
         self._db.execute("PRAGMA foreign_keys=ON")
+        self._check_version()
         self._migrate()
         self._db.executescript(SCHEMA)
+        self._db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         self._db.commit()
         self._lock = asyncio.Lock()
+
+    def _check_version(self) -> None:
+        """Refuse a database from before the clock changed.
+
+        Column additions can be detected and applied in place; a change of
+        *units* cannot. Nothing in `PRAGMA table_info` distinguishes seconds
+        from milliseconds, so the only safe answer is to stop and say so.
+        """
+        version = int(self._db.execute("PRAGMA user_version").fetchone()[0])
+        if version >= SCHEMA_VERSION:
+            return
+        empty = not self._db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' LIMIT 1"
+        ).fetchone()
+        if empty:
+            return  # a new database is created at the current version
+        raise SchemaTooOld(
+            f"{self.path} is schema v{version}; this release needs v{SCHEMA_VERSION}. "
+            "Timestamps moved from seconds to milliseconds, which cannot be detected in place. "
+            "Stop the services and run: python3 deploy/migrate_db_schema_v0_v1.py <instance-dir>"
+        )
 
     def _migrate(self) -> None:
         """Runs before SCHEMA, because the new indexes cannot be built without the columns."""
@@ -383,7 +417,7 @@ class Store:
         alias_cols = {r["name"] for r in self._db.execute("PRAGMA table_info(alias)")}
         if alias_cols and "source" not in alias_cols:
             self._db.execute("ALTER TABLE alias ADD COLUMN source TEXT NOT NULL DEFAULT 'cli'")
-            self._db.execute("ALTER TABLE alias ADD COLUMN added_at INTEGER NOT NULL DEFAULT 0")
+            self._db.execute("ALTER TABLE alias ADD COLUMN added_at_ms INTEGER NOT NULL DEFAULT 0")
 
         room_cols = {r["name"] for r in self._db.execute("PRAGMA table_info(room)")}
         for gone in ("profile", "knobs"):
@@ -392,19 +426,19 @@ class Store:
                 self._db.execute(f"ALTER TABLE room DROP COLUMN {gone}")
         if room_cols and "observed" not in room_cols:
             self._db.execute("ALTER TABLE room ADD COLUMN observed TEXT NOT NULL DEFAULT ''")
-            self._db.execute("ALTER TABLE room ADD COLUMN checked_at INTEGER NOT NULL DEFAULT 0")
+            self._db.execute("ALTER TABLE room ADD COLUMN checked_at_ms INTEGER NOT NULL DEFAULT 0")
         person_cols = {r["name"] for r in self._db.execute("PRAGMA table_info(person)")}
         if person_cols and "observed" not in person_cols:
             self._db.execute("ALTER TABLE person ADD COLUMN observed TEXT NOT NULL DEFAULT ''")
         if person_cols and "id" not in person_cols:
             # person(realm, account, notes) becomes person(id, notes) + alias.
-            old = self._db.execute("SELECT realm, account, notes, updated_at FROM person").fetchall()
+            old = self._db.execute("SELECT realm, account, notes, updated_at_ms FROM person").fetchall()
             self._db.execute("DROP TABLE person")
             self._db.executescript(SCHEMA)
             for row in old:
                 cur = self._db.execute(
-                    "INSERT INTO person (notes, facts, updated_at) VALUES (?, '{}', ?)",
-                    (row["notes"], row["updated_at"]),
+                    "INSERT INTO person (notes, facts, updated_at_ms) VALUES (?, '{}', ?)",
+                    (row["notes"], row["updated_at_ms"]),
                 )
                 self._db.execute(
                     "INSERT INTO alias (realm, handle, person_id) VALUES (?, ?, ?)",
@@ -420,8 +454,8 @@ class Store:
             self._db.execute("ALTER TABLE watch RENAME TO watch_old")
             self._db.executescript(SCHEMA)
             self._db.execute(
-                "INSERT INTO watch (id, realm, owner, repo, channel, feeds, added_by, added_at)"
-                " SELECT id, 'irc', owner, repo, channel, feeds, added_by, added_at FROM watch_old"
+                "INSERT INTO watch (id, realm, owner, repo, channel, feeds, added_by, added_at_ms)"
+                " SELECT id, 'irc', owner, repo, channel, feeds, added_by, added_at_ms FROM watch_old"
             )
             self._db.execute("DROP TABLE watch_old")
             self._db.execute("PRAGMA foreign_keys=ON")
@@ -440,10 +474,10 @@ class Store:
     ) -> None:
         def go() -> None:
             self._db.execute(
-                "INSERT INTO chatlog (ts, realm, channel, nick, nick_key, account, kind, text)"
+                "INSERT INTO chatlog (ts_ms, realm, channel, nick, nick_key, account, kind, text)"
                 " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (
-                    int(time.time()),
+                    now_ms(),
                     realm,
                     self.fold(realm, channel),
                     nick,
@@ -457,25 +491,25 @@ class Store:
 
         await self._run(go)
 
-    async def last_seen(self, realm: str, nick: str) -> Line | None:
+    async def last_seen_ms(self, realm: str, nick: str) -> Line | None:
         def go() -> Line | None:
             row = self._db.execute(
-                "SELECT ts, channel, nick, text FROM chatlog WHERE realm = ? AND nick_key = ? ORDER BY id DESC LIMIT 1",
+                "SELECT ts_ms, channel, nick, text FROM chatlog WHERE realm = ? AND nick_key = ? ORDER BY id DESC LIMIT 1",
                 (realm, self.fold(realm, nick)),
             ).fetchone()
-            return Line(row["ts"], row["channel"], row["nick"], row["text"]) if row else None
+            return Line(row["ts_ms"], row["channel"], row["nick"], row["text"]) if row else None
 
         return await self._run(go)
 
     async def search(self, realm: str, channel: str, terms: str, limit: int = 5, since: int = 0) -> list[Line]:
         def go() -> list[Line]:
             rows = self._db.execute(
-                "SELECT ts, channel, nick, text FROM chatlog"
-                " WHERE realm = ? AND channel = ? AND ts >= ? AND kind = 'privmsg' AND text LIKE ?"
+                "SELECT ts_ms, channel, nick, text FROM chatlog"
+                " WHERE realm = ? AND channel = ? AND ts_ms >= ? AND kind = 'privmsg' AND text LIKE ?"
                 " ORDER BY id DESC LIMIT ?",
                 (realm, self.fold(realm, channel), since, f"%{terms}%", limit),
             ).fetchall()
-            return [Line(r["ts"], r["channel"], r["nick"], r["text"]) for r in rows]
+            return [Line(r["ts_ms"], r["channel"], r["nick"], r["text"]) for r in rows]
 
         return await self._run(go)
 
@@ -491,16 +525,16 @@ class Store:
 
         def go() -> list[Line]:
             rows = self._db.execute(
-                "SELECT ts, channel, nick, text, kind, account FROM chatlog"
+                "SELECT ts_ms, channel, nick, text, kind, account FROM chatlog"
                 " WHERE realm = ? AND channel = ?"
                 " AND kind IN ('privmsg', 'command', 'self', 'bot')"
                 " ORDER BY id DESC LIMIT ?",
                 (realm, self.fold(realm, channel), limit),
             ).fetchall()
             if since:
-                fresh = [r for r in rows if r["ts"] >= since]
+                fresh = [r for r in rows if r["ts_ms"] >= since]
                 rows = fresh if len(fresh) >= least else rows[:least]
-            return [Line(r["ts"], r["channel"], r["nick"], r["text"], r["kind"], r["account"]) for r in reversed(rows)]
+            return [Line(r["ts_ms"], r["channel"], r["nick"], r["text"], r["kind"], r["account"]) for r in reversed(rows)]
 
         return await self._run(go)
 
@@ -509,7 +543,7 @@ class Store:
 
         def go() -> list[tuple[str, str, str, int]]:
             rows = self._db.execute(
-                "SELECT realm, account, nick, MAX(ts) AS seen FROM chatlog"
+                "SELECT realm, account, nick, MAX(ts_ms) AS seen FROM chatlog"
                 " WHERE account != '' GROUP BY realm, account"
                 " ORDER BY seen DESC LIMIT ?",
                 (limit,),
@@ -535,9 +569,9 @@ class Store:
 
     def note_soul_patch(self, patch_id: str, outcome: str) -> None:
         self._db.execute(
-            "INSERT INTO soul_patch (id, at, outcome) VALUES (?, ?, ?)"
-            " ON CONFLICT(id) DO UPDATE SET at=excluded.at, outcome=excluded.outcome",
-            (patch_id, int(time.time()), outcome),
+            "INSERT INTO soul_patch (id, at_ms, outcome) VALUES (?, ?, ?)"
+            " ON CONFLICT(id) DO UPDATE SET at_ms=excluded.at_ms, outcome=excluded.outcome",
+            (patch_id, now_ms(), outcome),
         )
         self._db.commit()
 
@@ -547,9 +581,9 @@ class Store:
         only shrinks when somebody remembers is not a ring."""
         if keep <= 0:
             return
-        now = int(time.time())
+        now = now_ms()
         self._db.execute(
-            "INSERT INTO llm_call (ts, reason, realm, room, nick, request, response, model, served,"
+            "INSERT INTO llm_call (ts_ms, reason, realm, room, nick, request, response, model, served,"
             " tool_calls, details, ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 now,
@@ -567,8 +601,8 @@ class Store:
             ),
         )
         self._db.execute(
-            "DELETE FROM llm_call WHERE id NOT IN (SELECT id FROM llm_call ORDER BY id DESC LIMIT ?) OR ts < ?",
-            (keep, now - max(hours, 0) * 3600 if hours > 0 else 0),
+            "DELETE FROM llm_call WHERE id NOT IN (SELECT id FROM llm_call ORDER BY id DESC LIMIT ?) OR ts_ms < ?",
+            (keep, now - ms(max(hours, 0) * 3600) if hours > 0 else 0),
         )
         self._db.commit()
 
@@ -607,9 +641,9 @@ class Store:
         )
         values = [str(fields.get(c, "") or "") for c in columns]
         self._db.execute(
-            f"INSERT INTO activity (ts, {', '.join(columns)}, cost, ms)"
+            f"INSERT INTO activity (ts_ms, {', '.join(columns)}, cost, ms)"
             f" VALUES (?, {', '.join('?' * len(columns))}, ?, ?)",
-            (int(time.time()), *values, float(fields.get("cost") or 0), int(fields.get("ms") or 0)),
+            (now_ms(), *values, float(fields.get("cost") or 0), int(fields.get("ms") or 0)),
         )
         self._db.commit()
 
@@ -624,7 +658,7 @@ class Store:
         exclude: Iterable[str] = (),
         limit: int = 50,
     ) -> list[dict]:
-        sql = "SELECT * FROM activity WHERE ts >= ?"
+        sql = "SELECT * FROM activity WHERE ts_ms >= ?"
         args: list = [since]
         if kind:
             sql += " AND kind = ?"
@@ -647,12 +681,12 @@ class Store:
 
     def spend(self, windows: dict[str, int]) -> dict[str, tuple[int, float]]:
         """{name: (calls, spent)} for each {name: seconds ago}; 0 means all time."""
-        now = int(time.time())
-        return {name: self.activity_cost(now - seconds if seconds else 0) for name, seconds in windows.items()}
+        now = now_ms()
+        return {name: self.activity_cost(now - ms(seconds) if seconds else 0) for name, seconds in windows.items()}
 
     def activity_cost(self, since: int = 0) -> tuple[int, float]:
         row = self._db.execute(
-            "SELECT COUNT(*) AS n, COALESCE(SUM(cost), 0) AS spent FROM activity WHERE ts >= ? AND cost > 0",
+            "SELECT COUNT(*) AS n, COALESCE(SUM(cost), 0) AS spent FROM activity WHERE ts_ms >= ? AND cost > 0",
             (since,),
         ).fetchone()
         return int(row["n"]), float(row["spent"])
@@ -665,7 +699,7 @@ class Store:
     def rooms(self) -> list[tuple[str, str, int, int]]:
         """(realm, channel, lines, last_ts), busiest last seen first."""
         rows = self._db.execute(
-            "SELECT realm, channel, COUNT(*) AS n, MAX(ts) AS last FROM chatlog"
+            "SELECT realm, channel, COUNT(*) AS n, MAX(ts_ms) AS last FROM chatlog"
             " GROUP BY realm, channel ORDER BY last DESC"
         ).fetchall()
         return [(r["realm"], r["channel"], r["n"], r["last"]) for r in rows]
@@ -673,7 +707,7 @@ class Store:
     def days(self, realm: str, channel: str) -> list[tuple[str, int]]:
         """(YYYY-MM-DD, lines) for one room, oldest first, in local time."""
         rows = self._db.execute(
-            "SELECT date(ts, 'unixepoch', 'localtime') AS day, COUNT(*) AS n FROM chatlog"
+            "SELECT date(ts_ms / 1000.0, 'unixepoch', 'localtime') AS day, COUNT(*) AS n FROM chatlog"
             " WHERE realm = ? AND channel = ? GROUP BY day ORDER BY day",
             (realm, self.fold(realm, channel)),
         ).fetchall()
@@ -690,18 +724,18 @@ class Store:
         grep: str = "",
         limit: int = 500,
     ) -> list[tuple[int, str, str, str, str]]:
-        """(ts, nick, account, kind, text) oldest first: everything said, including
+        """(ts_ms, nick, account, kind, text) oldest first: everything said, including
         the bot's own lines and other bots', unlike the model's scrollback."""
-        sql = "SELECT ts, nick, account, kind, text FROM chatlog WHERE realm = ? AND channel = ?"
+        sql = "SELECT ts_ms, nick, account, kind, text FROM chatlog WHERE realm = ? AND channel = ?"
         args: list = [realm, self.fold(realm, channel)]
         if day:
-            sql += " AND date(ts, 'unixepoch', 'localtime') = ?"
+            sql += " AND date(ts_ms / 1000.0, 'unixepoch', 'localtime') = ?"
             args.append(day)
         if since:
-            sql += " AND ts >= ?"
+            sql += " AND ts_ms >= ?"
             args.append(since)
         if until:
-            sql += " AND ts < ?"
+            sql += " AND ts_ms < ?"
             args.append(until)
         if grep:
             sql += " AND text LIKE ?"
@@ -709,12 +743,12 @@ class Store:
         sql += " ORDER BY id DESC LIMIT ?"
         args.append(limit)
         rows = self._db.execute(sql, args).fetchall()
-        return [(r["ts"], r["nick"], r["account"], r["kind"], r["text"]) for r in reversed(rows)]
+        return [(r["ts_ms"], r["nick"], r["account"], r["kind"], r["text"]) for r in reversed(rows)]
 
     async def prune(self, keep_days: int) -> int:
         def go() -> int:
-            cutoff = int(time.time()) - keep_days * 86400
-            cur = self._db.execute("DELETE FROM chatlog WHERE ts < ?", (cutoff,))
+            cutoff = now_ms() - ms(keep_days * 86400)
+            cur = self._db.execute("DELETE FROM chatlog WHERE ts_ms < ?", (cutoff,))
             self._db.commit()
             return cur.rowcount
 
@@ -773,20 +807,20 @@ class Store:
         """When a person last said anything here, 0 if never. The bot's own
         lines do not count: talking to itself is not a lively room."""
         row = self._db.execute(
-            "SELECT MAX(ts) AS ts FROM chatlog WHERE realm = ? AND channel = ? AND kind IN ('privmsg', 'command')",
+            "SELECT MAX(ts_ms) AS ts_ms FROM chatlog WHERE realm = ? AND channel = ? AND kind IN ('privmsg', 'command')",
             (realm, self.fold(realm, room)),
         ).fetchone()
-        return int(row["ts"] or 0) if row else 0
+        return int(row["ts_ms"] or 0) if row else 0
 
     def last_spoke(self, realm: str, room: str, nick: str) -> int:
         """When this person last said something here, 0 if never. A regular is
         somebody we have actually heard from, not anybody who wandered in."""
         row = self._db.execute(
-            "SELECT MAX(ts) AS ts FROM chatlog WHERE realm = ? AND channel = ? AND nick_key = ?"
+            "SELECT MAX(ts_ms) AS ts_ms FROM chatlog WHERE realm = ? AND channel = ? AND nick_key = ?"
             " AND kind IN ('privmsg', 'command')",
             (realm, self.fold(realm, room), self.fold(realm, nick)),
         ).fetchone()
-        return int(row["ts"] or 0) if row else 0
+        return int(row["ts_ms"] or 0) if row else 0
 
     # -- soul and people ---------------------------------------------------
 
@@ -797,9 +831,9 @@ class Store:
     def set_soul(self, text: str, author: str = "cli") -> None:
         text = text.strip()
         self._db.execute(
-            "INSERT INTO soul (id, text, updated_at) VALUES (1, ?, ?)"
-            " ON CONFLICT(id) DO UPDATE SET text = excluded.text, updated_at = excluded.updated_at",
-            (text, int(time.time())),
+            "INSERT INTO soul (id, text, updated_at_ms) VALUES (1, ?, ?)"
+            " ON CONFLICT(id) DO UPDATE SET text = excluded.text, updated_at_ms = excluded.updated_at_ms",
+            (text, now_ms()),
         )
         self._keep_revision("soul", "", text, author)
 
@@ -813,35 +847,35 @@ class Store:
         if row is not None and row["topic"] == topic:
             return False
         self._db.execute(
-            "INSERT INTO topic_log (ts, realm, room, topic, who) VALUES (?, ?, ?, ?, ?)",
-            (int(time.time()), realm, room, topic[:400], who),
+            "INSERT INTO topic_log (ts_ms, realm, room, topic, who) VALUES (?, ?, ?, ?, ?)",
+            (now_ms(), realm, room, topic[:400], who),
         )
         self._db.commit()
         return True
 
     def topics(self, realm: str, room: str, limit: int = 10) -> list[tuple[int, str, str]]:
-        """(ts, topic, who) newest first."""
+        """(ts_ms, topic, who) newest first."""
         rows = self._db.execute(
-            "SELECT ts, topic, who FROM topic_log WHERE realm = ? AND room = ? ORDER BY id DESC LIMIT ?",
+            "SELECT ts_ms, topic, who FROM topic_log WHERE realm = ? AND room = ? ORDER BY id DESC LIMIT ?",
             (realm, self.fold(realm, room), limit),
         ).fetchall()
-        return [(r["ts"], r["topic"], r["who"]) for r in rows]
+        return [(r["ts_ms"], r["topic"], r["who"]) for r in rows]
 
     def note_moderation(self, realm: str, room: str, action: str, target: str, actor: str, result: str) -> None:
         self._db.execute(
-            "INSERT INTO moderation (ts, realm, room, action, target, actor, result) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (int(time.time()), realm, self.fold(realm, room), action, target, actor, result[:200]),
+            "INSERT INTO moderation (ts_ms, realm, room, action, target, actor, result) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (now_ms(), realm, self.fold(realm, room), action, target, actor, result[:200]),
         )
         self._db.commit()
 
-    def moderation_since(self, realm: str, room: str, ts: int) -> list[tuple[int, str, str, str]]:
-        """(ts, action, target, actor) newest first, for one room."""
+    def moderation_since(self, realm: str, room: str, ts_ms: int) -> list[tuple[int, str, str, str]]:
+        """(ts_ms, action, target, actor) newest first, for one room."""
         rows = self._db.execute(
-            "SELECT ts, action, target, actor FROM moderation"
-            " WHERE realm = ? AND room = ? AND ts >= ? ORDER BY id DESC",
-            (realm, self.fold(realm, room), ts),
+            "SELECT ts_ms, action, target, actor FROM moderation"
+            " WHERE realm = ? AND room = ? AND ts_ms >= ? ORDER BY id DESC",
+            (realm, self.fold(realm, room), ts_ms),
         ).fetchall()
-        return [(r["ts"], r["action"], r["target"], r["actor"]) for r in rows]
+        return [(r["ts_ms"], r["action"], r["target"], r["actor"]) for r in rows]
 
     def setting_int(self, kind: str, key: str) -> int:
         """A timestamp a periodic pass keeps for itself, keyed by what and where."""
@@ -850,8 +884,8 @@ class Store:
 
     def note_setting_int(self, kind: str, key: str, value: int) -> None:
         self._db.execute(
-            "INSERT INTO setting (key, value, author, updated_at) VALUES (?, ?, 'internal', ?)"
-            " ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+            "INSERT INTO setting (key, value, author, updated_at_ms) VALUES (?, ?, 'internal', ?)"
+            " ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at_ms = excluded.updated_at_ms",
             (f"{kind}:{key}", str(value), value),
         )
         self._db.commit()
@@ -865,10 +899,10 @@ class Store:
 
     def set_setting(self, key: str, value: str, author: str = "cli") -> None:
         self._db.execute(
-            "INSERT INTO setting (key, value, author, updated_at) VALUES (?, ?, ?, ?)"
+            "INSERT INTO setting (key, value, author, updated_at_ms) VALUES (?, ?, ?, ?)"
             " ON CONFLICT(key) DO UPDATE SET value = excluded.value, author = excluded.author,"
-            " updated_at = excluded.updated_at",
-            (key, value, author, int(time.time())),
+            " updated_at_ms = excluded.updated_at_ms",
+            (key, value, author, now_ms()),
         )
         self._db.commit()
 
@@ -882,8 +916,8 @@ class Store:
         if self.is_bot(realm, handle):
             return False
         self._db.execute(
-            "INSERT INTO bot (realm, handle, author, added_at) VALUES (?, ?, ?, ?)",
-            (realm, self.fold(realm, handle), author, int(time.time())),
+            "INSERT INTO bot (realm, handle, author, added_at_ms) VALUES (?, ?, ?, ?)",
+            (realm, self.fold(realm, handle), author, now_ms()),
         )
         self._db.commit()
         return True
@@ -902,13 +936,13 @@ class Store:
         return row is not None
 
     def bots(self, realm: str = "") -> list[tuple[str, str, int]]:
-        sql = "SELECT realm, handle, added_at FROM bot"
+        sql = "SELECT realm, handle, added_at_ms FROM bot"
         args: list = []
         if realm:
             sql += " WHERE realm = ?"
             args.append(realm)
         sql += " ORDER BY realm, handle"
-        return [(r["realm"], r["handle"], r["added_at"]) for r in self._db.execute(sql, args)]
+        return [(r["realm"], r["handle"], r["added_at_ms"]) for r in self._db.execute(sql, args)]
 
     def room_notes(self, realm: str, room: str) -> str:
         row = self._db.execute(
@@ -919,9 +953,9 @@ class Store:
     def set_room_notes(self, realm: str, room: str, notes: str, author: str = "cli") -> None:
         name = self.fold(realm, room)
         self._db.execute(
-            "INSERT INTO room (realm, name, notes, updated_at) VALUES (?, ?, ?, ?)"
-            " ON CONFLICT(realm, name) DO UPDATE SET notes = excluded.notes, updated_at = excluded.updated_at",
-            (realm, name, notes, int(time.time())),
+            "INSERT INTO room (realm, name, notes, updated_at_ms) VALUES (?, ?, ?, ?)"
+            " ON CONFLICT(realm, name) DO UPDATE SET notes = excluded.notes, updated_at_ms = excluded.updated_at_ms",
+            (realm, name, notes, now_ms()),
         )
         self._keep_revision("room", f"{realm}/{name}", notes, author)
 
@@ -931,15 +965,15 @@ class Store:
         ).fetchone()
         return row["observed"] if row else ""
 
-    def set_room_observed(self, realm: str, room: str, text: str, when: float | None = None) -> None:
+    def set_room_observed(self, realm: str, room: str, text: str, when_ms: int | None = None) -> None:
         """The bot's own reading of the room. Kept apart from the owners' notes,
         and stamped even when it says the same thing, so a check is not repeated."""
         name = self.fold(realm, room)
-        now = int(when or time.time())
+        now = int(when_ms or now_ms())
         self._db.execute(
-            "INSERT INTO room (realm, name, observed, checked_at, updated_at) VALUES (?, ?, ?, ?, ?)"
+            "INSERT INTO room (realm, name, observed, checked_at_ms, updated_at_ms) VALUES (?, ?, ?, ?, ?)"
             " ON CONFLICT(realm, name) DO UPDATE SET observed = excluded.observed,"
-            " checked_at = excluded.checked_at",
+            " checked_at_ms = excluded.checked_at_ms",
             (realm, name, text, now, now),
         )
         self._keep_revision("room-observed", f"{realm}/{name}", text, "vibe-check")
@@ -947,29 +981,29 @@ class Store:
     def room_checked(self, realm: str, room: str) -> int:
         """When the bot last read the room to see what it is like, 0 if never."""
         row = self._db.execute(
-            "SELECT checked_at FROM room WHERE realm = ? AND name = ?", (realm, self.fold(realm, room))
+            "SELECT checked_at_ms FROM room WHERE realm = ? AND name = ?", (realm, self.fold(realm, room))
         ).fetchone()
-        return int(row["checked_at"]) if row else 0
+        return int(row["checked_at_ms"]) if row else 0
 
-    def lines_since(self, realm: str, room: str, ts: int) -> int:
+    def lines_since(self, realm: str, room: str, ts_ms: int) -> int:
         row = self._db.execute(
-            "SELECT COUNT(*) AS n FROM chatlog WHERE realm = ? AND channel = ? AND ts > ?"
+            "SELECT COUNT(*) AS n FROM chatlog WHERE realm = ? AND channel = ? AND ts_ms > ?"
             " AND kind IN ('privmsg', 'command')",
-            (realm, self.fold(realm, room), ts),
+            (realm, self.fold(realm, room), ts_ms),
         ).fetchone()
         return int(row["n"] or 0) if row else 0
 
     def described_rooms(self, any_policy: bool = False) -> list[tuple[str, str, int]]:
-        """(realm, room, updated_at) for every room anything has been written
+        """(realm, room, updated_at_ms) for every room anything has been written
         about -- by an owner or by the bot -- or every room at all."""
         where = "" if any_policy else " WHERE notes != '' OR observed != ''"
-        rows = self._db.execute(f"SELECT realm, name, updated_at FROM room{where} ORDER BY realm, name").fetchall()
-        return [(r["realm"], r["name"], r["updated_at"]) for r in rows]
+        rows = self._db.execute(f"SELECT realm, name, updated_at_ms FROM room{where} ORDER BY realm, name").fetchall()
+        return [(r["realm"], r["name"], r["updated_at_ms"]) for r in rows]
 
     def tenure(self, realm: str, room: str) -> tuple[int, int]:
         """(days seen, lines heard) in one room: how well the bot knows the place."""
         row = self._db.execute(
-            "SELECT COUNT(DISTINCT date(ts, 'unixepoch', 'localtime')) AS days, COUNT(*) AS lines"
+            "SELECT COUNT(DISTINCT date(ts_ms / 1000.0, 'unixepoch', 'localtime')) AS days, COUNT(*) AS lines"
             " FROM chatlog WHERE realm = ? AND channel = ? AND kind IN ('privmsg', 'command')",
             (realm, self.fold(realm, room)),
         ).fetchone()
@@ -990,29 +1024,29 @@ class Store:
     def note_member(self, realm: str, room: str, person_id: int, nick: str) -> bool:
         """True the first time this person is seen in this room. An upsert's
         rowcount cannot tell an insert from an update, so ask first."""
-        now = int(time.time())
+        now = now_ms()
         room = self.fold(realm, room)
         seen = self._db.execute(
             "SELECT 1 FROM membership WHERE realm = ? AND room = ? AND person_id = ?", (realm, room, person_id)
         ).fetchone()
         self._db.execute(
-            "INSERT INTO membership (realm, room, person_id, nick, first_seen, last_seen)"
+            "INSERT INTO membership (realm, room, person_id, nick, first_seen_ms, last_seen_ms)"
             " VALUES (?, ?, ?, ?, ?, ?)"
             " ON CONFLICT(realm, room, person_id) DO UPDATE SET nick = excluded.nick,"
-            " last_seen = excluded.last_seen",
+            " last_seen_ms = excluded.last_seen_ms",
             (realm, room, person_id, nick, now, now),
         )
         self._db.commit()
         return seen is None
 
     def members(self, realm: str, room: str) -> list[tuple[int, str, int, int]]:
-        """(person_id, nick, first_seen, last_seen), longest-standing first."""
+        """(person_id, nick, first_seen_ms, last_seen_ms), longest-standing first."""
         rows = self._db.execute(
-            "SELECT person_id, nick, first_seen, last_seen FROM membership"
-            " WHERE realm = ? AND room = ? ORDER BY first_seen",
+            "SELECT person_id, nick, first_seen_ms, last_seen_ms FROM membership"
+            " WHERE realm = ? AND room = ? ORDER BY first_seen_ms",
             (realm, self.fold(realm, room)),
         ).fetchall()
-        return [(r["person_id"], r["nick"], r["first_seen"], r["last_seen"]) for r in rows]
+        return [(r["person_id"], r["nick"], r["first_seen_ms"], r["last_seen_ms"]) for r in rows]
 
     def rooms_of(self, realm: str, person_id: int) -> list[str]:
         """Which rooms this identity sits in. Being in one says nothing about
@@ -1044,7 +1078,7 @@ class Store:
     def set_person_observed(self, person_id: int, text: str) -> None:
         """What the bot noticed, kept apart from what owners wrote."""
         self._db.execute(
-            "UPDATE person SET observed = ?, updated_at = ? WHERE id = ?", (text, int(time.time()), person_id)
+            "UPDATE person SET observed = ?, updated_at_ms = ? WHERE id = ?", (text, now_ms(), person_id)
         )
         self._keep_revision("person-observed", str(person_id), text, "bartender")
 
@@ -1057,13 +1091,13 @@ class Store:
         )
         args: list = [realm, self.fold(realm, room)]
         if day:
-            sql += " AND date(ts, 'unixepoch', 'localtime') = ?"
+            sql += " AND date(ts_ms / 1000.0, 'unixepoch', 'localtime') = ?"
             args.append(day)
         if since:
-            sql += " AND ts >= ?"
+            sql += " AND ts_ms >= ?"
             args.append(since)
         if until:
-            sql += " AND ts < ?"
+            sql += " AND ts_ms < ?"
             args.append(until)
         return [r["account"] for r in self._db.execute(sql, args)]
 
@@ -1090,9 +1124,9 @@ class Store:
 
     def alias_source(self, realm: str, handle: str) -> tuple[str, int]:
         row = self._db.execute(
-            "SELECT source, added_at FROM alias WHERE realm = ? AND handle = ? COLLATE NOCASE", (realm, handle)
+            "SELECT source, added_at_ms FROM alias WHERE realm = ? AND handle = ? COLLATE NOCASE", (realm, handle)
         ).fetchone()
-        return (row["source"], row["added_at"]) if row else ("", 0)
+        return (row["source"], row["added_at_ms"]) if row else ("", 0)
 
     def nicknames(self, realm: str, handle: str) -> list[str]:
         """Informal names for whoever holds this handle. Used for people, and
@@ -1118,24 +1152,24 @@ class Store:
         pid = self.person_id(realm, handle)
         if pid is None:
             cur = self._db.execute(
-                "INSERT INTO person (notes, facts, updated_at) VALUES (?, ?, ?)",
-                (notes, json.dumps(facts or {}), int(time.time())),
+                "INSERT INTO person (notes, facts, updated_at_ms) VALUES (?, ?, ?)",
+                (notes, json.dumps(facts or {}), now_ms()),
             )
             pid = int(cur.lastrowid or 0)
             # The first handle is sourced like any other: whoever vouched for it.
             self._db.execute(
-                "INSERT INTO alias (realm, handle, person_id, source, added_at) VALUES (?, ?, ?, ?, ?)",
-                (realm, handle, pid, author, int(time.time())),
+                "INSERT INTO alias (realm, handle, person_id, source, added_at_ms) VALUES (?, ?, ?, ?, ?)",
+                (realm, handle, pid, author, now_ms()),
             )
         else:
             if facts is None:
                 self._db.execute(
-                    "UPDATE person SET notes = ?, updated_at = ? WHERE id = ?", (notes, int(time.time()), pid)
+                    "UPDATE person SET notes = ?, updated_at_ms = ? WHERE id = ?", (notes, now_ms(), pid)
                 )
             else:
                 self._db.execute(
-                    "UPDATE person SET notes = ?, facts = ?, updated_at = ? WHERE id = ?",
-                    (notes, json.dumps(facts), int(time.time()), pid),
+                    "UPDATE person SET notes = ?, facts = ?, updated_at_ms = ? WHERE id = ?",
+                    (notes, json.dumps(facts), now_ms(), pid),
                 )
         self._keep_revision("person", str(pid), notes, author)
         return pid
@@ -1155,8 +1189,8 @@ class Store:
     def add_alias(self, person_id: int, realm: str, handle: str, source: str = "cli") -> bool:
         try:
             self._db.execute(
-                "INSERT INTO alias (realm, handle, person_id, source, added_at) VALUES (?, ?, ?, ?, ?)",
-                (realm, handle, person_id, source, int(time.time())),
+                "INSERT INTO alias (realm, handle, person_id, source, added_at_ms) VALUES (?, ?, ?, ?, ?)",
+                (realm, handle, person_id, source, now_ms()),
             )
         except sqlite3.IntegrityError:
             return False
@@ -1175,8 +1209,8 @@ class Store:
             self._db.commit()
             return  # a no-op write is not a revision
         self._db.execute(
-            "INSERT INTO revision (kind, key, text, author, ts) VALUES (?, ?, ?, ?, ?)",
-            (kind, key, text, author, int(time.time())),
+            "INSERT INTO revision (kind, key, text, author, ts_ms) VALUES (?, ?, ?, ?, ?)",
+            (kind, key, text, author, now_ms()),
         )
         self._db.execute(
             "DELETE FROM revision WHERE kind = ? AND key = ? AND id NOT IN"
@@ -1186,12 +1220,12 @@ class Store:
         self._db.commit()
 
     def revisions(self, kind: str, key: str = "") -> list[tuple[int, int, str, int]]:
-        """(id, ts, author, length), newest first."""
+        """(id, ts_ms, author, length), newest first."""
         rows = self._db.execute(
-            "SELECT id, ts, author, LENGTH(text) AS n FROM revision WHERE kind = ? AND key = ? ORDER BY id DESC",
+            "SELECT id, ts_ms, author, LENGTH(text) AS n FROM revision WHERE kind = ? AND key = ? ORDER BY id DESC",
             (kind, key),
         ).fetchall()
-        return [(r["id"], r["ts"], r["author"], r["n"]) for r in rows]
+        return [(r["id"], r["ts_ms"], r["author"], r["n"]) for r in rows]
 
     def revision(self, revision_id: int) -> tuple[str, str, str] | None:
         """(kind, key, text) for one revision."""
@@ -1208,35 +1242,35 @@ class Store:
         return True
 
     def people(self, realm: str = "") -> list[tuple[int, list[tuple[str, str]], int]]:
-        """(person_id, aliases, updated_at). With a realm, only those known there."""
+        """(person_id, aliases, updated_at_ms). With a realm, only those known there."""
         if realm:
             rows = self._db.execute(
-                "SELECT DISTINCT p.id, p.updated_at FROM person p JOIN alias a ON a.person_id = p.id"
+                "SELECT DISTINCT p.id, p.updated_at_ms FROM person p JOIN alias a ON a.person_id = p.id"
                 " WHERE a.realm = ? ORDER BY p.id",
                 (realm,),
             ).fetchall()
         else:
-            rows = self._db.execute("SELECT id, updated_at FROM person ORDER BY id").fetchall()
-        return [(int(r["id"]), self.aliases(int(r["id"])), r["updated_at"]) for r in rows]
+            rows = self._db.execute("SELECT id, updated_at_ms FROM person ORDER BY id").fetchall()
+        return [(int(r["id"]), self.aliases(int(r["id"])), r["updated_at_ms"]) for r in rows]
 
     # -- scheduled jobs ----------------------------------------------------
 
     async def add_job(
-        self, *, due_at: int, realm: str, room: str, nick: str, account: str, is_group: bool, command: str
+        self, *, due_at_ms: int, realm: str, room: str, nick: str, account: str, is_group: bool, command: str
     ) -> int:
         def go() -> int:
             cur = self._db.execute(
-                "INSERT INTO job (due_at, realm, room, nick, account, is_group, command, created_at)"
+                "INSERT INTO job (due_at_ms, realm, room, nick, account, is_group, command, created_at_ms)"
                 " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (
-                    due_at,
+                    due_at_ms,
                     realm,
                     self.fold(realm, room),
                     nick,
                     account,
                     int(is_group),
                     command,
-                    int(time.time()),
+                    now_ms(),
                 ),
             )
             self._db.commit()
@@ -1250,8 +1284,8 @@ class Store:
 
         def go() -> list[Job]:
             rows = self._db.execute(
-                "SELECT id, due_at, realm, room, nick, account, is_group, command"
-                " FROM job WHERE due_at <= ? ORDER BY due_at",
+                "SELECT id, due_at_ms, realm, room, nick, account, is_group, command"
+                " FROM job WHERE due_at_ms <= ? ORDER BY due_at_ms",
                 (now,),
             ).fetchall()
             if rows:
@@ -1260,7 +1294,7 @@ class Store:
             return [
                 Job(
                     r["id"],
-                    r["due_at"],
+                    r["due_at_ms"],
                     r["realm"],
                     r["room"],
                     r["nick"],
@@ -1275,16 +1309,16 @@ class Store:
 
     async def jobs(self, realm: str = "", room: str = "") -> list[Job]:
         def go() -> list[Job]:
-            sql = "SELECT id, due_at, realm, room, nick, account, is_group, command FROM job"
+            sql = "SELECT id, due_at_ms, realm, room, nick, account, is_group, command FROM job"
             args: tuple = ()
             if realm and room:
                 sql += " WHERE realm = ? AND room = ?"
                 args = (realm, self.fold(realm, room))
-            rows = self._db.execute(f"{sql} ORDER BY due_at", args).fetchall()
+            rows = self._db.execute(f"{sql} ORDER BY due_at_ms", args).fetchall()
             return [
                 Job(
                     r["id"],
-                    r["due_at"],
+                    r["due_at_ms"],
                     r["realm"],
                     r["room"],
                     r["nick"],
@@ -1315,7 +1349,7 @@ class Store:
         def go() -> bool:
             try:
                 self._db.execute(
-                    "INSERT INTO watch (realm, owner, repo, channel, feeds, added_by, added_at)"
+                    "INSERT INTO watch (realm, owner, repo, channel, feeds, added_by, added_at_ms)"
                     " VALUES (?, ?, ?, ?, ?, ?, ?)",
                     (
                         realm,
@@ -1324,7 +1358,7 @@ class Store:
                         self.fold(realm, channel),
                         ",".join(feeds),
                         added_by,
-                        int(time.time()),
+                        now_ms(),
                     ),
                 )
             except sqlite3.IntegrityError:

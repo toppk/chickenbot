@@ -78,7 +78,7 @@ async def test_comms_reports_real_channel_state(handler, irc):  # noqa: F811
 
 async def test_engines_reports_the_model_and_scheduler(handler, transport, store):
     await store.add_job(
-        due_at=9999999999,
+        due_at_ms=9999999999,
         realm="fake",
         room="#chan",
         nick="alice",

@@ -18,13 +18,13 @@ async def test_search_ignores_command_lines_but_scrollback_keeps_them(store):
         "!history kettle",
         "nothing matching that",
     ]
-    assert (await store.last_seen("irc", "nate")).text == "!history kettle"
+    assert (await store.last_seen_ms("irc", "nate")).text == "!history kettle"
 
 
 async def test_channel_lookup_is_case_insensitive(store):
     await store.log_line("irc", "#Chan", "Nate", "nate", "hi")
     assert await store.search("irc", "#CHAN", "hi")
-    assert (await store.last_seen("irc", "NATE")) is not None
+    assert (await store.last_seen_ms("irc", "NATE")) is not None
 
 
 async def test_watch_is_unique_per_channel(store):
@@ -45,7 +45,7 @@ async def test_removing_a_watch_drops_its_cursors(store):
 
 async def test_prune_drops_only_old_lines(store):
     await store.log_line("irc", "#chan", "nate", "nate", "recent")
-    store._db.execute("UPDATE chatlog SET ts = ts - 100 * 86400")
+    store._db.execute("UPDATE chatlog SET ts_ms = ts_ms - 100 * 86400 * 1000")
     await store.log_line("irc", "#chan", "nate", "nate", "fresh")
     assert await store.prune(30) == 1
     assert [line.text for line in await store.recent("irc", "#chan")] == ["fresh"]

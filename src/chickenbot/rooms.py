@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 import time
 
+from .clock import now_ms
 from .dossier import clip
 from .store import Store
 
@@ -119,8 +120,8 @@ class Rooms:
         return f"{self.standing(realm, room)} ({days}d, {lines} lines)" + (f": {note[:120]}" if note else "")
 
 
-def _ago(ts: int) -> str:
-    seconds = max(0, int(time.time()) - ts)
+def _ago(ts_ms: int) -> str:
+    seconds = max(0, (now_ms() - ts_ms) // 1000)
     for unit, size in (("d", 86400), ("h", 3600), ("m", 60)):
         if seconds >= size:
             return f"{seconds // size}{unit} ago"

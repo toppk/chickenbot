@@ -35,6 +35,7 @@ from .store import Store
 from .toolsocket import ToolServer
 from .transport import Transport
 from .transports import build
+from .clock import local_ms, ms, now_ms
 from .transports.irc_transport import IRCTransport
 from .vibe import VibeCheck
 from .watcher import Watcher
@@ -271,29 +272,29 @@ def _bartender_system() -> str:
     return SYSTEM
 
 
-def _when(ts: int) -> str:
-    return time.strftime("%Y-%m-%d %H:%M", time.localtime(ts))
+def _when(ts_ms: int) -> str:
+    return time.strftime("%Y-%m-%d %H:%M", local_ms(ts_ms))
 
 
 def _window(args: argparse.Namespace) -> tuple[int, int]:
-    """A slice of history, said three ways: around a moment, a named day, or
-    the last so many hours."""
+    """A slice of history on the stored clock, said three ways: around a
+    moment, a named day, or the last so many hours."""
     hours = max(args.hours, 1)
     if args.around:
         middle = _moment(args.around)
-        half = hours * 3600 // 2
+        half = ms(hours * 3600) // 2
         return middle - half, middle + half
     if args.day:
         start = _moment(f"{args.day} 00:00")
-        return start, start + 86400
-    now = int(time.time())
-    return now - hours * 3600, now
+        return start, start + ms(86400)
+    now = now_ms()
+    return now - ms(hours * 3600), now
 
 
 def _moment(text: str) -> int:
     for shape in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
         try:
-            return int(time.mktime(time.strptime(text, shape)))
+            return ms(time.mktime(time.strptime(text, shape)))
         except ValueError:
             continue
     raise ValueError(f"not a time: {text!r} (try 2026-10-04 12:06)")
@@ -363,7 +364,7 @@ def manage_vibe(store: Store, args: argparse.Namespace) -> int:
     if not args.room:
         rows = store.described_rooms()
         for realm, room, updated in rows:
-            when = time.strftime("%Y-%m-%d", time.localtime(updated))
+            when = time.strftime("%Y-%m-%d", local_ms(updated))
             print(f"{realm}/{room}\t{when}")
         if not rows:
             print("(nothing written about any room yet)")
@@ -428,7 +429,7 @@ def manage_bots(store: Store, args: argparse.Namespace) -> int:
     if not args.handle:
         rows = store.bots(args.realm or "")
         for realm, handle, added in rows:
-            print(f"{realm}/{handle}\tsince {time.strftime('%Y-%m-%d', time.localtime(added))}")
+            print(f"{realm}/{handle}\tsince {time.strftime('%Y-%m-%d', local_ms(added))}")
         if not rows:
             print("(none marked; bot mode and platform flags are honoured automatically)")
         return 0
@@ -492,7 +493,7 @@ def manage(cfg: config.Config, args: argparse.Namespace) -> int:
             rows = store.people(args.realm or "")
             for _pid, handles, updated in rows:
                 names = " = ".join(f"{r}/{h}" for r, h in handles)
-                print(f"{names}\t{time.strftime('%Y-%m-%d', time.localtime(updated))}")
+                print(f"{names}\t{time.strftime('%Y-%m-%d', local_ms(updated))}")
             if not rows:
                 print("(nobody matching)" if args.realm else "(nobody yet)")
             return 0
@@ -556,7 +557,7 @@ def browse(cfg: config.Config, args: argparse.Namespace) -> int:
         if not args.room:
             rooms = store.rooms()
             for transport, channel, count, last in rooms:
-                when = time.strftime("%Y-%m-%d %H:%M", time.localtime(last))
+                when = time.strftime("%Y-%m-%d %H:%M", local_ms(last))
                 print(f"{transport}/{channel:<20} {count:7} lines   last {when}")
             if not rooms:
                 print("(nothing logged yet)")
@@ -575,12 +576,12 @@ def browse(cfg: config.Config, args: argparse.Namespace) -> int:
                 print("(nothing logged for that room)")
             return 0
 
-        since = int(time.time()) - args.since * 3600 if args.since else 0
+        since = now_ms() - ms(args.since * 3600) if args.since else 0
         lines = store.conversation(
             transport, room, day=args.date or "", since=since, grep=args.grep or "", limit=args.limit
         )
         for ts, nick, _account, kind, text in lines:
-            stamp = time.strftime("%H:%M" if (args.date or since) else "%m-%d %H:%M", time.localtime(ts))
+            stamp = time.strftime("%H:%M" if (args.date or since) else "%m-%d %H:%M", local_ms(ts))
             print(f"{stamp} {MARKS.get(kind, '?')}{nick:>12} {text}")
         if not lines:
             print("(nothing matching)")
@@ -659,7 +660,7 @@ def show_activity(cfg: config.Config, args: argparse.Namespace) -> int:
     this shows what happened."""
     store = Store(cfg.db_path)
     try:
-        since = int(time.time()) - args.since * 3600 if args.since else 0
+        since = now_ms() - ms(args.since * 3600) if args.since else 0
         if args.cost:
             count, spent = store.activity_cost(since)
             window = f"the last {args.since}h" if args.since else "all time"
@@ -679,7 +680,7 @@ def show_activity(cfg: config.Config, args: argparse.Namespace) -> int:
                 print(json.dumps(row))
             return 0
         for row in reversed(rows):
-            when = time.strftime("%m-%d %H:%M", time.localtime(row["ts"]))
+            when = time.strftime("%m-%d %H:%M", local_ms(row["ts_ms"]))
             bits = [f"{when} {row['kind']:8} {row['room'] or '-':<12} {row['nick'] or '-':>12}"]
             for field in ("command", "outcome", "llm", "served", "tools", "error"):
                 if row[field]:
@@ -712,8 +713,8 @@ def export(cfg: config.Config, args: argparse.Namespace) -> int:
                         handle.write(
                             json.dumps(
                                 {
-                                    "ts": ts,
-                                    "time": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(ts)),
+                                    "ts_ms": ts,
+                                    "time": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(ts / 1000)),
                                     "transport": transport,
                                     "room": channel,
                                     "nick": nick,
@@ -869,7 +870,7 @@ def show_transcript(store: Store, args: argparse.Namespace) -> int:
 def _call_listing(rows: list, paint: Paint) -> int:
     print(paint(f"{'id':>5}  {'when':<14}  {'what':<12} {'room':<10} {'took':>8} {'tools':>5}  reply", "bold", "under"))
     for row in rows:
-        when = time.strftime("%m-%d %H:%M:%S", time.localtime(row["ts"]))
+        when = time.strftime("%m-%d %H:%M:%S", local_ms(row["ts_ms"]))
         label, colour = REASONS.get(str(row["reason"]), (str(row["reason"])[:12], "grey"))
         used = len(json.loads(row["tool_calls"] or "[]"))
         said = visible(" ".join(str(row["response"]).split()))
@@ -889,7 +890,7 @@ def _call_listing(rows: list, paint: Paint) -> int:
 
 def _one_call(row, paint: Paint, details: bool = False) -> int:
     label, colour = REASONS.get(str(row["reason"]), (str(row["reason"]), "grey"))
-    when = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(row["ts"]))
+    when = time.strftime("%Y-%m-%d %H:%M:%S", local_ms(row["ts_ms"]))
     print(paint.rule(f"#{row['id']}  {label.upper()}  {row['room']}  {when}", "rev", "bold"))
     facts = [("who asked", row["nick"] or "-"), ("network", row["realm"]), ("model", row["model"] or "-")]
     facts += [("served by", row["served"] or "-"), ("took", f"{row['ms']}ms")]
@@ -1159,7 +1160,7 @@ def _document(cfg_store: Store, kind: str, key: str, args: argparse.Namespace, w
     if args.history:
         rows = cfg_store.revisions(kind, key)
         for rid, ts, author, length in rows:
-            when = time.strftime("%Y-%m-%d %H:%M", time.localtime(ts))
+            when = time.strftime("%Y-%m-%d %H:%M", local_ms(ts))
             marker = "*" if rid == (rows[0][0] if rows else 0) else " "
             print(f"{marker} {rid:5}  {when}  {author:8} {length:6} chars")
         if not rows:

@@ -97,7 +97,7 @@ async def test_the_budget_is_per_room(handler):
 async def test_the_budget_lapses(handler, store):
     for i in range(PER_HOUR):
         store.note_moderation("fake", "#chan", "kick", f"p{i}", "alice", "ok")
-    store._db.execute("UPDATE moderation SET ts = ?", (int(time.time()) - 7200,))
+    store._db.execute("UPDATE moderation SET ts_ms = ?", (int(time.time() * 1000) - (7200) * 1000,))
     store._db.commit()
     assert await guarded(ctx(handler), "kick", "nate") == "kick nate"
 

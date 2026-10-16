@@ -22,7 +22,7 @@ import time
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-from .github import GitHub
+from .github import GitHub, ms, now_ms
 from .store import Store
 
 log = logging.getLogger("github-tool")
@@ -87,7 +87,7 @@ def _render_issue(repo: str, found: dict) -> str:
     bits = [head, found["url"]]
     if found["labels"]:
         bits.append("labels: " + ", ".join(label for label in found["labels"] if label))
-    bits.append(f"opened {found['created_at']}, last touched {found['updated_at']}")
+    bits.append(f"opened {found['created_at_ms']}, last touched {found['updated_at_ms']}")
     bits.append("")
     bits.append(_cut(found["body"], BODY_CHARS) or "(no description)")
     shown, total = len(found["comments"]), found["comment_count"]
@@ -117,14 +117,14 @@ def _trim_readme(repo: str, text: str) -> str:
 def _age(row, now: int) -> str:
     """Opened, last touched, and answered or not.
 
-    `updated_at` alone cannot tell a question nobody ever answered from a
+    `updated_at_ms` alone cannot tell a question nobody ever answered from a
     thread that ran and went quiet, and both look the same in a tending view.
     """
-    if not row["updated_at"]:
+    if not row["updated_at_ms"]:
         return "?"
-    parts = [f"{ago(now - row['updated_at'])} ago"]
-    if row["created_at"] and row["created_at"] < row["updated_at"]:
-        parts.append(f"open {ago(now - row['created_at'])}")
+    parts = [f"{ago_ms(row['updated_at_ms'])} ago"]
+    if row["created_at_ms"] and row["created_at_ms"] < row["updated_at_ms"]:
+        parts.append(f"open {ago_ms(row['created_at_ms'])}")
     comments = row["comments"]
     parts.append("no replies" if not comments else f"{comments} comment{'s' if comments > 1 else ''}")
     return ", ".join(parts)
@@ -368,6 +368,12 @@ def ago(seconds: int) -> str:
     return f"{max(seconds, 0)}s"
 
 
+def ago_ms(ts_ms: int) -> str:
+    """A stored timestamp, said as an age. `ago` still takes seconds, so the
+    two cannot be confused by accident."""
+    return ago((now_ms() - ts_ms) // 1000)
+
+
 class Tool:
     def __init__(self, store: Store, api: GitHub, users: list[str], interval: int = DEFAULT_INTERVAL) -> None:
         self.store = store
@@ -393,18 +399,18 @@ class Tool:
         """Older than the question's own window, so the mirror cannot answer it."""
         who = [user] if user else self.users
         stamps = [t for t in (self.store.cursor(f"user:{u}")[1] for u in who) if t]
-        return bool(who) and (not stamps or time.time() - min(stamps) >= window)
+        return bool(who) and (not stamps or now_ms() - min(stamps) >= ms(window))
 
     def stale(self, user: str) -> bool:
         """Has this user's slice of the mirror aged out? The mirror is on disk,
         so restarting, or being told about one new handle, is not a reason to
         refetch everyone."""
         _etag, last = self.store.cursor(f"user:{user}")
-        return not last or time.time() - last >= self.interval
+        return not last or now_ms() - last >= ms(self.interval)
 
     async def poll_once(self, *, force: bool = False, only: list[str] | None = None) -> int:
         fresh = 0
-        started = int(time.time())
+        started = now_ms()
         complete = True
         candidates = only if only is not None else self.users
         due = [u for u in candidates if force or self.stale(u)]
@@ -417,7 +423,7 @@ class Tool:
                 for repo in await self.api.repos(user):
                     self.store.save_repo(repo)
                 fresh += self.store.record(await self.api.events(user))
-                self.store.set_cursor(f"user:{user}", "", int(time.time()))
+                self.store.set_cursor(f"user:{user}", "", now_ms())
             except Exception as exc:  # noqa: BLE001 - one bad user must not stop the rest
                 log.warning("polling %s failed: %s", user, exc)
 
@@ -461,7 +467,7 @@ class Tool:
         if not self.users:
             return 0
         oldest = min(self.store.cursor(f"user:{u}")[1] for u in self.users)
-        return max(0, int(oldest + seconds - time.time())) if oldest else 0
+        return max(0, (oldest + ms(seconds) - now_ms()) // 1000) if oldest else 0
 
     async def poll_forever(self, seconds: int) -> None:
         while True:
@@ -478,7 +484,7 @@ class Tool:
     def github_activity(self, args: dict) -> str:
         user = str(args.get("user") or "")
         window = RANGES.get(str(args.get("range") or "day"), 86400)
-        since = int(time.time()) - window if window else 0
+        since = now_ms() - ms(window) if window else 0
         summarize = bool(args.get("summarize", False))
         who = user or "everyone"
 
@@ -495,9 +501,8 @@ class Tool:
         rows = self.store.activity(actor=user, kind=kind, since=since, limit=ACTIVITY_SHOWN)
         if not rows:
             return f"no activity for {who} in the last {args.get('range', 'day')}"
-        now = int(time.time())
         return " | ".join(
-            f"{r['actor']} {r['kind']} {r['repo']}: {r['title']} ({ago(now - r['ts'])} ago)" for r in rows
+            f"{r['actor']} {r['kind']} {r['repo']}: {r['title']} ({ago_ms(r['ts_ms'])} ago)" for r in rows
         )
 
     def github_repos(self, args: dict) -> str:
@@ -508,7 +513,7 @@ class Tool:
         if not rows:
             return "no repositories mirrored yet"
         limit = max(1, min(int(args.get("limit") or 10), 25))
-        now = int(time.time())
+        now = now_ms()
         return " | ".join(self._repo(r, now) for r in rows[:limit])
 
     def _repo(self, r, now: int) -> str:
@@ -518,7 +523,7 @@ class Tool:
         marks = [m for m, on in (("fork", r["fork"]), ("archived", r["archived"])) if on]
         marks.append(f"{r['stars']} stars")
         marks.append(self._open(r))
-        marks.append(f"pushed {ago(now - r['pushed_at'])} ago")
+        marks.append(f"pushed {ago_ms(r['pushed_at_ms'])} ago")
         described = f": {r['description'][:DESCRIPTION]}" if r["description"] else ""
         return f"{r['full_name']} ({', '.join(marks)}){described}"
 
@@ -553,7 +558,7 @@ class Tool:
         if kind := str(args.get("kind") or ""):
             rows = [r for r in rows if r["kind"] == kind]
         who = args.get("user") or "us"
-        return self._items(rows[:limit], int(time.time()), whose=f"on repos owned by {who}")
+        return self._items(rows[:limit], now_ms(), whose=f"on repos owned by {who}")
 
     def github_outgoing(self, args: dict) -> str:
         limit = max(1, min(int(args.get("limit") or 10), 25))
@@ -561,7 +566,7 @@ class Tool:
         if kind := str(args.get("kind") or ""):
             rows = [r for r in rows if r["kind"] == kind]
         who = args.get("user") or "us"
-        return self._items(rows[:limit], int(time.time()), whose=f"elsewhere by {who}")
+        return self._items(rows[:limit], now_ms(), whose=f"elsewhere by {who}")
 
     def freshen(self, user: str = "") -> None:
         """Stale answer now, fresh one next time. Waiting on a dozen API calls
@@ -600,7 +605,7 @@ class Tool:
         stamps = [t for t in stamps if t]
         if not stamps:
             return "watched, but nothing fetched yet; ask again in a moment"
-        old = int(time.time()) - min(stamps)
+        old = (now_ms() - min(stamps)) // 1000
         if window and old < window:
             return ""
         return f"as of {ago(old)} ago"
@@ -690,11 +695,10 @@ class Tool:
             return f"could not read {repo}'s branches ({type(exc).__name__})"
         if not tips:
             return f"no branches visible on {repo}"
-        now = int(time.time())
         shown = tips[:limit]
         lines = [
             f"{b['name']}{' (default)' if b['name'] == default else ''} {b['sha']} "
-            f"{ago(now - b['ts'])} ago {b['who']}: {b['subject'][:80]}"
+            f"{ago_ms(b['ts_ms'])} ago {b['who']}: {b['subject'][:80]}"
             for b in shown
         ]
         more = f", and {len(tips) - len(shown)} older" if len(tips) > len(shown) else ""
@@ -710,8 +714,7 @@ class Tool:
         where = f"{repo}@{branch}" if branch else f"{repo} (default branch only; no GITHUB_TOKEN for the others)"
         if not found:
             return f"no commits visible on {where}"
-        now = int(time.time())
-        lines = [f"{c['sha']} {ago(now - c['ts'])} ago {c['who']}: {c['subject'][:80]}" for c in found]
+        lines = [f"{c['sha']} {ago_ms(c['ts_ms'])} ago {c['who']}: {c['subject'][:80]}" for c in found]
         return f"{where}, newest first: " + " | ".join(lines)
 
     async def github_readme(self, args: dict) -> str:
@@ -767,7 +770,7 @@ class Tool:
         return f"{answer} [live, not mirrored; repos and recent public events only, no per-repo commits or authorship]"
 
     def _describe(self, user: str, repos: list[dict], events: list) -> str:
-        busiest = sorted(repos, key=lambda r: (-r["stars"], -r["pushed_at"]))[:3]
+        busiest = sorted(repos, key=lambda r: (-r["stars"], -r["pushed_at_ms"]))[:3]
         parts = []
         if busiest:
             named = ", ".join(f"{r['name']} ({r['stars']}*)" if r["stars"] else r["name"] for r in busiest)
@@ -777,8 +780,8 @@ class Tool:
             for item in events:
                 tally[item.kind] = tally.get(item.kind, 0) + 1
             recent = ", ".join(f"{n} {kind}" for kind, n in sorted(tally.items(), key=lambda kv: -kv[1]))
-            latest = max(item.ts for item in events)
-            parts.append(f"lately {recent}, last seen {ago(int(time.time() - latest))} ago")
+            latest = max(item.ts_ms for item in events)
+            parts.append(f"lately {recent}, last seen {ago((now_ms() - latest) // 1000)} ago")
         return f"{user}: " + "; ".join(parts)
 
     async def github_refresh(self, args: dict) -> str:
@@ -792,8 +795,8 @@ class Tool:
         if not who:
             return "nobody is watched here yet"
         since = min((self.store.cursor(f"user:{u}")[1] or 0) for u in who)
-        if since and time.time() - since < REFRESH_GAP:
-            return f"fetched {ago(int(time.time() - since))} ago already; nothing will have changed"
+        if since and now_ms() - since < ms(REFRESH_GAP):
+            return f"fetched {ago((now_ms() - since) // 1000)} ago already; nothing will have changed"
         # Join the fetch already running rather than starting a second one:
         # two passes over the same handles is twice the quota for one answer,
         # and they raced -- the forced one gave up at 22 seconds while the

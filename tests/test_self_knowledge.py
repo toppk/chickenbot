@@ -34,7 +34,7 @@ def ctx(handler, *, args="", owner=True, room="#chan") -> Context:
 
 
 def recorded(store, **fields) -> None:
-    row = {"ts": int(time.time()), "kind": "message", "room": "#chan", "nick": "nate", "outcome": "answered"}
+    row = {"ts_ms": int(time.time() * 1000), "kind": "message", "room": "#chan", "nick": "nate", "outcome": "answered"}
     store.record_activity(row | fields)
 
 

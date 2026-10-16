@@ -17,6 +17,7 @@ import asyncio
 import logging
 import time
 
+from .clock import local_ms
 from .brain import ProviderError
 from .dossier import MAX_CHARS, clip
 from .observe import activity, note, note_many
@@ -189,7 +190,7 @@ class Bartender:
             existing = self.h.store.person_observed(pid) or "(nothing yet)"
             known.append(f"{handle}:\n{existing}")
         transcript = "\n".join(
-            f"[{time.strftime('%H:%M', time.localtime(ts))}] <{nick}> {text}"
+            f"[{time.strftime('%H:%M', local_ms(ts))}] <{nick}> {text}"
             for ts, nick, _account, kind, text in lines
             if kind in ("privmsg", "command", "self", "bot")
         )
