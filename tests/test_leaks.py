@@ -42,13 +42,13 @@ def test_prose_is_left_alone():
 
 
 async def test_a_barfly_remark_that_is_machinery_is_dropped(cfg, store):
-    h, tr, now = setup(cfg, store, FakeProvider(LEAKED[0]))
-    from chickenbot.barfly import QUIET
+    h, tr, now_ms = setup(cfg, store, FakeProvider(LEAKED[0]))
+    from chickenbot.barfly import QUIET_MS
 
     from .test_welcome import spoke
 
-    spoke(store, "nate", now - QUIET - 60, realm="fake")
-    await Barfly(h).tick(now)
+    spoke(store, "nate", now_ms - QUIET_MS - 60_000, realm="fake")
+    await Barfly(h).tick(now_ms)
     await h.drain()
     assert tr.sent == []
 
@@ -65,13 +65,13 @@ async def test_an_answer_that_is_machinery_is_dropped(cfg, store):
 
 
 async def test_a_real_remark_still_goes_out(cfg, store):
-    from chickenbot.barfly import QUIET
+    from chickenbot.barfly import QUIET_MS
 
     from .test_welcome import spoke
 
-    h, tr, now = setup(cfg, store, FakeProvider("quiet in here"))
-    spoke(store, "nate", now - QUIET - 60, realm="fake")
-    await Barfly(h).tick(now)
+    h, tr, now_ms = setup(cfg, store, FakeProvider("quiet in here"))
+    spoke(store, "nate", now_ms - QUIET_MS - 60_000, realm="fake")
+    await Barfly(h).tick(now_ms)
     await h.drain()
     assert tr.sent == [("#soup", "quiet in here")]
 
@@ -90,7 +90,7 @@ async def test_the_barfly_may_look_but_not_touch(cfg, store):
     """It was reaching for a tool when it wrote a call into #lobby, and the
     reach was right. What it may not do is change anything: nobody asked, so
     nothing should be different afterwards."""
-    from chickenbot.barfly import QUIET
+    from chickenbot.barfly import QUIET_MS
 
     from .test_welcome import spoke
 
@@ -102,9 +102,9 @@ async def test_the_barfly_may_look_but_not_touch(cfg, store):
             return "quiet in here"
 
     cfg.llm.tools = True
-    h, tr, now = setup(cfg, store, Watching())
-    spoke(store, "nate", now - QUIET - 60, realm="fake")
-    await Barfly(h).tick(now)
+    h, tr, now_ms = setup(cfg, store, Watching())
+    spoke(store, "nate", now_ms - QUIET_MS - 60_000, realm="fake")
+    await Barfly(h).tick(now_ms)
     await h.drain()
 
     offered = {s["function"]["name"] for s in seen["toolbox"].schemas}
@@ -113,7 +113,7 @@ async def test_the_barfly_may_look_but_not_touch(cfg, store):
 
 
 async def test_with_tools_switched_off_it_reaches_nothing(cfg, store):
-    from chickenbot.barfly import QUIET
+    from chickenbot.barfly import QUIET_MS
 
     from .test_welcome import spoke
 
@@ -125,9 +125,9 @@ async def test_with_tools_switched_off_it_reaches_nothing(cfg, store):
             return "quiet in here"
 
     cfg.llm.tools = False
-    h, tr, now = setup(cfg, store, Watching())
-    spoke(store, "nate", now - QUIET - 60, realm="fake")
-    await Barfly(h).tick(now)
+    h, tr, now_ms = setup(cfg, store, Watching())
+    spoke(store, "nate", now_ms - QUIET_MS - 60_000, realm="fake")
+    await Barfly(h).tick(now_ms)
     await h.drain()
     assert seen["toolbox"].schemas == []
 

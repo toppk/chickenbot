@@ -12,6 +12,8 @@ import logging
 import time
 from typing import TYPE_CHECKING
 
+from . import clock
+from .clock import ms
 from .attention import SILENT
 from .brain import ProviderError, leaked_markup
 from .observe import activity, note
@@ -23,9 +25,9 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 TICK = 300.0
-QUIET = 45 * 60  # a lull, rather than a gap between two sentences
-SPELL = 4 * 3600  # at most one unprompted remark per room per spell
-TODAY = 8 * 3600  # somebody must have been around this recently: not an empty room
+QUIET_MS = ms(45 * 60)  # a lull, rather than a gap between two sentences
+SPELL_MS = ms(4 * 3600)  # at most one unprompted remark per room per spell
+TODAY_MS = ms(8 * 3600)  # somebody must have been around this recently: not an empty room
 
 REMARK = (
     "Nobody has said anything for a while, and no one has asked you anything. "
@@ -59,34 +61,34 @@ class Barfly:
                 log.exception("barfly tick failed")
             await asyncio.sleep(TICK)
 
-    async def tick(self, now: float | None = None) -> None:
-        now = now or time.time()
+    async def tick(self, now_ms: int | None = None) -> None:
+        now_ms = now_ms or clock.now_ms()
         for tr in self.h.transports.values():
             for room in list(tr.rooms):
-                if self._due(tr.realm, room, now):
-                    await self.remark(tr, room, now)
+                if self._due(tr.realm, room, now_ms):
+                    await self.remark(tr, room, now_ms)
 
-    def _due(self, realm: str, room: str, now: float) -> bool:
+    def _due(self, realm: str, room: str, now_ms: int) -> bool:
         # Some rooms want it present and quiet, whatever it has learned.
         if not self.h.policies.of(realm, room).barfly:
             return False
         # A guest does not hold forth in a room it has only just walked into.
         if not self.h.rooms.may_act_out(realm, room):
             return False
-        if not self.h.rhythm.lively_now(realm, room, now):
+        if not self.h.rhythm.lively_now(realm, room, now_ms / 1000):
             return False
-        last = self.h.store.last_human_line(realm, room)
-        if not last or not QUIET <= now - last <= TODAY:
+        last_ms = self.h.store.last_human_line(realm, room)
+        if not last_ms or not QUIET_MS <= now_ms - last_ms <= TODAY_MS:
             return False
-        return now - self._spoke.get(f"{realm}/{room}", 0.0) >= SPELL
+        return now_ms - self._spoke.get(f"{realm}/{room}", 0) >= SPELL_MS
 
-    async def remark(self, tr, room: str, now: float) -> None:
+    async def remark(self, tr, room: str, now_ms: int) -> None:
         from .commands import Context, compose
 
         if self.h.provider is None:
             return
         # Claimed before the call, so a slow model cannot be asked twice.
-        self._spoke[f"{tr.realm}/{room}"] = now
+        self._spoke[f"{tr.realm}/{room}"] = now_ms
         with activity(kind="barfly", realm=tr.realm, room=room, nick=tr.me, account="-"):
             ctx = Context(
                 handler=self.h,

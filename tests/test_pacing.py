@@ -266,12 +266,12 @@ async def test_two_people_are_not_run_together(cfg, store):
 async def test_a_later_remark_is_its_own_utterance(cfg, store):
     import time as clock
 
-    from chickenbot.commands import BREATH, render_scrollback
+    from chickenbot.commands import BREATH_MS, render_scrollback
 
     store._db.execute(
         "INSERT INTO chatlog (ts_ms, realm, channel, nick, nick_key, account, kind, text)"
         " VALUES (?, 'fake', '#chan', 'nate', 'nate', 'nate', 'privmsg', 'first')",
-        (int(clock.time()) - BREATH - 60,),
+        (int(clock.time() * 1000) - BREATH_MS - 60_000,),
     )
     store._db.commit()
     await store.log_line("fake", "#chan", "nate", "nate", "second", "privmsg")

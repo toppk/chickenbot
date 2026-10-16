@@ -15,7 +15,7 @@ from . import irccase
 
 MAX_REVISIONS = 50
 
-from .clock import ms, now_ms
+from .clock import millis, ms, now_ms
 
 # This database's own version, independent of any other. Bumped for anything
 # that changes the schema OR the interpretation of what is already in it: a
@@ -547,7 +547,9 @@ class Store:
 
         return await self._run(go)
 
-    async def recent(self, realm: str, channel: str, limit: int = 40, since: int = 0, least: int = 0) -> list[Line]:
+    async def recent(
+        self, realm: str, channel: str, limit: int = 40, since_ms: int = 0, least: int = 0
+    ) -> list[Line]:
         """The tail of the room. `since` bounds it in time, because twenty lines
         in a quiet channel can reach back a day and a conversation does not.
         `least` keeps that from returning nothing at all when the room is cold.
@@ -565,8 +567,8 @@ class Store:
                 " ORDER BY id DESC LIMIT ?",
                 (realm, self.fold(realm, channel), limit),
             ).fetchall()
-            if since:
-                fresh = [r for r in rows if r["ts_ms"] >= since]
+            if since_ms:
+                fresh = [r for r in rows if r["ts_ms"] >= millis(since_ms, "a scrollback window")]
                 rows = fresh if len(fresh) >= least else rows[:least]
             return [Line(r["ts_ms"], r["channel"], r["nick"], r["text"], r["kind"], r["account"]) for r in reversed(rows)]
 
@@ -718,10 +720,10 @@ class Store:
         now = now_ms()
         return {name: self.activity_cost(now - ms(seconds) if seconds else 0) for name, seconds in windows.items()}
 
-    def activity_cost(self, since: int = 0) -> tuple[int, float]:
+    def activity_cost(self, since_ms: int = 0) -> tuple[int, float]:
         row = self._db.execute(
             "SELECT COUNT(*) AS n, COALESCE(SUM(cost), 0) AS spent FROM activity WHERE ts_ms >= ? AND cost > 0",
-            (since,),
+            (millis(since_ms, "a cost window"),),
         ).fetchone()
         return int(row["n"]), float(row["spent"])
 
@@ -1312,7 +1314,7 @@ class Store:
 
         return await self._run(go)
 
-    async def due_jobs(self, now: int) -> list[Job]:
+    async def due_jobs(self, now_ms: int) -> list[Job]:
         """Claim everything due. Rows are deleted as they are handed out, so a
         job cannot fire twice even if handling it is slow."""
 
@@ -1320,7 +1322,7 @@ class Store:
             rows = self._db.execute(
                 "SELECT id, due_at_ms, realm, room, nick, account, is_group, command"
                 " FROM job WHERE due_at_ms <= ? ORDER BY due_at_ms",
-                (now,),
+                (millis(now_ms, "a job deadline"),),
             ).fetchall()
             if rows:
                 self._db.executemany("DELETE FROM job WHERE id = ?", [(r["id"],) for r in rows])

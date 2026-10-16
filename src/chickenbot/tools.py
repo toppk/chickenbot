@@ -366,7 +366,7 @@ async def tool_chan_history(h: Handler, ctx: Context, args: dict) -> str:
         lines = await h.store.search(realm, room, contains, limit=limit, since=since)
         lines = list(reversed(lines))
     else:
-        lines = await h.store.recent(realm, room, limit=limit, since=since)
+        lines = await h.store.recent(realm, room, limit=limit, since_ms=since)
     if not lines:
         window = f"the last {hours}h"
         return f"nothing matching {contains!r} in {window}" if contains else f"nothing said in {room} in {window}"

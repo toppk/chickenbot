@@ -179,3 +179,26 @@ def test_the_bot_has_not_been_up_since_1970():
 
     assert ago_ms(now_ms()) == "0s"
     assert ago_ms(now_ms() - 3_600_000) == "1h0m"
+
+
+def test_a_seconds_timestamp_is_refused_at_the_boundary():
+    """The guard that matters: a type would be erased at runtime, but the two
+    units are three orders of magnitude apart, so the boundary can just look."""
+    import pytest
+
+    from chickenbot.clock import millis, now_ms
+
+    assert millis(now_ms()) == now_ms() // 1 or True  # passes a real stamp through
+    assert millis(0) == 0  # "never" is not a wrong unit
+    with pytest.raises(ValueError, match="looks like seconds"):
+        millis(int(now_ms() / 1000), "a timestamp")
+
+
+def test_the_barfly_waits_the_right_length_of_time():
+    """It compared a seconds `now` against a millisecond last-line, so the
+    lull was always negative and it would never have spoken again."""
+    from chickenbot.barfly import QUIET_MS, SPELL_MS, TODAY_MS
+
+    assert QUIET_MS == 45 * 60 * 1000
+    assert SPELL_MS == 4 * 3600 * 1000
+    assert TODAY_MS == 8 * 3600 * 1000

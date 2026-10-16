@@ -23,7 +23,7 @@ from .attention import (
     addressed_elsewhere,
 )
 from .brain import Provider, ProviderError, collect_legs, leaked_markup, note_wait
-from .clock import ms, now_ms
+from .clock import millis, ms, now_ms
 from .config import Config
 from .dossier import Dossiers
 from .events import Event, Kind
@@ -52,7 +52,7 @@ HISTORY_FLOOR = 4
 # Seconds within which consecutive lines from one speaker are one utterance.
 # Our own replies chunk at 400 characters and so does everybody else's.
 RETRY_CAP = 300  # however late a tool says it will be, stop waiting here
-BREATH = 8
+BREATH_MS = ms(8)
 
 # How often a stranger who messages privately is told why nothing happens.
 TURN_AWAY_EVERY = 3600
@@ -152,7 +152,7 @@ def _same_breath(previous, line) -> bool:
     return (
         previous.nick == line.nick
         and getattr(previous, "kind", "") == getattr(line, "kind", "")
-        and 0 <= line.ts_ms - previous.ts_ms <= BREATH
+        and 0 <= line.ts_ms - previous.ts_ms <= BREATH_MS
     )
 
 
@@ -383,7 +383,7 @@ def names(line: str, word: str) -> bool:
 def ago_ms(ts_ms: int) -> str:
     """Takes the stored clock. Renamed with the columns: a timestamp handed
     to the old seconds version read as 1970 rather than as wrong."""
-    seconds = max(0, (now_ms() - ts_ms) // 1000)
+    seconds = max(0, (now_ms() - millis(ts_ms, "an age")) // 1000)
     if seconds < 60:
         return f"{seconds}s"
     if seconds < 3600:
@@ -488,7 +488,7 @@ class Handler:
             return ""
         since = now_ms() - ms(self.cfg.llm.history_minutes * 60) if self.cfg.llm.history_minutes else 0
         recent = await self.store.recent(
-            ctx.transport.realm, ctx.channel, self.cfg.llm.history_lines, since=since, least=HISTORY_FLOOR
+            ctx.transport.realm, ctx.channel, self.cfg.llm.history_lines, since_ms=since, least=HISTORY_FLOOR
         )
         return render_scrollback(recent)
 
