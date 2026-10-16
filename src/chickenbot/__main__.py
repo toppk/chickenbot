@@ -35,6 +35,7 @@ from .store import Store
 from .toolsocket import ToolServer
 from .transport import Transport
 from .transports import build
+from .transports.irc_transport import IRCTransport
 from .vibe import VibeCheck
 from .watcher import Watcher
 
@@ -593,6 +594,9 @@ class _Preview:
 
     name = "irc"
     caps = frozenset()
+    # Borrowed, not copied: a preview that words the medium differently from
+    # the transport is a preview of something nobody is sent.
+    renders = IRCTransport.renders
 
     def __init__(self, realm: str, me: str) -> None:
         self.realm = realm

@@ -296,3 +296,26 @@ def test_prose_about_tool_protocols_is_not_mistaken_for_one():
         "chrisk: the agents use github comments as a comms channel",
     ):
         assert leaked_markup(honest) == "", honest
+
+
+def test_the_turn_says_what_the_network_renders(cfg, store):
+    """The soul stopped describing one network's formatting, so the transport
+    has to actually be asked -- it was defined and tested but never read."""
+    from chickenbot.commands import Context, Handler, compose
+
+    from .conftest import FakeTransport
+
+    tr = FakeTransport()
+    h = Handler(cfg, store, None, None)
+    ctx = Context(
+        handler=h,
+        transport=tr,
+        nick="toppk",
+        account="toppk",
+        channel="#chan",
+        args="",
+        is_owner=False,
+        in_channel=True,
+    )
+    system, _prompt = compose(h, ctx, scrollback="")
+    assert tr.renders.strip() in system

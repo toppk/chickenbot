@@ -13,6 +13,7 @@ class FakeTransport:
 
     name = "fake"
     me = "chickenbot"
+    renders = " Plain text only here: markup of any kind arrives literally."
 
     def __init__(self, *, owners=("alice",), ignored=(), caps=ALL_CAPS, ops=None, here=()) -> None:
         self.caps = frozenset(caps)

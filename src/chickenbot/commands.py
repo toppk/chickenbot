@@ -209,7 +209,14 @@ def compose(
     can show the real thing rather than an approximation of it.
     """
     # The suffix is a safety rail, not personality: the soul may not edit it.
-    system = h.soul.text() + SYSTEM_SUFFIX + tools_note(toolbox) + SILENCE_NOTE + (FOLLOW_NOTE if following else "")
+    system = (
+        h.soul.text()
+        + SYSTEM_SUFFIX
+        + ctx.transport.renders
+        + tools_note(toolbox)
+        + SILENCE_NOTE
+        + (FOLLOW_NOTE if following else "")
+    )
 
     # Volatile context goes in the user turn, not the system prompt, so the
     # stable prefix stays cacheable.
