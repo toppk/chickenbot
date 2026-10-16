@@ -194,7 +194,8 @@ class Bartender:
             known.append(f"{handle}:\n{existing}")
         transcript = "\n".join(
             f"[{time.strftime('%H:%M', local_ms(ts))}] <{nick}> {text}"
-            for ts, nick, _account, kind, text, _note in lines
+            + (f"\n{' ' * 8}note to self: {note}" if note else "")
+            for ts, nick, _account, kind, text, note in lines
             if kind in ("privmsg", "command", "self", "bot")
         )
         return (

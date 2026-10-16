@@ -1,6 +1,7 @@
 # A note to self, carried beside the line
 
-Status: planned. Written before the implementation, deliberately, so the
+Status: built, and scored at the bottom. Written before the implementation
+so the
 prediction can be scored against what actually happened. The scorecard at
 the bottom is filled in afterwards and not before.
 
@@ -151,4 +152,70 @@ history rather than in a side table.
 
 ## Scorecard
 
-Filled in after the implementation.
+Status: built. Scored against the predictions above, which were written
+before any of it.
+
+### Right
+
+Every file predicted was touched, and no file was touched that was not
+predicted. The schema list, both history paths, both `_prompt` builders, the
+`log`/`export` tuple unpacking, `SILENCE_NOTE`, the gate refinement, and the
+testing list all landed as written.
+
+The widest edge was called correctly: widening `conversation()` from a
+5-tuple to a 6-tuple broke **226 tests** in one go, across bartender, vibe,
+`log`, `export` and two test files. That was the predicted shape of the
+blast radius, and knowing it was coming made it a mechanical fix rather than
+a surprise.
+
+The risky part was called correctly too. `say()` is shared with command
+paths, so the note is set on the `Context` and consumed by the first `say`
+-- read and cleared -- which is what the plan predicted. A test holds it: a
+second `say()` in the same turn carries nothing.
+
+"No eaccel changes" held. `annotate_reply` is a built-in tool, so the
+`[tools.grants.*]` stanzas do not apply to it at all -- those gate `ext_`
+tools only. Nothing to add, no restart needed beyond the deploy, no soul
+patch, no migration to run.
+
+### Wrong, or missed
+
+**The version gate needed more than a refinement; it needed a test that it
+is possible to arrive at all.** `IN_PLACE` was predicted. What was not: a
+version must be *either* in `IN_PLACE` or have a migration script, or a
+database is stranded with no way forward. That is now asserted for every
+step from 1 to `SCHEMA_VERSION`.
+
+**A test that assumed the latest script targets the current version.**
+`test_each_database_carries_its_own_version` compared the v0_v1 script's
+target against `SCHEMA_VERSION`, which was true while there was one step and
+false the moment there were two. A script's target is the version it was
+written for and never moves. Not predicted; found by the suite.
+
+**A multi-line SQL comment before the last column breaks `DROP COLUMN`.**
+The first `note` column was documented with two comment lines directly above
+it. SQLite rewrites the stored schema text on `ALTER TABLE ... DROP COLUMN`
+and leaves the comment dangling: `incomplete input`. `_migrate` already
+drops columns from `room`, so this was a real landmine, not just a test
+problem. The comment is a trailing one on the column line now. Not predicted
+at all.
+
+**The `millis` guard caught the test fixtures.** `Line(1, ...)` as a
+timestamp raises "looks like seconds, not milliseconds" -- which is the
+guard working, a night after it was written, on code written to exercise
+something else entirely.
+
+**The render needed to say whose line it is.** Predicted as "own lines
+only", implemented first as "any line with a note". Nothing else writes the
+column, so it could not have gone wrong -- but it stated the wrong rule. It
+checks `kind in ("self", "action")` now.
+
+**The export gained a field.** Not predicted: `export` unpacks the tuple,
+and once `note` is in hand, discarding it from the owner's complete record
+is the wrong call. Ruff caught the unused variable and the question answered
+itself.
+
+### Not scored
+
+Whether it is any good -- whether the aside actually relaxes the spoken line
+-- is not something tests can say. That wants reading transcripts.

@@ -44,8 +44,10 @@ def addressed_elsewhere(claim: str) -> bool:
 SILENCE_NOTE = (
     f" Saying nothing has one spelling: {SILENT}, alone, with nothing before or after it. "
     "That string is read by code and never reaches anyone. Everything else you write is sent to "
-    "the room exactly as typed -- there is no aside, no stage direction, no note to your "
-    "maintainer, and no way to think out loud. A line naming you does not oblige an answer: "
+    "the room exactly as typed: no stage direction, no note to your maintainer, no thinking "
+    "out loud. The one aside you have is `annotate_reply`, when it is offered -- a sentence "
+    "kept beside your own line and shown back only to you. Anything you want to say that is "
+    "not for the room goes there, or nowhere. A line naming you does not oblige an answer: "
     "someone quoting you, or asking a third party about you, needs nothing from you. "
     f"Decline with {SILENT}, never with a sentence about declining."
 )

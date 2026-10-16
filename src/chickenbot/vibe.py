@@ -111,7 +111,9 @@ class VibeCheck:
     def _prompt(self, tr: Transport, room: str, lines: list) -> str:
         previous = self.h.store.room_observed(tr.realm, room)
         transcript = "\n".join(
-            f"[{time.strftime('%a %H:%M', local_ms(ts))}] <{nick}> {text}" for ts, nick, _a, _k, text, _note in lines
+            f"[{time.strftime('%a %H:%M', local_ms(ts))}] <{nick}> {text}"
+            + (f"\n{' ' * 8}note to self: {note}" if note else "")
+            for ts, nick, _a, _k, text, note in lines
         )
         head = f"Room {room} on {tr.realm}."
         if previous:

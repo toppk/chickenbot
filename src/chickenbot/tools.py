@@ -18,6 +18,7 @@ from .brain import now_ms
 from .clock import local_ms, ms
 from .observe import note_many
 from .rooms import GUEST
+from .store import NOTE_CHARS
 from .transport import BAN, TOPIC
 
 if TYPE_CHECKING:  # commands imports us, so this stays a type-only edge
@@ -224,6 +225,37 @@ async def tool_current_time(h: Handler, ctx: Context, args: dict) -> str:
     import datetime
 
     return datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+
+@tool(
+    "annotate_reply",
+    description=(
+        "Keep one short note to yourself beside the reply you are about to send. "
+        "It is never sent anywhere: it comes back to you, and only to you, on your own "
+        "line in the conversation history, where it is the one place you have for an "
+        "aside.\n\n"
+        "Use it for what the reply cannot carry: why you said what you said, what you "
+        "suspect but would not assert out loud, what you looked up and left out, what to "
+        "pick up if the subject returns. One sentence, 140 characters, and anything longer "
+        "is cut. Optional, and most replies do not need one.\n\n"
+        "It is not a diary and nobody tidies it: write what would help you read this "
+        "exchange cold in an hour, not how you felt about it."
+    ),
+    params={
+        "type": "object",
+        "properties": {"note": {"type": "string", "description": "one sentence, to yourself, 140 characters"}},
+        "required": ["note"],
+    },
+)
+async def tool_annotate_reply(h: Handler, ctx: Context, args: dict) -> str:
+    """Written onto the Context and consumed by the first `say`, so it lands
+    beside the reply it was written about rather than on whatever gets said
+    next in the same turn."""
+    note = " ".join(str(args.get("note") or "").split())[:NOTE_CHARS]
+    if not note:
+        return "error: a note needs something in it"
+    ctx.note = note
+    return f"noted, beside your reply: {note}"
 
 
 # -- core tools ----------------------------------------------------------

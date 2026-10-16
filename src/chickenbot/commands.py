@@ -82,13 +82,19 @@ class Context:
     # This request is itself a second look at an earlier one. A second look
     # never earns a third: that is the whole loop prevention.
     again: bool = False
+    # An aside written by `annotate_reply`, waiting for the line it belongs
+    # beside. Consumed by the first `say`, because that is the reply it was
+    # written about: a command that speaks later in the same turn, or a
+    # second sentence, is not what was annotated.
+    note: str = ""
 
     def say(self, text: str) -> None:
         self.transport.say(self.channel, text)
         # Logged too, or the bot cannot see what it just said and every
         # follow-up arrives as a cold start.
         if self.handler is not None:
-            self.handler.remember_own(self.transport, self.channel, text)
+            said, self.note = self.note, ""
+            self.handler.remember_own(self.transport, self.channel, text, note=said)
 
     def can(self, action: str) -> bool:
         return action in self.transport.caps
@@ -145,6 +151,11 @@ def render_scrollback(recent: list) -> str:
             out[-1] += " " + line.text
         else:
             out.append(f"[{ago_ms(line.ts_ms)} ago] <{speaker(line)}> {line.text}")
+        # Its own aside, beside the line it was written about. Indented and
+        # labelled rather than parenthesised: a parenthetical shown back as
+        # ordinary history teaches exactly what the suffix forbids.
+        if line.note and line.kind in ("self", "action"):
+            out.append(f"{' ' * 22}note to self: {line.note}")
         previous = line
     return "\n".join(out)
 
@@ -607,9 +618,13 @@ class Handler:
             self._rooms[key] = (tr, room)
             self.attention.engage(key, tr.me, self.follow_window(tr, room))
 
-    def remember_own(self, tr: Transport, room: str, text: str, kind: str = "self") -> None:
+    def remember_own(self, tr: Transport, room: str, text: str, kind: str = "self", note: str = "") -> None:
         """Fire and forget: the reply has already gone out, logging must not block it."""
-        watched(self._writes, self.store.log_line(tr.realm, room, tr.me, "", text, kind), what="logging our own line")
+        watched(
+            self._writes,
+            self.store.log_line(tr.realm, room, tr.me, "", text, kind, note=note),
+            what="logging our own line",
+        )
 
     def aliases_changed(self, realm: str) -> None:
         """Somebody learned a new handle. Tools watching that realm want to know."""
