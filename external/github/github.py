@@ -32,6 +32,7 @@ class GitHub:
         if token:
             headers["Authorization"] = f"Bearer {token}"
         self.base = base_url.rstrip("/")
+        self.token = token  # GraphQL has no anonymous tier, so this is asked about
         self.client = httpx.AsyncClient(timeout=30.0, headers=headers, follow_redirects=True)
 
     async def aclose(self) -> None:
@@ -61,6 +62,88 @@ class GitHub:
             for b in (payload if isinstance(payload, list) else [])
             if b.get("name")
         ]
+
+    BRANCH_TIPS = (
+        "query($owner:String!,$name:String!,$n:Int!){repository(owner:$owner,name:$name){"
+        "defaultBranchRef{name} refs(refPrefix:\"refs/heads/\",first:$n){totalCount nodes{name "
+        "target{... on Commit{committedDate oid messageHeadline author{user{login}}}}}}}}"
+    )
+
+    async def graphql(self, query: str, **variables) -> dict:
+        """One POST. GraphQL has no anonymous tier at all, unlike REST."""
+        if not self.token:
+            raise RuntimeError("github graphql needs a GITHUB_TOKEN")
+        response = await self.client.post(f"{self.base}/graphql", json={"query": query, "variables": variables})
+        response.raise_for_status()
+        body = response.json()
+        if errors := body.get("errors"):
+            raise RuntimeError(f"github rejected the query ({str(errors[0].get('message', ''))[:80]})")
+        return body.get("data") or {}
+
+    async def branch_tips(self, repo: str, limit: int = 100) -> tuple[str, list[dict]]:
+        """Every branch and when it last moved, newest first, in one call.
+
+        The default branch is routinely the stalest thing in a repository --
+        the work is on branches and the merge comes later -- so a tool that
+        reads only `main` reports a month of silence on a repo that moved
+        yesterday. REST cannot answer this: `/branches` carries no dates, so
+        it would be a call per branch.
+        """
+        owner, _, name = repo.partition("/")
+        # RefOrder cannot sort branches by commit date -- only tags -- so the
+        # ordering that matters is done here.
+        data = await self.graphql(self.BRANCH_TIPS, owner=owner, name=name, n=max(1, min(limit, 100)))
+        repository = data.get("repository") or {}
+        if not repository:
+            return "", []
+        default = ((repository.get("defaultBranchRef") or {}).get("name")) or ""
+        out = []
+        for node in (repository.get("refs") or {}).get("nodes") or []:
+            target = node.get("target") or {}
+            if not target.get("committedDate"):
+                continue  # an annotated tag or an empty branch is not a tip
+            out.append(
+                {
+                    "name": node.get("name", ""),
+                    "sha": str(target.get("oid", ""))[:7],
+                    "ts": _ts(target.get("committedDate")),
+                    "who": ((target.get("author") or {}).get("user") or {}).get("login") or "",
+                    "subject": str(target.get("messageHeadline", "")),
+                }
+            )
+        out.sort(key=lambda b: b["ts"], reverse=True)
+        return default, out
+
+    async def commits(self, repo: str, branch: str = "", limit: int = 10) -> list[dict]:
+        """What a repository has actually had pushed to it, live.
+
+        The events feed is a timeline, generated asynchronously and often
+        hours behind; this is the repository itself. A push that no event
+        has been published for is visible here immediately, which is the
+        whole reason this exists alongside the mirror.
+        """
+        params = {"per_page": max(1, min(limit, 50))}
+        if branch:
+            params["sha"] = branch
+        payload, _ = await self.get(f"/repos/{repo}/commits", **params)
+        out = []
+        for raw in payload if isinstance(payload, list) else []:
+            commit = raw.get("commit") or {}
+            out.append(
+                {
+                    "sha": str(raw.get("sha", ""))[:7],
+                    "ts": _ts((commit.get("committer") or {}).get("date")),
+                    "who": ((raw.get("author") or {}).get("login") or (commit.get("author") or {}).get("name") or ""),
+                    "subject": str(commit.get("message", "")).split("\n", 1)[0],
+                }
+            )
+        return out
+
+    async def pushed_at(self, repo: str) -> int:
+        """When the repository itself says it last moved. One cheap call, and
+        unlike the events feed it is never behind."""
+        payload, _ = await self.get(f"/repos/{repo}")
+        return _ts(payload.get("pushed_at")) if isinstance(payload, dict) else 0
 
     async def issue(self, repo: str, number: int, comments: int = 0) -> dict:
         """One issue or pull request, with its body and the latest comments.
