@@ -32,6 +32,19 @@ def valid_name(name: str) -> bool:
     return bool(name) and len(name) <= 48 and set(name) <= _VALID
 
 
+DESCRIPTION_MAX = 2000  # a bound on a subprocess's input, not an editorial one
+
+
+def _described(name: str, raw: object) -> str:
+    """Cut, but never quietly: the cap used to be 400 and silently removed the
+    half of a description that says when NOT to call the tool."""
+    text = str(raw or "")
+    if len(text) <= DESCRIPTION_MAX:
+        return text
+    log.warning("%s describes itself in %d chars; keeping the first %d", name, len(text), DESCRIPTION_MAX)
+    return text[:DESCRIPTION_MAX]
+
+
 class Connection:
     """One external process. Its tools live only as long as it does."""
 
@@ -91,7 +104,7 @@ class Connection:
                 name=name,
                 run=self._runner(name),
                 owner=grant.owner,
-                description=str(item.get("description", ""))[:400],
+                description=_described(name, item.get("description", "")),
                 params=params,
                 requires=frozenset(grant.requires),
                 # The tool knows whether calling it changes anything; nothing

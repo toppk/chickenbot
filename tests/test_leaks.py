@@ -319,3 +319,29 @@ def test_the_turn_says_what_the_network_renders(cfg, store):
     )
     system, _prompt = compose(h, ctx, scrollback="")
     assert tr.renders.strip() in system
+
+
+def test_a_long_tool_description_is_not_cut_in_silence(caplog):
+    """The cap was 400 and six of the github tools were over it, so the half
+    of each description saying when NOT to call it never reached the model."""
+    import logging
+
+    from chickenbot.toolsocket import DESCRIPTION_MAX, _described
+
+    fits = "x" * DESCRIPTION_MAX
+    assert _described("ext_whatever", fits) == fits
+
+    with caplog.at_level(logging.WARNING):
+        got = _described("ext_wordy", "y" * (DESCRIPTION_MAX + 1))
+    assert len(got) == DESCRIPTION_MAX
+    assert "ext_wordy" in caplog.text
+
+
+def test_every_github_tool_describes_itself_within_the_cap():
+    """A description that does not fit is one the bot never fully reads."""
+    from external.github.__main__ import TOOLS
+
+    from chickenbot.toolsocket import DESCRIPTION_MAX
+
+    over = {t["name"]: len(t["description"]) for t in TOOLS if len(t["description"]) > DESCRIPTION_MAX}
+    assert not over, over
