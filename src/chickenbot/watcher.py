@@ -58,6 +58,7 @@ class Watcher:
         if cfg.token:
             headers["Authorization"] = f"Bearer {cfg.token}"
         self.client = httpx.AsyncClient(timeout=20.0, headers=headers)
+        self._public: dict[str, bool] = {}  # asked once per repo, not per poll
 
     async def aclose(self) -> None:
         await self.client.aclose()
@@ -85,7 +86,29 @@ class Watcher:
                 except Exception:
                     log.exception("poll %s %s failed", watch.slug, feed)
 
+    async def may_read(self, watch: Watch) -> bool:
+        """A token wide enough to read a private repo is not permission to
+        announce one into a channel. Asked once per repo and remembered."""
+        if self.cfg.private_repos:
+            return True
+        if (known := self._public.get(watch.slug)) is not None:
+            return known
+        try:
+            response = await self.client.get(f"{API}/repos/{watch.owner}/{watch.repo}")
+        except httpx.RequestError as exc:
+            log.warning("github unreachable for %s: %s", watch.slug, exc)
+            return False  # unknown visibility is not permission
+        if response.status_code >= 400:
+            return False
+        private = bool((response.json() or {}).get("private"))
+        if private:
+            log.warning("%s is private and github.private_repos is off; not announcing it", watch.slug)
+        self._public[watch.slug] = not private
+        return not private
+
     async def poll(self, watch: Watch, feed: str) -> None:
+        if not await self.may_read(watch):
+            return
         last_id, etag = await self.store.get_cursor(watch.id, feed)
         headers = {"If-None-Match": etag} if etag else {}
         path, params = _endpoint(feed)

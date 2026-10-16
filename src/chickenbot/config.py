@@ -255,6 +255,10 @@ class GitHubConfig:
     token_env: str = "GITHUB_TOKEN"
     summarize: bool = True
     max_per_poll: int = 3
+    # Off here, on in a deployment whose whole point is private work. A token
+    # wide enough to read a private repo says nothing about whether this room
+    # should hear it, so the two are decided separately.
+    private_repos: bool = False
 
     @property
     def token(self) -> str:

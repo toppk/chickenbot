@@ -27,12 +27,16 @@ def _ts(value: str | None) -> int:
 
 
 class GitHub:
-    def __init__(self, token: str = "", base_url: str = API) -> None:
+    def __init__(self, token: str = "", base_url: str = API, private: bool = False) -> None:
         headers = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"}
         if token:
             headers["Authorization"] = f"Bearer {token}"
         self.base = base_url.rstrip("/")
         self.token = token  # GraphQL has no anonymous tier, so this is asked about
+        # A token wide enough to read a private repo is not a decision to read
+        # one. Off by default: an instance that means to must say so.
+        self.private = private
+        self._public: dict[str, bool] = {}
         self.client = httpx.AsyncClient(timeout=30.0, headers=headers, follow_redirects=True)
 
     async def aclose(self) -> None:
@@ -52,10 +56,27 @@ class GitHub:
         response.raise_for_status()
         return response.json(), response.headers.get("etag", "")
 
+    async def guard(self, repo: str) -> None:
+        """Raise rather than read a private repository. Asked once per repo.
+
+        The alternative -- dropping the token for these calls so private
+        repos simply 404 -- is enforcement by construction but costs the
+        authenticated rate limit, 5000 an hour against 60.
+        """
+        if self.private or self._public.get(repo):
+            return
+        payload, _ = await self.get(f"/repos/{repo}")
+        if not isinstance(payload, dict) or not payload:
+            return  # 404 or gone: the call itself will say so, honestly
+        if payload.get("private"):
+            raise RuntimeError(f"{repo} is private and this instance does not read private repositories")
+        self._public[repo] = True
+
     async def branches(self, repo: str) -> list[dict]:
         """Branch names for a repo, one call. Names only: GitHub does not put
         a date on them, and a call per branch to find out is not worth it --
         when each one last moved is already in the activity we mirror."""
+        await self.guard(repo)
         payload, _ = await self.get(f"/repos/{repo}/branches", per_page=PER_PAGE)
         return [
             {"name": b.get("name", ""), "protected": bool(b.get("protected"))}
@@ -65,7 +86,7 @@ class GitHub:
 
     BRANCH_TIPS = (
         "query($owner:String!,$name:String!,$n:Int!){repository(owner:$owner,name:$name){"
-        "defaultBranchRef{name} refs(refPrefix:\"refs/heads/\",first:$n){totalCount nodes{name "
+        "isPrivate defaultBranchRef{name} refs(refPrefix:\"refs/heads/\",first:$n){totalCount nodes{name "
         "target{... on Commit{committedDate oid messageHeadline author{user{login}}}}}}}}"
     )
 
@@ -96,6 +117,8 @@ class GitHub:
         repository = data.get("repository") or {}
         if not repository:
             return "", []
+        if repository.get("isPrivate") and not self.private:
+            raise RuntimeError(f"{repo} is private and this instance does not read private repositories")
         default = ((repository.get("defaultBranchRef") or {}).get("name")) or ""
         out = []
         for node in (repository.get("refs") or {}).get("nodes") or []:
@@ -122,6 +145,7 @@ class GitHub:
         has been published for is visible here immediately, which is the
         whole reason this exists alongside the mirror.
         """
+        await self.guard(repo)
         params = {"per_page": max(1, min(limit, 50))}
         if branch:
             params["sha"] = branch
@@ -143,7 +167,11 @@ class GitHub:
         """When the repository itself says it last moved. One cheap call, and
         unlike the events feed it is never behind."""
         payload, _ = await self.get(f"/repos/{repo}")
-        return _ts(payload.get("pushed_at")) if isinstance(payload, dict) else 0
+        if not isinstance(payload, dict):
+            return 0
+        if payload.get("private") and not self.private:
+            raise RuntimeError(f"{repo} is private and this instance does not read private repositories")
+        return _ts(payload.get("pushed_at"))
 
     async def issue(self, repo: str, number: int, comments: int = 0) -> dict:
         """One issue or pull request, with its body and the latest comments.
@@ -153,6 +181,7 @@ class GitHub:
         increasingly where agents talk to each other -- so reading one needs
         a call rather than a cache.
         """
+        await self.guard(repo)
         payload, _ = await self.get(f"/repos/{repo}/issues/{number}")
         if not isinstance(payload, dict) or not payload:
             return {}
@@ -192,6 +221,7 @@ class GitHub:
         The raw media type, because the JSON form is base64 and the HTML form
         is a page. "" when there is none, which is not an error.
         """
+        await self.guard(repo)
         response = await self.client.get(
             f"{self.base}/repos/{repo}/readme",
             headers={"Accept": "application/vnd.github.raw+json"},
@@ -231,6 +261,10 @@ class GitHub:
         open anywhere. Discussions are not searchable this way -- they need
         the GraphQL API -- so they are simply absent rather than faked.
         """
+        # Authenticated search reaches whatever the token can see, so the
+        # restriction has to be in the query rather than in the filtering.
+        if not self.private and "is:public" not in query:
+            query = f"{query} is:public"
         payload, _ = await self.get("/search/issues", q=query, per_page=min(limit, 100), sort="updated")
         items = payload.get("items", []) if isinstance(payload, dict) else []
         out = []

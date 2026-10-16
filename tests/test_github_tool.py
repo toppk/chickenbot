@@ -1639,3 +1639,142 @@ def test_activity_says_its_feed_can_be_behind():
 
     said = [t for t in TOOLS if t["name"] == "github_activity"][0]["description"]
     assert "behind" in said and "github_commits" in said
+
+
+def _api(private=False, handler=None):
+    import httpx
+
+    from external.github.github import GitHub
+
+    api = GitHub("github_pat_x", private=private)
+    api.client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    return api
+
+
+def test_a_private_repo_is_refused_rather_than_read():
+    """A token wide enough to read one is not a decision to read it."""
+    import asyncio
+
+    import httpx
+    import pytest
+
+    seen = []
+
+    def handler(request):
+        seen.append(request.url.path)
+        if request.url.path == "/repos/acme/secret":
+            return httpx.Response(200, json={"private": True, "full_name": "acme/secret"})
+        return httpx.Response(200, json=[])
+
+    async def go():
+        api = _api(handler=handler)
+        with pytest.raises(RuntimeError, match="private"):
+            await api.commits("acme/secret")
+        await api.aclose()
+
+    asyncio.run(go())
+    assert "/repos/acme/secret/commits" not in seen  # refused before it was read
+
+
+def test_an_instance_that_means_to_may_read_them():
+    import asyncio
+
+    import httpx
+
+    def handler(request):
+        return httpx.Response(200, json=[])
+
+    async def go():
+        api = _api(private=True, handler=handler)
+        got = await api.commits("acme/secret")
+        await api.aclose()
+        return got
+
+    assert asyncio.run(go()) == []
+
+
+def test_visibility_is_asked_once_per_repo():
+    import asyncio
+
+    import httpx
+
+    seen = []
+
+    def handler(request):
+        seen.append(request.url.path)
+        if request.url.path == "/repos/acme/open":
+            return httpx.Response(200, json={"private": False})
+        return httpx.Response(200, json=[])
+
+    async def go():
+        api = _api(handler=handler)
+        await api.commits("acme/open")
+        await api.branches("acme/open")
+        await api.aclose()
+
+    asyncio.run(go())
+    assert seen.count("/repos/acme/open") == 1
+
+
+def test_search_cannot_reach_private_repos_the_token_can_see():
+    """Authenticated search returns whatever the token sees, so the limit has
+    to be in the query rather than in the filtering afterwards."""
+    import asyncio
+
+    import httpx
+
+    asked = []
+
+    def handler(request):
+        asked.append(request.url.params.get("q"))
+        return httpx.Response(200, json={"items": []})
+
+    async def go():
+        api = _api(handler=handler)
+        await api.search_issues("author:toppk is:pr")
+        await api.aclose()
+        api = _api(private=True, handler=handler)
+        await api.search_issues("author:toppk is:pr")
+        await api.aclose()
+
+    asyncio.run(go())
+    assert asked[0] == "author:toppk is:pr is:public"
+    assert asked[1] == "author:toppk is:pr"
+
+
+def test_the_private_flag_defaults_to_off_on_anything_unclear():
+    from external.github.__main__ import _truthy
+
+    assert _truthy("1") and _truthy("true") and _truthy("YES") and _truthy("on")
+    assert not _truthy("") and not _truthy("0") and not _truthy("false")
+    assert not _truthy("maybe") and not _truthy("private")
+
+
+def test_the_watcher_will_not_announce_a_private_repo(tmp_path):
+    """The riskiest path: it polls on a timer and speaks unprompted."""
+    import asyncio
+
+    import httpx
+
+    from chickenbot.config import GitHubConfig
+    from chickenbot.watcher import Watcher
+
+    class Watch:
+        id, owner, repo, slug = 1, "acme", "secret", "acme/secret"
+
+    def handler(request):
+        if request.url.path == "/repos/acme/secret":
+            return httpx.Response(200, json={"private": True})
+        raise AssertionError(f"polled {request.url.path} on a private repo")
+
+    async def go(private):
+        w = Watcher.__new__(Watcher)
+        w.cfg = GitHubConfig(private_repos=private)
+        w._public = {}
+        w.client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        allowed = await w.may_read(Watch())
+        await w.client.aclose()
+        return allowed
+
+    assert asyncio.run(go(False)) is False
+    assert asyncio.run(go(True)) is True

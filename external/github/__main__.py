@@ -887,6 +887,11 @@ async def serve_forever(tool: Tool, socket_path: str) -> None:
         delay = min(delay * 2, 30.0)
 
 
+def _truthy(raw: str) -> bool:
+    """Anything but an explicit yes is a no: this one fails closed."""
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _declared() -> list[dict]:
     """TOOLS is a module literal and USERS arrives on the command line after
     it, so the watched handles read as "one of " until they are filled in."""
@@ -961,7 +966,9 @@ async def _pump(tool: Tool, reader: asyncio.StreamReader, send) -> None:
 
 async def run(args: argparse.Namespace) -> int:
     store = Store(args.db)
-    api = GitHub(os.environ.get("GITHUB_TOKEN", ""))
+    api = GitHub(os.environ.get("GITHUB_TOKEN", ""), private=args.private_repos)
+    if args.private_repos:
+        log.warning("reading private repositories: anything this token can see may reach a room")
     tool = Tool(store, api, args.users, interval=args.interval)
     try:
         if args.once:
@@ -1035,6 +1042,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--env", default=".env", help="file to read GITHUB_TOKEN from")
     parser.add_argument(
         "--users", nargs="*", default=USERS, help="only for running detached; chickenbot supplies these"
+    )
+    # Local to this process on purpose: the mirror polls before chickenbot has
+    # connected, so a setting that arrived over the socket would arrive late.
+    parser.add_argument(
+        "--private-repos",
+        action="store_true",
+        default=_truthy(os.environ.get("CB_GITHUB_PRIVATE_REPOS", "")),
+        help="read private repositories too; off unless this instance is for them",
     )
     parser.add_argument(
         "--interval",

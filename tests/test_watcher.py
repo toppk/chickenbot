@@ -15,6 +15,9 @@ def watcher(store):
     payload: dict = {"status": 200, "json": releases(3, 2, 1)}
 
     def route(request: httpx.Request) -> httpx.Response:
+        # The visibility check that precedes every poll; these repos are public.
+        if request.url.path.count("/") == 3:
+            return httpx.Response(200, json={"private": False})
         if payload["status"] == 304:
             return httpx.Response(304)
         return httpx.Response(200, json=payload["json"], headers={"etag": "W/abc"})
@@ -69,6 +72,8 @@ async def test_a_broken_feed_does_not_stop_the_others(store):
     def route(request: httpx.Request) -> httpx.Response:
         if "boom" in str(request.url):
             raise httpx.ConnectError("nope")
+        if request.url.path.count("/") == 3:
+            return httpx.Response(200, json={"private": False})
         return httpx.Response(200, json=releases(2, 1))
 
     async def announce(transport: str, channel: str, text: str) -> None:
