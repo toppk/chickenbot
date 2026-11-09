@@ -255,3 +255,75 @@ async def test_the_serving_provider_and_cost_reach_the_activity_line(monkeypatch
     assert record.fields["served"] == "Novita"
     assert record.fields["cost"] == "0.000022"
     assert record.fields["model"] == "deepseek/deepseek-v4.1-flash"
+
+
+async def test_the_reasoning_budget_is_sent_so_a_model_leaves_room_to_answer(monkeypatch):
+    """eaccel's bartender died daily: `effort` was read only by the Claude
+    provider, so a model reasoned to `max_tokens` and had nothing left."""
+    bodies: list[dict] = []
+    p = openai_compat(monkeypatch, LLMConfig(provider="openrouter", effort="low"), ok(bodies))
+    await p.reply(system="s", history=[], prompt="p", search=False)
+    await p.aclose()
+    assert bodies[0]["reasoning"] == {"effort": "low"}
+
+
+async def test_reasoning_can_be_turned_off_and_is_overridable(monkeypatch):
+    bodies: list[dict] = []
+    off = LLMConfig(provider="openrouter", effort="none")
+    p = openai_compat(monkeypatch, off, ok(bodies))
+    await p.reply(system="s", history=[], prompt="p", search=False)
+    await p.aclose()
+    assert bodies[0]["reasoning"] == {"enabled": False}
+
+    # body_params is applied after, so an operator keeps the last word.
+    bodies.clear()
+    mine = LLMConfig(provider="openrouter", effort="low", body_params={"reasoning": {"max_tokens": 200}})
+    p = openai_compat(monkeypatch, mine, ok(bodies))
+    await p.reply(system="s", history=[], prompt="p", search=False)
+    await p.aclose()
+    assert bodies[0]["reasoning"] == {"max_tokens": 200}
+
+
+async def test_a_vendor_extension_is_not_sent_to_other_endpoints(monkeypatch):
+    """`reasoning` is OpenRouter's; a local server may reject what it does
+    not know, and body_params is the way in everywhere else."""
+    bodies: list[dict] = []
+    p = openai_compat(monkeypatch, LLMConfig(provider="xai", effort="low"), ok(bodies))
+    await p.reply(system="s", history=[], prompt="p", search=False)
+    await p.aclose()
+    assert "reasoning" not in bodies[0]
+
+
+async def test_an_exhausted_budget_says_so_rather_than_came_back_with_nothing(monkeypatch):
+    """The record held `finish: length` with every output token spent on
+    reasoning, and the error said none of it."""
+    import httpx
+
+    def handler(_request):
+        return httpx.Response(
+            200,
+            json={
+                "choices": [{"message": {"content": ""}, "finish_reason": "length"}],
+                "usage": {
+                    "completion_tokens": 4096,
+                    "completion_tokens_details": {"reasoning_tokens": 4096},
+                },
+            },
+        )
+
+    p = openai_compat(monkeypatch, LLMConfig(provider="openrouter"), handler)
+    with pytest.raises(ProviderError, match="whole 4096-token output budget reasoning"):
+        await p.reply(system="s", history=[], prompt="p", search=False)
+    await p.aclose()
+
+
+async def test_an_empty_answer_that_is_not_a_budget_still_reads_plainly(monkeypatch):
+    import httpx
+
+    def handler(_request):
+        return httpx.Response(200, json={"choices": [{"message": {"content": "  "}, "finish_reason": "stop"}]})
+
+    p = openai_compat(monkeypatch, LLMConfig(provider="openrouter"), handler)
+    with pytest.raises(ProviderError, match="came back with nothing"):
+        await p.reply(system="s", history=[], prompt="p", search=False)
+    await p.aclose()

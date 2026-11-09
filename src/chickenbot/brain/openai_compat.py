@@ -47,6 +47,21 @@ def _wrong_channel(tools: object) -> str:
     )
 
 
+def _said_nothing(leg: dict) -> str:
+    """Why there were no words, when the record knows.
+
+    The bartender died daily on "came back with nothing", which sends an
+    operator looking for an empty reply. The truth was `finish: length` with
+    every one of the 4096 output tokens spent on reasoning.
+    """
+    if leg.get("finish") != "length":
+        return "the model came back with nothing"
+    out = leg.get("tokens_out") or 0
+    if (leg.get("reasoning_tokens") or 0) >= out > 0:
+        return f"the model spent its whole {out}-token output budget reasoning and said nothing"
+    return f"the model reached its {out}-token output limit before saying anything"
+
+
 class OpenAICompatProvider:
     supports_tools = True
 
@@ -95,6 +110,21 @@ class OpenAICompatProvider:
             "remaining": data.get("limit_remaining"),
         }
 
+    def _reasoning(self) -> dict:
+        """OpenRouter's reasoning budget, from `llm.effort`.
+
+        `effort` was only ever sent by the Claude provider, so setting it here
+        did nothing: a model that reasoned to `max_tokens` had no budget left
+        to answer with. `llm.body_params` still overrides this, since it is
+        applied after.
+        """
+        if self.name != "openrouter":
+            return {}  # a vendor extension; elsewhere body_params is the way
+        effort = (self.cfg.effort or "").strip().lower()
+        if effort in ("none", "off"):
+            return {"enabled": False}
+        return {"effort": effort} if effort in ("low", "medium", "high") else {}
+
     async def reply(
         self, *, system: str, history: list[Turn], prompt: str, search: bool, toolbox=None, session: str = ""
     ) -> str:
@@ -103,6 +133,8 @@ class OpenAICompatProvider:
         messages.append({"role": "user", "content": prompt})
 
         body: dict = {"model": self.model, "max_tokens": self.cfg.max_tokens, "messages": messages}
+        if reasoning := self._reasoning():
+            body["reasoning"] = reasoning
         if session and self.cfg.session_stickiness:
             # OpenRouter keeps a conversation on one model and provider rather
             # than re-shopping every turn.
@@ -117,7 +149,7 @@ class OpenAICompatProvider:
 
         exhausted = True
         for _ in range(MAX_TOOL_TURNS):
-            message = await self._post(body)
+            message, leg = await self._post(body)
             calls = message.get("tool_calls") or []
             if not calls or toolbox is None:
                 exhausted = False
@@ -131,7 +163,7 @@ class OpenAICompatProvider:
             # with tools withheld rather than reporting a failure over work
             # that actually happened.
             note(outcome="tool-loop")
-            message = await self._post({**body, "messages": messages, "tools": []})
+            message, leg = await self._post({**body, "messages": messages, "tools": []})
 
         text = (message.get("content") or "").strip()
         if leak := leaked_markup(text):
@@ -143,16 +175,16 @@ class OpenAICompatProvider:
             log.warning("model wrote a %s call as text; asking again", leak)
             messages.append({"role": "assistant", "content": text})
             messages.append({"role": "user", "content": _wrong_channel(body.get("tools"))})
-            message = await self._post({**body, "messages": messages})
+            message, leg = await self._post({**body, "messages": messages})
             text = (message.get("content") or "").strip()
             if second := leaked_markup(text):
                 note(outcome="leaked-markup", leak=second)
                 raise ProviderError("the model kept answering with tool markup instead of words")
         if not text:
-            raise ProviderError("the model came back with nothing")
+            raise ProviderError(_said_nothing(leg))
         return text
 
-    async def _post(self, body: dict) -> dict:
+    async def _post(self, body: dict) -> tuple[dict, dict]:
         began = time.monotonic()
         try:
             response = await self.client.post(f"{self.base_url}/chat/completions", json=body)
@@ -173,22 +205,21 @@ class OpenAICompatProvider:
         if usage.get("cost") is not None:
             note(cost=f"{usage['cost']:.6f}")
         choice = (payload.get("choices") or [{}])[0]
-        note_leg(
-            {
-                "served": payload.get("provider", ""),
-                "model": payload.get("model", ""),
-                "finish": choice.get("finish_reason", ""),
-                "asked_for": len(body.get("tools") or []),
-                "wanted_tools": len(message.get("tool_calls") or []),
-                "tokens_in": usage.get("prompt_tokens"),
-                "tokens_out": usage.get("completion_tokens"),
-                "cost": usage.get("cost"),
-                "reasoning_tokens": (usage.get("completion_tokens_details") or {}).get("reasoning_tokens"),
-                "ms": int((time.monotonic() - began) * 1000),
-                "id": payload.get("id", ""),
-            }
-        )
-        return message
+        leg = {
+            "served": payload.get("provider", ""),
+            "model": payload.get("model", ""),
+            "finish": choice.get("finish_reason", ""),
+            "asked_for": len(body.get("tools") or []),
+            "wanted_tools": len(message.get("tool_calls") or []),
+            "tokens_in": usage.get("prompt_tokens"),
+            "tokens_out": usage.get("completion_tokens"),
+            "cost": usage.get("cost"),
+            "reasoning_tokens": (usage.get("completion_tokens_details") or {}).get("reasoning_tokens"),
+            "ms": int((time.monotonic() - began) * 1000),
+            "id": payload.get("id", ""),
+        }
+        note_leg(leg)
+        return message, leg
 
     async def _run_call(self, toolbox, call: dict) -> dict:
         fn = call.get("function") or {}
