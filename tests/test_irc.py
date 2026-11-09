@@ -460,3 +460,41 @@ async def test_a_line_split_across_the_timeout_survives(monkeypatch):
         assert ("PONG", "tok") in sent, "the split line was lost"
     finally:
         loop.cancel()
+
+
+async def test_a_real_socket_that_goes_silent_is_given_up_on(monkeypatch):
+    """The StreamReader tests above drive the loop directly. This one uses a
+    real socket, because the read is bounded by cancelling `readline()` and
+    the question is whether that works on the thing we actually run on."""
+    from chickenbot import irc as irc_mod
+
+    monkeypatch.setattr(irc_mod, "IDLE_PING", 0.05)
+    monkeypatch.setattr(irc_mod, "PONG_WAIT", 0.5)  # long enough for the outbox to write
+
+    seen: list[str] = []
+    hung_up = asyncio.Event()
+
+    async def serve(reader, writer):
+        # Register the client, then say nothing ever again.
+        writer.write(b":toy 001 chickenbot :welcome\r\n")
+        await writer.drain()
+        while True:
+            line = await reader.readline()
+            if not line:
+                hung_up.set()
+                return
+            seen.append(line.decode().strip())
+
+    server = await asyncio.start_server(serve, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    client = irc_mod.Client(host="127.0.0.1", port=port, nick="chickenbot", tls=False)
+    client.send_interval = 0.0  # flood pacing is not what this is testing
+    try:
+        # Returns rather than raising: the caller's loop reconnects.
+        await asyncio.wait_for(client._connect_once(), timeout=5)
+        await asyncio.wait_for(hung_up.wait(), timeout=5)
+    finally:
+        server.close()
+        await server.wait_closed()
+
+    assert any(line.startswith("PING") for line in seen), seen

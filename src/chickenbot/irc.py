@@ -596,6 +596,9 @@ class Client:
             return True
         self._awaiting_pong = True
         log.debug("quiet for %.0fs; asking whether anyone is there", IDLE_PING)
+        # Queued like anything else, deliberately: if `_drain_outbox` has died
+        # the ping never leaves, we hear nothing back, and the connection ends
+        # -- which is the recovery that a dead outbox otherwise never gets.
         self.send("PING", f"cb{int(time.monotonic())}")
         return False
 
