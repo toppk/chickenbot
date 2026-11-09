@@ -57,6 +57,13 @@ WANTED_CAPS = frozenset(
 _TAG_UNESCAPE = {":": ";", "s": " ", "\\": "\\", "r": "\r", "n": "\n"}
 
 
+def _why(exc: BaseException) -> str:
+    """The type when there is no message: `ConnectionResetError()` and
+    `TimeoutError()` both str() empty, so "connection failed:" printed
+    nothing eleven times during the Oct 21 reconnect storm."""
+    return str(exc) or type(exc).__name__
+
+
 def _safe(line: str) -> str:
     """Never log a SASL payload: base64 of user\0user\0password is not a secret."""
     if line.startswith("AUTHENTICATE ") and line != "AUTHENTICATE +":
@@ -452,7 +459,7 @@ class Client:
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001 - any failure means reconnect
-                log.warning("connection failed: %s", exc)
+                log.warning("connection failed: %s", _why(exc))
             if self._closing:
                 break
             wait = min(delay, 300.0) * (0.8 + random.random() * 0.4)
@@ -520,7 +527,7 @@ class Client:
                 writer.write(line.encode("utf-8", "replace")[:510] + b"\r\n")
                 await writer.drain()
             except Exception as exc:  # noqa: BLE001 - read loop will notice
-                log.debug("write failed: %s", exc)
+                log.debug("write failed: %s", _why(exc))
                 return
             log.log(TRACE, ">> %s", _safe(line))
             await asyncio.sleep(self.send_interval)

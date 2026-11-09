@@ -498,3 +498,26 @@ async def test_a_real_socket_that_goes_silent_is_given_up_on(monkeypatch):
         await server.wait_closed()
 
     assert any(line.startswith("PING") for line in seen), seen
+
+
+def test_a_nameless_exception_is_still_reported():
+    """`connection failed:` with nothing after it, eleven times during the
+    Oct 21 reconnect storm: these two str() empty."""
+    from chickenbot.irc import _why
+
+    assert _why(ConnectionResetError()) == "ConnectionResetError"
+    assert _why(TimeoutError()) == "TimeoutError"
+    assert _why(OSError("no route to host")) == "no route to host"
+
+
+async def test_the_reconnect_log_says_what_went_wrong(caplog):
+    client = _client()
+
+    async def refused():
+        client._closing = True  # one pass through the loop, then out
+        raise ConnectionResetError
+
+    client._connect_once = refused
+    with caplog.at_level("WARNING", logger="chickenbot.irc"):
+        await client.run()
+    assert "connection failed: ConnectionResetError" in caplog.text
