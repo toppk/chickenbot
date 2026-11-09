@@ -363,3 +363,100 @@ async def test_declining_is_not_retried():
     await client._handle_protocol(parse(":toy 001 chickenbot :welcome"))
     await client._handle_protocol(parse(":toy 005 chickenbot BOT=B :are supported"))
     assert client._bot_check is None  # nothing to confirm
+
+
+def test_a_stalled_handshake_reconnects_without_pinging():
+    """PING before registration earns 451, which is traffic, which would make
+    a dead handshake look alive forever."""
+    client = _client()
+    sent: list[tuple] = []
+    client.send = lambda *args: sent.append(args)
+    assert client._give_up_on_silence() is True  # ready was never set
+    assert not sent
+
+
+async def test_a_quiet_connection_is_pinged_and_then_dropped(monkeypatch):
+    """eaccel held an ESTABLISHED socket to a server that had stopped talking
+    to it for three days: `readline()` had no timeout and nothing ever asked."""
+    from chickenbot import irc as irc_mod
+
+    monkeypatch.setattr(irc_mod, "IDLE_PING", 0.02)
+    monkeypatch.setattr(irc_mod, "PONG_WAIT", 0.02)
+    client = _client()
+    client._reader = asyncio.StreamReader()
+    client.ready.set()
+    sent: list[tuple] = []
+    client.send = lambda *args: sent.append(args)
+
+    # Returning is the recovery path: the caller reconnects.
+    await asyncio.wait_for(client._read_loop(), timeout=2)
+    assert [args[0] for args in sent] == ["PING"]
+
+
+async def test_an_answer_keeps_the_connection(monkeypatch):
+    from chickenbot import irc as irc_mod
+
+    monkeypatch.setattr(irc_mod, "IDLE_PING", 0.02)
+    monkeypatch.setattr(irc_mod, "PONG_WAIT", 0.02)
+    client = _client()
+    reader = client._reader = asyncio.StreamReader()
+    client.ready.set()
+    sent: list[tuple] = []
+    client.send = lambda *args: sent.append(args)
+
+    loop = asyncio.create_task(client._read_loop())
+    try:
+        for _ in range(3):
+            await asyncio.sleep(0.03)  # long enough to be asked
+            reader.feed_data(b":toy PONG chickenbot :cb1\r\n")
+        await asyncio.sleep(0)
+        assert not loop.done(), "an answered ping must not drop the connection"
+        assert client._awaiting_pong is False
+    finally:
+        loop.cancel()
+
+
+async def test_a_quiet_room_is_not_a_dead_server(monkeypatch):
+    """Nobody speaking is the normal state of a channel; only the server
+    failing to answer us counts against it."""
+    from chickenbot import irc as irc_mod
+
+    monkeypatch.setattr(irc_mod, "IDLE_PING", 0.02)
+    monkeypatch.setattr(irc_mod, "PONG_WAIT", 5.0)
+    client = _client()
+    client._reader = asyncio.StreamReader()
+    client.ready.set()
+    sent: list[tuple] = []
+    client.send = lambda *args: sent.append(args)
+
+    loop = asyncio.create_task(client._read_loop())
+    try:
+        await asyncio.sleep(0.1)
+        assert not loop.done()  # still waiting on the ping it sent
+        assert [args[0] for args in sent] == ["PING"]
+    finally:
+        loop.cancel()
+
+
+async def test_a_line_split_across_the_timeout_survives(monkeypatch):
+    """The read is bounded by cancelling `readline()`, so a half-arrived line
+    must stay in the buffer: losing it would desynchronise the protocol."""
+    from chickenbot import irc as irc_mod
+
+    monkeypatch.setattr(irc_mod, "IDLE_PING", 0.02)
+    monkeypatch.setattr(irc_mod, "PONG_WAIT", 5.0)
+    client = _client()
+    reader = client._reader = asyncio.StreamReader()
+    client.ready.set()
+    sent: list[tuple] = []
+    client.send = lambda *args: sent.append(args)
+
+    loop = asyncio.create_task(client._read_loop())
+    try:
+        reader.feed_data(b":toy PIN")  # half a line
+        await asyncio.sleep(0.05)  # the read is cancelled and re-entered here
+        reader.feed_data(b"G :tok\r\n")  # the rest
+        await asyncio.sleep(0.01)
+        assert ("PONG", "tok") in sent, "the split line was lost"
+    finally:
+        loop.cancel()

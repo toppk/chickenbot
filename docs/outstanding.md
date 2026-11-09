@@ -136,6 +136,18 @@ one path that must not break, and it wants testing against a real server
 rather than a mock -- the interesting cases are a half-open socket and a
 server that stops reading while still sending.
 
+**The half-open socket half of this is now fixed, by the other route.** The
+read loop bounds its own read (`IDLE_PING`, `PONG_WAIT`) and pings when the
+peer goes quiet, so a connection whose far end has vanished without a FIN
+now ends and reconnects. That was not hypothetical: eaccel sat on an
+ESTABLISHED socket to a server that had stopped talking to it for three
+days, with no timer on the socket, no error, and no log line -- the bot was
+up, the channel was empty, and the only thing still running was the
+bartender. What remains here is the other failure: `_drain_outbox` or
+`_work_inbox` dying while the server is still live and talking. A ping gets
+answered in that case, so liveness proves nothing, and `FIRST_COMPLETED` is
+still the fix.
+
 Same shape elsewhere, worth checking at the same time: the github tool's
 `poll_forever` and `serve_forever` are awaited with `FIRST_COMPLETED`
 against a stop event, which is right; nothing else in that process creates

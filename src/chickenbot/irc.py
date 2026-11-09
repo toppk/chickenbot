@@ -28,6 +28,14 @@ WHO_WAIT = 6.0  # a WHO the server never ends must not hang the asker
 BOT_MODE_WAIT = 8.0
 BOT_MODE_TRIES = 3
 
+# A quiet channel sends nothing, so silence is not news by itself -- and a peer
+# that vanished without a FIN looks exactly like a quiet one until we ask.
+# eaccel held an ESTABLISHED socket to a server that was no longer talking to
+# it for three days: no error, no log, no reconnect, because `readline()` had
+# no timeout and the client never pinged.
+IDLE_PING = 120.0  # silence we accept before asking whether anyone is there
+PONG_WAIT = 60.0  # and how long the answer may take before we give up
+
 WANTED_CAPS = frozenset(
     {
         "message-tags",
@@ -356,6 +364,7 @@ class Client:
         self._outbox: asyncio.Queue[str] = asyncio.Queue(maxsize=500)
         self._offered: set[str] = set()
         self._pending_caps: set[str] = set()
+        self._awaiting_pong = False
         self._registered_sent = False
         self._closing = False
 
@@ -471,6 +480,7 @@ class Client:
         self._sasl_now = ""
         self._bot_mode_set = False
         self._registered_sent = False
+        self._awaiting_pong = False
         self.umodes = set()
         self.away.clear()
         self.nick = self.wanted_nick
@@ -539,10 +549,18 @@ class Client:
     async def _read_loop(self) -> None:
         assert self._reader is not None
         while True:
-            raw = await self._reader.readline()
+            try:
+                async with asyncio.timeout(PONG_WAIT if self._awaiting_pong else IDLE_PING):
+                    raw = await self._reader.readline()
+            except TimeoutError:
+                if self._give_up_on_silence():
+                    return
+                continue
             if not raw:
                 log.info("server closed the connection")
                 return
+            # Any line at all is proof the peer is still there.
+            self._awaiting_pong = False
             line = raw.decode("utf-8", "replace").rstrip("\r\n")
             if not line:
                 continue
@@ -561,6 +579,25 @@ class Client:
                 self._inbox.put_nowait(msg)
             except asyncio.QueueFull:
                 log.warning("inbox full, dropping %s", msg.command)
+
+    def _give_up_on_silence(self) -> bool:
+        """True when this connection is finished, after one ping asked nicely.
+
+        The read loop returning is what triggers a reconnect, so "give up" is
+        the recovery path rather than a failure.
+        """
+        if not self.ready.is_set():
+            # Still handshaking: a server that has said nothing for this long
+            # is not going to finish, and PING before registration earns 451.
+            log.warning("%s went quiet before registering; reconnecting", self.host)
+            return True
+        if self._awaiting_pong:
+            log.warning("no answer to our ping in %.0fs; reconnecting", PONG_WAIT)
+            return True
+        self._awaiting_pong = True
+        log.debug("quiet for %.0fs; asking whether anyone is there", IDLE_PING)
+        self.send("PING", f"cb{int(time.monotonic())}")
+        return False
 
     async def _work_inbox(self) -> None:
         """One worker, so handlers still run strictly in the order received."""
