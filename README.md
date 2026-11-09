@@ -184,7 +184,7 @@ chickenbot              chickenbot-github
      |                          |
      |<----- hello: here are my tools -----|
      |------ welcome: here is who to watch ->|
-     |------ call ext_github_branches ----->|
+     |------ call ext_github_commits ------>|
      |<----- result ----------------------- |
 ```
 

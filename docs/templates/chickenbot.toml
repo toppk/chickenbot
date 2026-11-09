@@ -88,19 +88,31 @@ enabled = true
 # github mirror, and a work handle is not a hobby handle.
 socket = "../run/chickenbot-tools.sock"
 
+# The mirrored views: already fetched, so answering costs nothing.
 [tools.grants.ext_github_activity]
 owner = false
 
-[tools.grants.ext_github_repos]
+[tools.grants.ext_github_user_repos]
 owner = false
 
-# Looking somebody up is reading a public profile, so anyone in the room may
-# ask. It costs an API call and is not mirrored.
+# These three go to GitHub when asked, which is the point: the events feed the
+# mirror holds runs hours behind, so "did my push land" has to read the
+# repository itself. One API call each, and repeats within a few minutes are
+# free, so anyone in the room may ask.
+[tools.grants.ext_github_commits]
+owner = false
+
+[tools.grants.ext_github_releases]
+owner = false
+
 [tools.grants.ext_github_lookup]
 owner = false
 
-# ext_github_refresh is deliberately not granted: it spends API quota and
-# waits, so it stays owner-only like anything unlisted.
+# Not granted, and each for its own reason: ext_github_refresh spends API
+# quota and waits; ext_github_issue writes to somebody else's repository;
+# ext_github_pending, ext_github_outgoing and ext_github_readme answer about
+# the owners' own work, which is not the room's business by default. Anything
+# unlisted is owner-only, so this list is a reminder, not the mechanism.
 
 [llm]
 enabled = true
@@ -117,8 +129,25 @@ pause_seconds = 5.0
 max_silences = 3
 per_user_per_min = 4
 
+# One key per instance, so two deployments are not one line in a usage graph
+# and either can be revoked alone. The variable lives in the .env beside this
+# file; empty falls back to the provider's own default name.
+api_key_env = ""
+
 [llm.body_params.provider]
 zdr = true                   # zero-retention endpoints only
 data_collection = "deny"     # no endpoint that keeps prompts for training
-sort = "price"               # cheapest eligible endpoint wins
+# Cheapest eligible endpoint is not the obvious win: the slow ones answer a
+# room a minute after the question, by which time the conversation moved.
+sort = "latency"
 require_parameters = true    # never route somewhere that ignores `tools`
+
+# What the bot knows about GitHub. Who it watches comes from linked handles,
+# not from here -- this is only how hard it polls and with whose token.
+[github]
+enabled = true
+poll_seconds = 900
+token_env = "GITHUB_TOKEN"
+# A token wide enough to read a private repo says nothing about whether this
+# room should hear about it, so the two are decided separately.
+private_repos = false

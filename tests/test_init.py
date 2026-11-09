@@ -148,3 +148,42 @@ def test_every_template_the_code_reads_is_committed():
     tracked = done.stdout.split()
     missing = [t for t in templates if f"docs/templates/{t}" not in tracked]
     assert not missing, f"present here but not committed: {missing}"
+
+
+def test_the_template_grants_only_tools_that_exist():
+    """`ext_github_repos` sat here for two releases after the tool was renamed
+    `ext_github_user_repos`, granting nothing to a name nobody declares. A
+    grant for a tool that does not exist is silently inert, so only a check
+    like this one ever notices."""
+    import tomllib
+    from pathlib import Path
+
+    from external.github.__main__ import TOOLS as EXTERNAL
+
+    from chickenbot.tools import TOOLS as BUILTIN
+
+    root = Path(__file__).resolve().parent.parent
+    cfg = tomllib.loads((root / "docs" / "templates" / "chickenbot.toml").read_text())
+    granted = set(cfg.get("tools", {}).get("grants", {}))
+    known = set(BUILTIN) | {f"ext_{t['name']}" for t in EXTERNAL}
+    assert granted <= known, f"granted but declared nowhere: {sorted(granted - known)}"
+
+
+def test_the_template_is_a_config_this_code_can_read(tmp_path):
+    """`load` rejects unknown keys, so this catches a knob renamed in
+    config.py and left looking live here. The two placeholder values are the
+    ones the template deliberately leaves for an operator to fill in."""
+    import tomllib
+    from pathlib import Path
+
+    from chickenbot.config import load
+
+    root = Path(__file__).resolve().parent.parent
+    text = (root / "docs" / "templates" / "chickenbot.toml").read_text()
+    tomllib.loads(text)  # a syntax error here would read as a config error below
+    conf = tmp_path / "conf"
+    conf.mkdir()
+    (conf / "chickenbot.toml").write_text(text.replace("owners = []", 'owners = ["someone"]'))
+    cfg = load(conf / "chickenbot.toml")
+    assert cfg.github.poll_seconds == 900
+    assert cfg.llm.body_params["provider"]["sort"] == "latency"

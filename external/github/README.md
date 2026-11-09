@@ -56,7 +56,18 @@ the open items of whoever was skipped.
 | `ext_github_pending` | open issues and PRs **on** our repositories, from anyone — what needs tending |
 | `ext_github_outgoing` | open issues and PRs **we opened elsewhere** — what is out in the world |
 | `ext_github_activity` | recent events: commits, issues, PRs, stars, releases |
-| `ext_github_repos` | repositories owned, with stars and last push |
+| `ext_github_user_repos` | repositories owned, with stars and last push |
+| `ext_github_commits` | what has actually been pushed, live — the repository, not the feed |
+| `ext_github_releases` | releases and tags, live, with the newest one's notes on request |
+| `ext_github_readme` | a repository's README |
+| `ext_github_lookup` | a public profile, by handle |
+| `ext_github_issue` | opens an issue — the only one that writes |
+| `ext_github_refresh` | polls now rather than waiting for the interval |
+
+The first four read the mirror on disk. `commits`, `releases`, `readme` and
+`lookup` go to GitHub when asked, which is the point of them: the events feed
+the mirror holds is generated asynchronously and runs hours behind, so "did my
+push land" can only be answered by the repository itself.
 
 The first two are the same question asked from opposite ends. Tending your own
 projects and participating in other people's are different jobs, and mixing
@@ -84,9 +95,14 @@ socket = "chickenbot-tools.sock"
 [tools.grants.ext_github_activity]
 owner = false      # anyone in the room may ask
 
-[tools.grants.ext_github_repos]
+[tools.grants.ext_github_user_repos]
 owner = false
 ```
+
+`docs/templates/chickenbot.toml` ships the grants worth having by default, and
+a test asserts every name in it is one this tool declares — a grant for a tool
+nobody declares is silently inert, which is how `ext_github_repos` outlived its
+own rename by two releases.
 
 Without a grant a tool is registered owner-only and may not push events, which
 is the safe default for something that just appeared on the socket.
